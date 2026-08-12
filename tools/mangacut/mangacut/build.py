@@ -130,8 +130,12 @@ def analyse_page(
             )
         ]
 
+    # Con las siluetas, y no solo las cajas, se detectan los gutters diagonales.
     order = reading_order(
-        [Box(*p.bbox) for p in panels], rtl=rtl, tol=default_tolerance(w, h)
+        [Box(*p.bbox) for p in panels],
+        rtl=rtl,
+        tol=default_tolerance(w, h),
+        polygons=[p.polygon for p in panels],
     )
 
     used_balloons: set[int] = set()

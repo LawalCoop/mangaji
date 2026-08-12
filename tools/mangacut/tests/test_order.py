@@ -115,22 +115,27 @@ def test_solapadas_caen_al_criterio_simple():
 def test_borde_diagonal_no_invierte_la_fila():
     """El caso que fallaba en Kingdom.
 
-    Dos viñetas de la misma fila separadas por un borde diagonal: sus proyecciones se pisan
-    en ambos ejes, así que no hay corte posible. La izquierda empieza 8 px más arriba, y
-    ordenar por `y` la ponía primera — al revés de como se lee.
+    Dos viñetas de la misma fila separadas por un borde inclinado. Sus cajas se pisan en
+    ambos ejes —por eso hay que pasar las siluetas—, pero el pivote vertical las separa:
+    a cada trapecio le recorta una esquina despreciable.
     """
-    check([Box(505, 528, 495, 460), Box(10, 520, 700, 470)])
+    izq = [(10.0, 520.0), (620.0, 520.0), (710.0, 990.0), (10.0, 990.0)]
+    der = [(640.0, 528.0), (1000.0, 528.0), (1000.0, 988.0), (730.0, 988.0)]
+    boxes = [Box(10, 520, 700, 470), Box(640, 528, 360, 460)]
+
+    got = reading_order(boxes, polygons=[izq, der])
+    assert got == [1, 0], "la de la derecha se lee primero"
 
 
 def test_diagonal_con_banda_siguiente():
     """La fila diagonal se ordena bien y no contamina la banda de abajo."""
-    check(
-        [
-            Box(505, 8, 495, 460),  # fila 1, derecha (arranca más abajo que su vecina)
-            Box(10, 0, 700, 470),  # fila 1, izquierda
-            Box(0, 500, W, 400),  # fila 2
-        ]
-    )
+    izq = [(10.0, 0.0), (620.0, 0.0), (710.0, 470.0), (10.0, 470.0)]
+    der = [(640.0, 8.0), (1000.0, 8.0), (1000.0, 468.0), (730.0, 468.0)]
+    abajo = [(0.0, 500.0), (1000.0, 500.0), (1000.0, 900.0), (0.0, 900.0)]
+    boxes = [Box(10, 0, 700, 470), Box(640, 8, 360, 460), Box(0, 500, W, 400)]
+
+    got = reading_order(boxes, polygons=[izq, der, abajo])
+    assert got == [1, 0, 2]
 
 
 def test_alta_a_la_derecha_no_se_intercala():
@@ -149,3 +154,39 @@ def test_es_una_permutacion(rtl: bool):
     boxes = [Box(x * 260, y * 380, 240, 360) for y in range(4) for x in range(4)]
     got = reading_order(boxes, rtl=rtl, tol=TOL)
     assert sorted(got) == list(range(16))
+
+
+def tri(pts):
+    """Polígono explícito, para layouts con gutters diagonales."""
+    return [(float(x), float(y)) for x, y in pts]
+
+
+def test_gutter_diagonal_separa_dos_viñetas():
+    """El caso que antes no tenía corte posible.
+
+    Dos viñetas de la misma fila con el borde inclinado: sus sombras horizontales y
+    verticales se pisan, pero existe un gutter diagonal que las separa limpiamente.
+    """
+    derecha = tri([(520, 0), (1000, 0), (1000, 470), (600, 470)])
+    izquierda = tri([(0, 0), (500, 0), (580, 470), (0, 470)])
+    boxes = [Box(0, 0, 580, 470), Box(520, 0, 480, 470)]  # cajas que se solapan en x
+
+    got = reading_order(boxes, tol=TOL, polygons=[izquierda, derecha])
+    assert got == [1, 0], "la de la derecha se lee primero"
+
+
+def test_banda_diagonal_completa():
+    """Fila superior, banda diagonal de dos, y fila inferior."""
+    arriba = tri([(0, 0), (1000, 0), (1000, 300), (0, 300)])
+    der = tri([(520, 320), (1000, 320), (1000, 780), (600, 780)])
+    izq = tri([(0, 320), (500, 320), (580, 780), (0, 780)])
+    abajo = tri([(0, 800), (1000, 800), (1000, 1100), (0, 1100)])
+
+    boxes = [
+        Box(0, 0, 1000, 300),
+        Box(0, 320, 580, 460),
+        Box(520, 320, 480, 460),
+        Box(0, 800, 1000, 300),
+    ]
+    got = reading_order(boxes, tol=TOL, polygons=[arriba, izq, der, abajo])
+    assert got == [0, 2, 1, 3]
