@@ -22,10 +22,13 @@ export class Camera {
   /** Sacudida en curso: amplitud actual y cuánto le queda. */
   #shake = { amp: 0, left: 0, total: 1 };
   /**
-   * Deriva continua, por segundo. Una toma que queda perfectamente quieta se lee como una
-   * imagen; un movimiento apenas perceptible la mantiene viva mientras se lee.
+   * Deriva continua, con presupuesto.
+   *
+   * `x`/`y`/`zoom` son la velocidad por segundo, y `leftX`/`leftY`/`leftZoom` cuánto queda
+   * por recorrer. El tope es lo que evita que una viñeta que se queda mucho tiempo en
+   * pantalla termine derivando fuera de su propio encuadre.
    */
-  #drift = { x: 0, y: 0, zoom: 0 };
+  #drift = { x: 0, y: 0, zoom: 0, leftX: 0, leftY: 0, leftZoom: 0 };
 
   get transform(): Transform {
     if (this.#shake.left <= 0) return this.#current;
@@ -45,11 +48,23 @@ export class Camera {
   }
 
   /**
-   * Deja la cámara a la deriva. `zoom` es la fracción de escala por segundo, y `x`/`y` el
-   * desplazamiento en píxeles por segundo. Se corta sola en el próximo encuadre.
+   * Deja la cámara a la deriva. `x`/`y` en píxeles por segundo y `zoom` como fracción de
+   * escala por segundo; `max` es el tope acumulado de cada uno, tras el cual se detiene.
    */
-  drift(x: number, y: number, zoom: number): void {
-    this.#drift = { x, y, zoom };
+  drift(
+    x: number,
+    y: number,
+    zoom: number,
+    max: { x: number; y: number; zoom: number },
+  ): void {
+    this.#drift = {
+      x,
+      y,
+      zoom,
+      leftX: Math.abs(max.x),
+      leftY: Math.abs(max.y),
+      leftZoom: Math.abs(max.zoom),
+    };
   }
 
   /** Encuadre que contiene `rect` completo, centrado. `zoom` > 1 lo acerca. */
@@ -71,7 +86,7 @@ export class Camera {
 
   /** Corta la deriva. Se llama al cambiar de encuadre. */
   settle(): void {
-    this.#drift = { x: 0, y: 0, zoom: 0 };
+    this.#drift = { x: 0, y: 0, zoom: 0, leftX: 0, leftY: 0, leftZoom: 0 };
   }
 
   /**
@@ -105,15 +120,23 @@ export class Camera {
   update(dtMs: number): boolean {
     if (this.#shake.left > 0) this.#shake.left -= dtMs;
 
-    const drifting = this.#drift.x || this.#drift.y || this.#drift.zoom;
+    const d = this.#drift;
+    const drifting = d.leftX > 0 || d.leftY > 0 || d.leftZoom > 0;
     if (drifting) {
       const s = dtMs / 1000;
+      // Cada componente avanza hasta agotar su presupuesto y ahí se planta.
+      const dx = Math.sign(d.x) * Math.min(Math.abs(d.x * s), d.leftX);
+      const dy = Math.sign(d.y) * Math.min(Math.abs(d.y * s), d.leftY);
+      const dz = Math.sign(d.zoom) * Math.min(Math.abs(d.zoom * s), d.leftZoom);
+      d.leftX -= Math.abs(dx);
+      d.leftY -= Math.abs(dy);
+      d.leftZoom -= Math.abs(dz);
+
       // Se mueven current y target juntos: si no, la interpolación tiraría de vuelta.
-      const k = 1 + this.#drift.zoom * s;
       for (const t of [this.#current, this.#target]) {
-        t.x += this.#drift.x * s;
-        t.y += this.#drift.y * s;
-        t.scale *= k;
+        t.x += dx;
+        t.y += dy;
+        t.scale *= 1 + dz;
       }
     }
 

@@ -16,23 +16,30 @@ const FIT_MARGIN = 0.94;
 /** Duración del viaje de la cámara entre viñetas de la misma página. */
 const TRAVEL_MS = 520;
 
+/** Tope acumulado de la deriva: pasado esto se planta, para no salirse del encuadre. */
+const DRIFT_LIMIT = { zoom: 0.035, pan: 0.05 };
+
 /**
  * Deriva que queda corriendo una vez que la cámara llegó, según el movimiento del beat.
  *
- * Una toma perfectamente quieta se lee como una imagen. Esto es apenas perceptible cuadro a
- * cuadro —un 1,2 % de escala por segundo— pero es lo que hace que la viñeta se sienta una
- * toma y no una foto mientras la leés.
+ * Una toma perfectamente quieta se lee como una imagen. Es deliberadamente lentísima —medio
+ * punto de escala por segundo— y con tope: alcanza para que la viñeta respire, sin que
+ * termine desplazándose fuera de su propio encuadre si te quedás leyendo.
  */
-function driftFor(cam: CameraMove | undefined, view: Viewport): [number, number, number] {
+function driftFor(
+  cam: CameraMove | undefined,
+  view: Viewport,
+): [number, number, number, { x: number; y: number; zoom: number }] {
+  const stop = { x: view.w * DRIFT_LIMIT.pan, y: view.h * DRIFT_LIMIT.pan, zoom: DRIFT_LIMIT.zoom };
   switch (cam?.kind) {
     case "panH":
-      return [view.w * 0.012, 0, 0];
+      return [view.w * 0.005, 0, 0, stop];
     case "tiltV":
-      return [0, -view.h * 0.012, 0];
+      return [0, -view.h * 0.005, 0, stop];
     case "pullBack":
-      return [0, 0, -0.008];
+      return [0, 0, -0.004, stop];
     default:
-      return [0, 0, 0.012];
+      return [0, 0, 0.005, stop];
   }
 }
 /**
