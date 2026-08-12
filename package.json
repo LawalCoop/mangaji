@@ -1,0 +1,15 @@
+{
+  "name": "manganime",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Lector de manga CBZ que dirige la lectura viñeta por viñeta",
+  "scripts": {
+    "dev": "pnpm -C apps/reader dev",
+    "build": "pnpm -C apps/reader build",
+    "test": "pnpm -r test"
+  },
+  "packageManager": "pnpm@10.18.1",
+  "engines": {
+    "node": ">=20.9.0"
+  }
+}

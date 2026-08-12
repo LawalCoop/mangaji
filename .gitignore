@@ -1,0 +1,38 @@
+# deps
+node_modules/
+.pnpm-store/
+
+# builds
+.next/
+out/
+dist/
+build/
+*.tsbuildinfo
+.turbo/
+
+# python
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+.mangacut/
+
+# manga: nada de contenido con copyright en la historia del repo
+samples/
+!samples/.gitkeep
+*.cbz
+*.cbza
+*.cbr
+tests/fixtures/out/
+
+# env
+.env
+.env.*
+!.env.example
+
+# os / editor
+.DS_Store
+*.swp
+.idea/
+.vscode/
