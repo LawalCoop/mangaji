@@ -10,6 +10,7 @@ import { DEFAULT_MOOD, MOOD_ORDER, MOODS, type MoodId } from "@/lib/mood";
 import { Music } from "@/lib/music";
 import { Stage } from "@/lib/stage";
 import type { Rect } from "@/lib/types";
+import { Landing } from "./landing";
 import { Toolbar } from "./toolbar";
 
 /** Hasta que la página se decodifica no se sabe su tamaño; esto evita un encuadre en cero. */
@@ -493,32 +494,12 @@ export default function ReaderView() {
       </div>
 
       {status.kind !== "ready" && (
-        <div className="pointer-events-none absolute inset-0 grid place-items-center p-8">
-          <div className="pointer-events-auto max-w-md text-center">
-            <h1 className="mb-2 text-2xl font-semibold tracking-tight">Manganime</h1>
-            <p className="mb-6 text-sm text-neutral-400">
-              {status.kind === "loading"
-                ? "Abriendo…"
-                : status.kind === "error"
-                  ? status.message
-                  : "Soltá un CBZ o un .cbza acá, o elegilo."}
-            </p>
-            <label className="cursor-pointer rounded-md border border-neutral-700 px-4 py-2 text-sm hover:bg-neutral-900">
-              Elegir CBZ
-              <input
-                type="file"
-                accept=".cbza,.cbz,.zip,application/zip"
-                className="hidden"
-                onChange={(e) => {
-                  const file = e.target.files?.[0];
-                  if (file) void open(file);
-                }}
-              />
-            </label>
-            <p className="mt-6 text-xs text-neutral-600">
-              Nada se sube a ningún servidor: el archivo se abre en tu navegador.
-            </p>
-          </div>
+        <div className="absolute inset-0 overflow-y-auto">
+          <Landing
+            status={status.kind === "error" ? "error" : status.kind === "loading" ? "loading" : "idle"}
+            message={status.kind === "error" ? status.message : undefined}
+            onFile={(file) => void open(file)}
+          />
         </div>
       )}
 

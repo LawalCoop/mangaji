@@ -1,29 +1,36 @@
 import type { Metadata } from "next";
-import { Geist, Geist_Mono } from "next/font/google";
+import { Anton, Zen_Kaku_Gothic_New } from "next/font/google";
 import "./globals.css";
 
-const geistSans = Geist({
-  variable: "--font-geist-sans",
+/** Condensada y pesada: el peso de una onomatopeya. Se usa solo en titulares. */
+const display = Anton({
+  variable: "--font-display",
+  weight: "400",
   subsets: ["latin"],
 });
 
-const geistMono = Geist_Mono({
-  variable: "--font-geist-mono",
+/** Gótica japonesa: del mundo del manga, y legible en cuerpos chicos. */
+const body = Zen_Kaku_Gothic_New({
+  variable: "--font-body",
+  weight: ["400", "500", "700"],
   subsets: ["latin"],
 });
 
 export const metadata: Metadata = {
-  title: "Manganime",
-  description: "Lector de manga que dirige la lectura viñeta por viñeta",
+  title: "Manganime — tu manga, dirigido",
+  description:
+    "Lee tus CBZ viñeta por viñeta, con la cámara viajando por la página y el diálogo apareciendo cuando le toca.",
 };
 
 export default function RootLayout({ children }: LayoutProps<"/">) {
   return (
     <html
       lang="es"
-      className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
+      className={`${display.variable} ${body.variable} h-full antialiased`}
     >
-      <body className="min-h-full flex flex-col overscroll-none">{children}</body>
+      <body className="min-h-full flex flex-col overscroll-none font-[family-name:var(--font-body)]">
+        {children}
+      </body>
     </html>
   );
 }
