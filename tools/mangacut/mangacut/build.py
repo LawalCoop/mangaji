@@ -28,7 +28,48 @@ class BuildStats:
     balloons: int = 0
     texts: int = 0
     splashes: int = 0
+    #: detecciones descartadas por caer bajo el área mínima
+    dropped: int = 0
+    #: la misma viñeta o globo detectado más de una vez
+    duplicates: int = 0
     ms: float = 0.0
+
+
+#: Dos detecciones que se solapan más que esto son la misma viñeta vista dos veces.
+DEDUPE_IOU = 0.6
+
+
+def _polygon_iou(a: list[tuple[int, int]], b: list[tuple[int, int]], scale: float = 0.125) -> float:
+    """Solape real entre dos siluetas.
+
+    Comparar cajas no alcanza: las viñetas de manga son trapecios muy alargados, y dos
+    trapecios bien distintos pueden compartir casi la misma caja envolvente. Se rasteriza
+    a escala reducida, que para decidir un duplicado sobra y cuesta nada.
+    """
+    pa = np.array(a, np.float32) * scale
+    pb = np.array(b, np.float32) * scale
+    pts = np.vstack([pa, pb])
+    x0, y0 = pts.min(0) - 1
+    x1, y1 = pts.max(0) + 1
+    w, h = int(x1 - x0) + 1, int(y1 - y0) + 1
+    if w <= 0 or h <= 0:
+        return 0.0
+
+    ma = np.zeros((h, w), np.uint8)
+    mb = np.zeros((h, w), np.uint8)
+    cv2.fillPoly(ma, [(pa - [x0, y0]).astype(np.int32)], 1)
+    cv2.fillPoly(mb, [(pb - [x0, y0]).astype(np.int32)], 1)
+    union = np.count_nonzero(ma | mb)
+    return float(np.count_nonzero(ma & mb) / union) if union else 0.0
+
+
+def _dedupe(dets: list[Detection], threshold: float = DEDUPE_IOU) -> list[Detection]:
+    """Se queda con la detección más confiable de cada grupo solapado."""
+    kept: list[Detection] = []
+    for det in sorted(dets, key=lambda d: -d.conf):
+        if all(_polygon_iou(det.polygon, k.polygon) < threshold for k in kept):
+            kept.append(det)
+    return kept
 
 
 def _contains(outer: tuple[float, float, float, float], inner: tuple[float, float, float, float]) -> float:
@@ -67,9 +108,15 @@ def analyse_page(
     dets = detector(image)
     stats.ms = (time.perf_counter() - t0) * 1000
 
-    panels = [d for d in dets if d.cls == "frame" and d.area / page_area >= MIN_PANEL_AREA_RATIO]
-    balloons = [d for d in dets if d.cls == "balloon"]
+    big_enough = [d for d in dets if d.cls == "frame" and d.area / page_area >= MIN_PANEL_AREA_RATIO]
+    raw_balloons = [d for d in dets if d.cls == "balloon"]
+
+    panels = _dedupe(big_enough)
+    balloons = _dedupe(raw_balloons)
     texts = [d for d in dets if d.cls == "text"]
+
+    stats.dropped = sum(1 for d in dets if d.cls == "frame") - len(big_enough)
+    stats.duplicates = (len(big_enough) - len(panels)) + (len(raw_balloons) - len(balloons))
 
     # Una splash sin marco dibujado no produce detecciones: la página entera es la viñeta.
     if not panels:
@@ -177,6 +224,8 @@ def build(
             total.balloons += stats.balloons
             total.texts += stats.texts
             total.splashes += stats.splashes
+            total.dropped += stats.dropped
+            total.duplicates += stats.duplicates
             total.ms += stats.ms
             if progress:
                 progress(index, page, stats)

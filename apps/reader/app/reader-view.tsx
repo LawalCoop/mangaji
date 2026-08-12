@@ -290,13 +290,13 @@ export default function ReaderView() {
                 ? "Abriendo…"
                 : status.kind === "error"
                   ? status.message
-                  : "Soltá un archivo CBZ acá, o elegilo."}
+                  : "Soltá un CBZ o un .cbza acá, o elegilo."}
             </p>
             <label className="cursor-pointer rounded-md border border-neutral-700 px-4 py-2 text-sm hover:bg-neutral-900">
               Elegir CBZ
               <input
                 type="file"
-                accept=".cbz,.zip,application/zip"
+                accept=".cbza,.cbz,.zip,application/zip"
                 className="hidden"
                 onChange={(e) => {
                   const file = e.target.files?.[0];

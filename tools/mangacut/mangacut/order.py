@@ -51,6 +51,64 @@ def _split(boxes: Sequence[Box], cut: float, axis: int) -> tuple[list[Box], list
     return lo, hi
 
 
+#: Cuánto tienen que compartir dos viñetas en vertical para considerarse de la misma banda.
+#: Por encima de esto manda la columna (derecha primero en manga) y no la altura.
+SAME_BAND_RATIO = 0.5
+
+
+def _same_band(a: Box, b: Box) -> bool:
+    overlap = min(a.y2, b.y2) - max(a.y, b.y)
+    return overlap > SAME_BAND_RATIO * min(a.h, b.h)
+
+
+def _untangle(items: list[tuple[int, Box]], *, rtl: bool) -> list[int]:
+    """Ordena un bloque que ningún corte recto puede separar.
+
+    Con bordes diagonales dos viñetas de la misma fila se pisan en ambas proyecciones, y
+    ordenar por `y` deja que una diferencia de pocos píxeles decida mal toda la fila. La
+    regla que aplica un lector es distinta: si comparten banda vertical manda la columna
+    —derecha primero en manga—, y solo si no la comparten manda la altura.
+
+    Esas precedencias se resuelven con un orden topológico, que las respeta de a pares sin
+    depender de que la comparación sea transitiva.
+    """
+    n = len(items)
+    after: list[set[int]] = [set() for _ in range(n)]
+    indegree = [0] * n
+
+    for i in range(n):
+        for j in range(i + 1, n):
+            a, b = items[i][1], items[j][1]
+            if _same_band(a, b):
+                first, second = (i, j) if ((a.x2 > b.x2) == rtl) else (j, i)
+            else:
+                first, second = (i, j) if a.y <= b.y else (j, i)
+            if second not in after[first]:
+                after[first].add(second)
+                indegree[second] += 1
+
+    # Desempate estable: lo más cercano al origen de lectura (arriba y al margen inicial).
+    def rank(k: int) -> tuple[float, float]:
+        box = items[k][1]
+        return (box.y, -box.x2 if rtl else box.x)
+
+    ready = sorted((k for k in range(n) if indegree[k] == 0), key=rank)
+    out: list[int] = []
+    while ready:
+        k = ready.pop(0)
+        out.append(items[k][0])
+        for nxt in sorted(after[k], key=rank):
+            indegree[nxt] -= 1
+            if indegree[nxt] == 0:
+                ready.append(nxt)
+        ready.sort(key=rank)
+
+    if len(out) < n:  # ciclo: quedan nodos sin resolver, se agregan por cercanía al origen
+        done = set(out)
+        out.extend(items[k][0] for k in sorted(range(n), key=rank) if items[k][0] not in done)
+    return out
+
+
 def reading_order(
     boxes: Sequence[Box], *, rtl: bool = True, tol: float = 0.0
 ) -> list[int]:
@@ -84,9 +142,9 @@ def reading_order(
                 first, second = (right, left) if rtl else (left, right)
                 return walk(first) + walk(second)
 
-        # Bloque irreducible (viñetas solapadas o en diagonal): se cae al criterio simple.
-        key = (lambda it: (it[1].y, -it[1].x)) if rtl else (lambda it: (it[1].y, it[1].x))
-        return [i for i, _ in sorted(items, key=key)]
+        # Bloque irreducible: viñetas separadas por bordes diagonales, cuyas proyecciones
+        # se pisan y no admiten ningún corte recto.
+        return _untangle(items, rtl=rtl)
 
     return walk(indexed)
 

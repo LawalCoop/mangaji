@@ -112,6 +112,38 @@ def test_solapadas_caen_al_criterio_simple():
     assert sorted(got) == [0, 1]
 
 
+def test_borde_diagonal_no_invierte_la_fila():
+    """El caso que fallaba en Kingdom.
+
+    Dos viñetas de la misma fila separadas por un borde diagonal: sus proyecciones se pisan
+    en ambos ejes, así que no hay corte posible. La izquierda empieza 8 px más arriba, y
+    ordenar por `y` la ponía primera — al revés de como se lee.
+    """
+    check([Box(505, 528, 495, 460), Box(10, 520, 700, 470)])
+
+
+def test_diagonal_con_banda_siguiente():
+    """La fila diagonal se ordena bien y no contamina la banda de abajo."""
+    check(
+        [
+            Box(505, 8, 495, 460),  # fila 1, derecha (arranca más abajo que su vecina)
+            Box(10, 0, 700, 470),  # fila 1, izquierda
+            Box(0, 500, W, 400),  # fila 2
+        ]
+    )
+
+
+def test_alta_a_la_derecha_no_se_intercala():
+    """Una viñeta alta a la derecha comparte banda con dos bajas: va primero, entera."""
+    boxes = [
+        Box(600, 0, 390, 980),  # alta, derecha
+        Box(0, 10, 560, 470),  # baja, izquierda arriba
+        Box(0, 500, 560, 480),  # baja, izquierda abajo
+    ]
+    got = reading_order(boxes, tol=TOL)
+    assert got[0] == 0, "la alta de la derecha se lee antes que las dos de la izquierda"
+
+
 @pytest.mark.parametrize("rtl", [True, False])
 def test_es_una_permutacion(rtl: bool):
     boxes = [Box(x * 260, y * 380, 240, 360) for y in range(4) for x in range(4)]

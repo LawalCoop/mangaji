@@ -73,11 +73,27 @@ def clean_mask(mask: np.ndarray) -> np.ndarray:
     return (labels == biggest).astype(np.uint8)
 
 
+#: Por encima de esta relación área/casco, la viñeta se considera convexa y se reemplaza
+#: por su casco: los marcos de manga son rectos, y el casco los deja perfectamente rectos
+#: en vez de seguir el escalonado de la máscara.
+CONVEX_RATIO = 0.93
+
+
 def mask_to_polygon(mask: np.ndarray, eps_px: float = SIMPLIFY_EPS_PX) -> list[tuple[int, int]]:
     contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
     if not contours:
         return []
     contour = max(contours, key=cv2.contourArea)
+
+    # Un marco de manga es un polígono de lados rectos. Si el contorno es casi convexo,
+    # su casco es ese polígono ideal; seguir el borde crudo solo copia el escalonado que
+    # deja la máscara de baja resolución.
+    area = cv2.contourArea(contour)
+    hull = cv2.convexHull(contour)
+    hull_area = cv2.contourArea(hull)
+    if hull_area > 0 and area / hull_area >= CONVEX_RATIO:
+        contour = hull
+
     simple = cv2.approxPolyDP(contour, eps_px, True).reshape(-1, 2)
     if len(simple) < 3:
         return []
@@ -126,20 +142,23 @@ class Detector:
             conf, cls_id, coeffs = float(row[4]), int(row[5]), row[6:]
 
             logits = (coeffs @ flat).reshape(ph, pw)
-            mask = (1 / (1 + np.exp(-logits)) > 0.5).astype(np.uint8)
+            prob = 1.0 / (1.0 + np.exp(-logits))
 
             # Recortar a la caja evita que la máscara sangre a otras viñetas.
             bx1, by1 = int(x1 * pw / INPUT_SIZE), int(y1 * ph / INPUT_SIZE)
             bx2, by2 = int(np.ceil(x2 * pw / INPUT_SIZE)), int(np.ceil(y2 * ph / INPUT_SIZE))
-            keep = np.zeros_like(mask)
-            keep[max(by1, 0) : by2, max(bx1, 0) : bx2] = 1
-            mask &= keep
-
-            mask = mask[:vh, :vw]
-            if not mask.any():
+            keep = np.zeros_like(prob)
+            keep[max(by1, 0) : by2, max(bx1, 0) : bx2] = 1.0
+            prob = prob[:vh, :vw] * keep[:vh, :vw]
+            if not prob.any():
                 continue
 
-            mask = cv2.resize(mask, (w0, h0), interpolation=cv2.INTER_NEAREST)
+            # Interpolar la probabilidad y recién después umbralizar sitúa el borde con
+            # precisión subpíxel. Escalar la máscara ya binarizada convertiría cada píxel
+            # de los prototipos (1/4 de resolución) en un escalón visible.
+            prob = cv2.resize(prob, (w0, h0), interpolation=cv2.INTER_LINEAR)
+            mask = (prob > 0.5).astype(np.uint8)
+
             polygon = mask_to_polygon(clean_mask(mask))
             if not polygon:
                 continue

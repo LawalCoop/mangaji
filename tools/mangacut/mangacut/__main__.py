@@ -49,6 +49,8 @@ def cmd_build(args: argparse.Namespace) -> int:
         f"\n{total.pages} páginas · {total.panels} viñetas · {total.balloons} globos"
         f" · {total.splashes} splash"
     )
+    if total.duplicates or total.dropped:
+        print(f"descartados: {total.duplicates} duplicados, {total.dropped} bajo el área mínima")
     print(
         f"{total.ms / max(total.pages, 1):.0f} ms/página · "
         f"{total.ms / 1000:.1f} s en total · {size_mb:.1f} MB"
