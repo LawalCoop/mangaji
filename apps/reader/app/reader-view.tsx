@@ -7,7 +7,7 @@ import { Camera, type Viewport } from "@/lib/camera";
 import { Director } from "@/lib/director";
 import { PageFrameSource, PanelFrameSource } from "@/lib/frame-sources";
 import { Stage } from "@/lib/stage";
-import type { Frame, Rect } from "@/lib/types";
+import type { Rect } from "@/lib/types";
 
 /** Hasta que la página se decodifica no se sabe su tamaño; esto evita un encuadre en cero. */
 const ASSUMED_PAGE = { w: 1600, h: 2300 };
@@ -16,13 +16,10 @@ const FIT_MARGIN = 0.94;
 /** Duración del viaje de la cámara entre viñetas de la misma página. */
 const TRAVEL_MS = 520;
 
-/**
- * La cámara se detiene al llegar a la viñeta.
- *
- * Se probó dejarla derivando muy despacio, para que la toma no quedara del todo quieta.
- * Visto en marcha distrae más de lo que aporta, así que se quitó: el movimiento lo dan la
- * entrada y el viaje entre viñetas, y entre medio conviene poder leer tranquilo.
- */
+// La cámara se detiene al llegar a la viñeta. Se probó dejarla derivando muy despacio para
+// que la toma no quedara del todo quieta, y en marcha distrae más de lo que aporta: el
+// movimiento lo dan la entrada y el viaje entre viñetas, y entre medio conviene leer tranquilo.
+
 /**
  * Cuánto se destaca la viñeta activa sobre el resto de la página. Se cicla con `o`.
  * El default es suave a propósito: lo justo para dar protagonismo sin que se note el truco.
