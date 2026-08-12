@@ -81,14 +81,16 @@ def _clip(poly: Polygon, axis: int, pivot: float, keep_lower: bool) -> list[Poin
 
 def _split(
     polys: Sequence[Polygon], axis: int, pivot: float, threshold: float
-) -> tuple[list[int], list[int]] | None:
-    """Reparte las viñetas a ambos lados del pivote, o None si alguna queda demasiado partida.
+) -> tuple[list[int], list[int], float] | None:
+    """Reparte las viñetas a ambos lados del pivote, o None si alguna queda muy partida.
 
     Una viñeta que el pivote roza se asigna entera al lado donde tiene más área; lo que se
-    exige es que la parte que queda del otro lado sea despreciable.
+    exige es que la parte que queda del otro lado sea despreciable. Devuelve además cuánto
+    rebanó a la viñeta más afectada, que es lo que permite comparar pivotes entre sí.
     """
     lower: list[int] = []
     upper: list[int] = []
+    worst = 0.0
 
     for i, poly in enumerate(polys):
         total = _area(poly)
@@ -96,13 +98,15 @@ def _split(
             continue
         below = _area(_clip(poly, axis, pivot, keep_lower=True))
         above = total - below
-        if min(below, above) / total > threshold:
+        cut = min(below, above) / total
+        if cut > threshold:
             return None
+        worst = max(worst, cut)
         (lower if below >= above else upper).append(i)
 
     if not lower or not upper:
         return None
-    return lower, upper
+    return lower, upper, worst
 
 
 def _pivots(polys: Sequence[Polygon], axis: int) -> list[float]:
@@ -136,20 +140,33 @@ def reading_order(
 
         polys = [shapes[i] for i in idx]
 
-        # Paso 1: pivote horizontal — la lectura se estructura en filas antes que en columnas.
-        for pivot in _pivots(polys, axis=1):
-            parts = _split(polys, axis=1, pivot=pivot, threshold=threshold)
-            if parts:
-                top, bottom = parts
-                return walk([idx[i] for i in top]) + walk([idx[i] for i in bottom])
+        def best(axis: int):
+            """El pivote que menos rebana, de todos los que separan sobre este eje."""
+            found = None
+            for pivot in _pivots(polys, axis=axis):
+                parts = _split(polys, axis=axis, pivot=pivot, threshold=threshold)
+                if parts and (found is None or parts[2] < found[2]):
+                    found = parts
+                    if found[2] == 0.0:  # corte limpio: no hay nada mejor
+                        break
+            return found
 
-        # Paso 2: pivote vertical — dentro de la fila, primero la derecha en manga.
-        for pivot in _pivots(polys, axis=0):
-            parts = _split(polys, axis=0, pivot=pivot, threshold=threshold)
-            if parts:
-                left, right = parts
-                first, second = (right, left) if rtl else (left, right)
-                return walk([idx[i] for i in first]) + walk([idx[i] for i in second])
+        horizontal = best(axis=1)
+        vertical = best(axis=0)
+
+        # Las filas mandan sobre las columnas, pero solo a igualdad de limpieza. Quedarse
+        # con el primer corte horizontal que pasara el umbral le rebanaba la punta a una
+        # viñeta que ocupa toda la altura y la empujaba abajo, dejando arriba a su vecina
+        # angosta: la página arrancaba por una franja en vez de por la columna de la
+        # derecha, aunque existía un corte vertical impecable.
+        if horizontal and (not vertical or horizontal[2] <= vertical[2]):
+            top, bottom, _ = horizontal
+            return walk([idx[i] for i in top]) + walk([idx[i] for i in bottom])
+
+        if vertical:
+            left, right, _ = vertical
+            first, second = (right, left) if rtl else (left, right)
+            return walk([idx[i] for i in first]) + walk([idx[i] for i in second])
 
         # Paso 3: hoja inseparable. El estimador original les asigna un único orden; acá
         # hace falta uno total, y ordenar por altura no sirve: dos viñetas de la misma fila
