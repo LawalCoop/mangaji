@@ -19,9 +19,11 @@ const TEXTURE_LIMIT = 5;
  * Tono del papel de una página, tomado de sus bordes.
  *
  * Se muestrea una miniatura en vez de la página entera: para elegir un color de fondo sobra
- * y cuesta una fracción de milisegundo. Se toma la mediana del marco exterior, que es papel
- * salvo en las páginas a sangre; ahí devuelve el tono dominante del borde, que es
- * justamente el que conviene continuar.
+ * y cuesta una fracción de milisegundo.
+ *
+ * Del marco exterior se toma un percentil alto y no la mediana: en una página cargada de
+ * tinta la mediana se contamina con el dibujo y devuelve un gris, que contra el margen
+ * blanco del escaneo se ve como un corte. El papel es la parte clara del borde.
  */
 function paperColor(bitmap: ImageBitmap): number {
   const size = 24;
@@ -43,8 +45,9 @@ function paperColor(bitmap: ImageBitmap): number {
     }
   }
 
-  const median = (v: number[]) => v.sort((a, b) => a - b)[v.length >> 1] ?? 0;
-  const [r, g, b] = edge.map(median);
+  const paper = (v: number[]) =>
+    v.sort((a, b) => a - b)[Math.floor(v.length * 0.82)] ?? 255;
+  const [r, g, b] = edge.map(paper);
   return (r << 16) | (g << 8) | b;
 }
 /** Cuánto se atenúa el diálogo de las viñetas que no son la activa. */
