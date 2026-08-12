@@ -1,4 +1,4 @@
-import { Application, Container, Graphics, Sprite, Texture } from "pixi.js";
+import { Application, BlurFilter, Container, Graphics, Sprite, Texture } from "pixi.js";
 import { Camera, type Transform } from "./camera";
 import type { Frame, Rect } from "./types";
 
@@ -16,6 +16,13 @@ import type { Frame, Rect } from "./types";
 const TEXTURE_LIMIT = 5;
 /** Cuánto se atenúa el diálogo de las viñetas que no son la activa. */
 const OFF_PANEL_DIALOGUE_ALPHA = 0.5;
+/**
+ * Desenfoque con el que entra un bloque de diálogo, en píxeles de la página.
+ *
+ * El texto toma foco en vez de materializarse: aparecer de golpe sobre el globo vacío se
+ * lee como un corte, y esto acompaña mejor al resto del movimiento.
+ */
+const DIALOGUE_ENTRY_BLUR = 14;
 
 export class Stage {
   readonly camera = new Camera();
@@ -40,6 +47,8 @@ export class Stage {
   #sprites = new Map<string, Sprite>();
   /** Posición final de cada sprite, para animar desde un pequeño desplazamiento. */
   #rests = new Map<string, number>();
+  /** Desenfoque de entrada de cada bloque de diálogo. */
+  #blurs = new Map<string, BlurFilter>();
   #textures = new Map<number, Texture>();
   #bitmaps = new Map<number, ImageBitmap>();
   #page = -1;
@@ -144,6 +153,7 @@ export class Stage {
     this.#sprites.clear();
     this.#rests.clear();
 
+    this.#blurs.clear();
     for (const entry of entries) {
       const sprite = new Sprite(Texture.from(entry.bitmap));
       sprite.position.set(entry.rect.x, entry.rect.y);
@@ -152,6 +162,7 @@ export class Stage {
       this.#dialogue.addChild(sprite);
       this.#sprites.set(entry.id, sprite);
       this.#rests.set(entry.id, entry.rect.y);
+      this.#blurs.set(entry.id, new BlurFilter({ strength: DIALOGUE_ENTRY_BLUR, quality: 2 }));
     }
   }
 
@@ -229,15 +240,26 @@ export class Stage {
     }
   }
 
-  /** Muestra un bloque de diálogo. `progress` de 0 a 1 anima su aparición. */
+  /** Muestra un bloque de diálogo. `progress` de 0 a 1 anima su entrada. */
   revealDialogue(id: string, progress: number): void {
     const sprite = this.#sprites.get(id);
     if (!sprite) return;
     const t = Math.min(Math.max(progress, 0), 1);
-    sprite.alpha = t * (sprite.label === "off" ? OFF_PANEL_DIALOGUE_ALPHA : 1);
-    // Un desplazamiento mínimo hacia arriba: da la sensación de que el globo "habla" en
-    // vez de que una imagen aparezca de la nada.
+    const full = sprite.label === "off" ? OFF_PANEL_DIALOGUE_ALPHA : 1;
+
+    // Entra desenfocado y toma foco. La opacidad arranca alta para que lo que se vea sea
+    // el texto enfocándose, y no una imagen que se materializa.
+    sprite.alpha = full * (0.35 + 0.65 * t);
     sprite.y = this.#rests.get(id)! + (1 - t) * 6;
+
+    const blur = this.#blurs.get(id);
+    if (!blur) return;
+    if (t >= 1) {
+      sprite.filters = []; // ya nítido: sin filtro no se paga nada por él
+      return;
+    }
+    blur.strength = DIALOGUE_ENTRY_BLUR * (1 - t) ** 1.6;
+    sprite.filters = [blur];
   }
 
   destroy(): void {

@@ -147,8 +147,9 @@ def _contains(outer: tuple[float, float, float, float], inner: tuple[float, floa
 
 #: Cuánto dura la entrada de la cámara antes de que aparezca el primer diálogo.
 ENTER_MS = 450
-#: Duración de la aparición de un globo.
-REVEAL_MS = 260
+#: Duración de la entrada de un globo. Lo bastante larga para que se note cómo toma foco:
+#: con menos, el desenfoque de entrada pasa desapercibido y vuelve a parecer un corte.
+REVEAL_MS = 420
 #: Piso y techo del tiempo de lectura de un globo.
 READ_MS = (650, 2800)
 #: Escala que convierte tinta relativa a la página en milisegundos de lectura.
