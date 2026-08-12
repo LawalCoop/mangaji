@@ -6,8 +6,11 @@ import { CbzSource } from "@/lib/archive";
 import { Camera, type Viewport } from "@/lib/camera";
 import { Director } from "@/lib/director";
 import { PageFrameSource, PanelFrameSource } from "@/lib/frame-sources";
+import { DEFAULT_MOOD, MOOD_ORDER, MOODS, type MoodId } from "@/lib/mood";
+import { Music } from "@/lib/music";
 import { Stage } from "@/lib/stage";
 import type { Rect } from "@/lib/types";
+import { Toolbar } from "./toolbar";
 
 /** Hasta que la página se decodifica no se sabe su tamaño; esto evita un encuadre en cero. */
 const ASSUMED_PAGE = { w: 1600, h: 2300 };
@@ -20,15 +23,7 @@ const TRAVEL_MS = 520;
 // que la toma no quedara del todo quieta, y en marcha distrae más de lo que aporta: el
 // movimiento lo dan la entrada y el viaje entre viñetas, y entre medio conviene leer tranquilo.
 
-/**
- * Cuánto se destaca la viñeta activa sobre el resto de la página. Se cicla con `o`.
- * El default es suave a propósito: lo justo para dar protagonismo sin que se note el truco.
- */
-const FOCUS_LEVELS = [
-  { shade: 0.11, blur: 3 },
-  { shade: 0.22, blur: 7 },
-  { shade: 0, blur: 0 },
-];
+// Cuánto se destaca la viñeta activa lo fija ahora el mood, en `lib/mood.ts`.
 
 /** Traduce un movimiento de cámara del manifest a un par de encuadres concretos. */
 function framing(cam: CameraMove | undefined, rect: Rect, view: Viewport) {
@@ -59,9 +54,16 @@ export default function ReaderView() {
   } | null>(null);
 
   const [status, setStatus] = useState<Status>({ kind: "idle" });
-  const [label, setLabel] = useState("");
   const [title, setTitle] = useState("");
   const [panelMode, setPanelMode] = useState(false);
+  const [mood, setMood] = useState<MoodId>(DEFAULT_MOOD);
+  const [music, setMusic] = useState(false);
+  /** Posición de lectura, refrescada en cada encuadre. */
+  const [at, setAt] = useState({ page: 1, pages: 1, panel: 0, panels: 0, progress: 0 });
+
+  /** El mood se lee dentro del ciclo de render, que no ve el estado de React. */
+  const moodRef = useRef(MOODS[DEFAULT_MOOD]);
+  const musicRef = useRef<Music | null>(null);
 
   const teardown = useCallback(() => {
     engine.current?.dispose();
@@ -118,7 +120,14 @@ export default function ReaderView() {
         const draw = async (immediate: boolean) => {
           const mine = ++token;
           const frame = director.frame;
-          setLabel(director.label);
+          const pos = director.positionInPage;
+          setAt({
+            page: frame.page + 1,
+            pages: source.pageCount,
+            panel: pos.index,
+            panels: pos.total,
+            progress: director.length > 1 ? director.index / (director.length - 1) : 1,
+          });
 
           source.prefetch(frame.page + 1);
           source.prefetch(frame.page + 2);
@@ -187,7 +196,7 @@ export default function ReaderView() {
             } else if (samePage) {
               // Dentro de la página la cámara viaja: es lo que da la sensación de estar
               // recorriendo la hoja en vez de ver recortes sueltos.
-              stage.camera.glide(to, TRAVEL_MS);
+              stage.camera.glide(to, TRAVEL_MS * moodRef.current.pace);
             } else {
               // Página nueva: se entra con el movimiento que pida el beat.
               stage.camera.cut(from);
@@ -216,7 +225,7 @@ export default function ReaderView() {
           }
 
           // Con movimiento reducido no se dispara ninguno: son todos movimiento.
-          if (ev.beat.fx && !director.reducedMotion) {
+          if (ev.beat.fx && !director.reducedMotion && moodRef.current.fx > 0) {
             const fx = ev.beat.fx;
             const power =
               fx.kind === "shake"
@@ -226,12 +235,16 @@ export default function ReaderView() {
                   : fx.kind === "speedlines"
                     ? fx.density
                     : 0;
-            stage.playFx(fx.kind, power, Math.max(ev.beat.ms, 120));
+            // El mood decide con cuánta fuerza se ejecuta lo que el manifest pide.
+            stage.playFx(fx.kind, power * moodRef.current.fx, Math.max(ev.beat.ms, 120));
+            musicRef.current?.accent(0.8);
           }
         });
 
         const offTick = stage.onTick((dt) => {
-          director.tick(dt);
+          // El ritmo del mood se aplica al reloj del director: así escala todo de una vez
+          // —pausas, tiempos de lectura, apariciones— en vez de retocar cada duración.
+          director.tick(dt / moodRef.current.pace);
           stage.camera.update(dt);
           stage.updateFx(dt);
 
@@ -253,6 +266,9 @@ export default function ReaderView() {
           stage.render();
         };
         window.addEventListener("resize", onResize);
+
+        stage.focusStrength = moodRef.current.focus.shade;
+        stage.focusBlur = moodRef.current.focus.blur;
 
         engine.current = {
           source,
@@ -279,6 +295,67 @@ export default function ReaderView() {
     [teardown],
   );
 
+  /** Aplica el mood a lo que ya está andando. */
+  const applyMood = useCallback((id: MoodId) => {
+    const next = MOODS[id];
+    moodRef.current = next;
+    setMood(id);
+    musicRef.current?.setMood(next);
+
+    const eng = engine.current;
+    if (!eng) return;
+    eng.stage.focusStrength = next.focus.shade;
+    eng.stage.focusBlur = next.focus.blur;
+    eng.stage.refocus(eng.director.frame);
+    eng.stage.render();
+  }, []);
+
+  const toggleMusic = useCallback((on: boolean) => {
+    if (!on) {
+      musicRef.current?.stop();
+      musicRef.current = null;
+      setMusic(false);
+      return;
+    }
+    // Debe arrancar desde un gesto del usuario: el navegador no deja sonar audio sin eso.
+    const player = new Music(moodRef.current);
+    musicRef.current = player;
+    void player.start().then(
+      () => setMusic(true),
+      () => {
+        musicRef.current = null;
+        setMusic(false);
+      },
+    );
+  }, []);
+
+  useEffect(() => () => musicRef.current?.stop(), []);
+
+  const zoom = useCallback((factor: number) => {
+    const eng = engine.current;
+    if (!eng) return;
+    const { w, h } = eng.stage.viewport;
+    eng.stage.camera.zoomAt(factor, w / 2, h / 2);
+    eng.stage.render();
+  }, []);
+
+  const fit = useCallback(() => {
+    const eng = engine.current;
+    if (!eng) return;
+    eng.stage.camera.cut(
+      Camera.fit(eng.director.frame.rect, eng.stage.viewport, FIT_MARGIN),
+    );
+    eng.stage.render();
+  }, []);
+
+  const toggleMode = useCallback(() => {
+    const eng = engine.current;
+    if (!eng?.panelFrames) return;
+    const toPanels = eng.director.length === eng.pageFrames.length;
+    eng.director.setSource(toPanels ? eng.panelFrames : eng.pageFrames);
+    setPanelMode(toPanels);
+  }, []);
+
   // Teclado. Manga se lee derecha→izquierda: la flecha izquierda avanza.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -296,31 +373,36 @@ export default function ReaderView() {
           e.preventDefault();
           eng.director.prev();
           break;
+        case "ArrowDown":
+          e.preventDefault();
+          eng.director.seekToPage(eng.director.frame.page + 1);
+          break;
+        case "ArrowUp":
+          e.preventDefault();
+          eng.director.seekToPage(eng.director.frame.page - 1);
+          break;
         case "f":
-          eng.stage.camera.cut(
-            Camera.fit(eng.director.frame.rect, eng.stage.viewport, FIT_MARGIN),
-          );
+          fit();
           break;
-        case "o": {
-          // Cicla cuánto se destaca la viñeta sobre el resto de la página.
-          const i = FOCUS_LEVELS.findIndex(
-            (l) => l.shade === eng.stage.focusStrength && l.blur === eng.stage.focusBlur,
-          );
-          const next = FOCUS_LEVELS[(i + 1) % FOCUS_LEVELS.length];
-          eng.stage.focusStrength = next.shade;
-          eng.stage.focusBlur = next.blur;
-          eng.stage.refocus(eng.director.frame);
-          eng.stage.render();
+        case "+":
+        case "=":
+          zoom(1.25);
           break;
-        }
-        case "v": {
-          // Alternar viñeta ↔ página es cambiar de fuente. Nada más del motor se entera.
-          if (!eng.panelFrames) break;
-          const toPanels = eng.director.length === eng.pageFrames.length;
-          eng.director.setSource(toPanels ? eng.panelFrames : eng.pageFrames);
-          setPanelMode(toPanels);
+        case "-":
+          zoom(1 / 1.25);
           break;
-        }
+        case "m":
+          toggleMusic(!musicRef.current);
+          break;
+        case "v":
+          toggleMode();
+          break;
+        case "1":
+        case "2":
+        case "3":
+        case "4":
+          applyMood(MOOD_ORDER[Number(e.key) - 1]);
+          break;
         case "Home":
           eng.director.seek(0);
           break;
@@ -331,7 +413,7 @@ export default function ReaderView() {
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, []);
+  }, [applyMood, fit, toggleMode, toggleMusic, zoom]);
 
   const onDrop = useCallback(
     (e: React.DragEvent) => {
@@ -432,17 +514,27 @@ export default function ReaderView() {
       )}
 
       {status.kind === "ready" && (
-        <div className="pointer-events-none absolute inset-x-0 bottom-0 flex items-center justify-between gap-4 bg-gradient-to-t from-black/70 to-transparent p-4 text-xs text-neutral-400">
-          <span className="truncate">{title}</span>
-          <span className="flex items-center gap-3">
-            {engine.current?.panelFrames && (
-              <span className="rounded border border-neutral-700 px-1.5 py-0.5 text-[10px] uppercase tracking-wide">
-                {panelMode ? "viñeta" : "página"} · v
-              </span>
-            )}
-            <span className="tabular-nums">{label}</span>
-          </span>
-        </div>
+        <Toolbar
+          title={title}
+          page={at.page}
+          pages={at.pages}
+          panel={at.panel}
+          panels={at.panels}
+          progress={at.progress}
+          mood={mood}
+          music={music}
+          panelMode={panelMode}
+          hasPanels={Boolean(engine.current?.panelFrames)}
+          onPage={(page) => engine.current?.director.seekToPage(page - 1)}
+          onStep={(delta) =>
+            delta > 0 ? engine.current?.director.next() : engine.current?.director.prev()
+          }
+          onZoom={zoom}
+          onFit={fit}
+          onMood={applyMood}
+          onMusic={toggleMusic}
+          onToggleMode={toggleMode}
+        />
       )}
     </main>
   );

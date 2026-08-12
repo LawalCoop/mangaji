@@ -108,6 +108,29 @@ export class Director {
     this.seek(next, true);
   }
 
+  /** Salta al primer encuadre de una página. */
+  seekToPage(page: number): void {
+    for (let i = 0; i < this.#source.length; i++) {
+      if (this.#source.at(i).page === page) {
+        this.seek(i);
+        return;
+      }
+    }
+  }
+
+  /** Cuántos encuadres tiene la página actual, y cuál se está viendo. */
+  get positionInPage(): { index: number; total: number } {
+    const page = this.frame.page;
+    let total = 0;
+    let index = 0;
+    for (let i = 0; i < this.#source.length; i++) {
+      if (this.#source.at(i).page !== page) continue;
+      total++;
+      if (i === this.#index) index = total;
+    }
+    return { index, total };
+  }
+
   seek(index: number, immediate = false): void {
     const clamped = Math.min(Math.max(index, 0), this.#source.length - 1);
     this.#index = clamped;
