@@ -52,6 +52,39 @@ def _ring(image: np.ndarray, mask: np.ndarray) -> np.ndarray:
     return image[ring > 0].reshape(-1, image.shape[2])
 
 
+#: Mínimo de manchas de tinta separadas para que un bloque parezca escrito.
+MIN_INK_BLOBS = 2
+#: Fracción máxima de la tinta que puede concentrarse en una sola mancha.
+#:
+#: Medido sobre los bloques de una página: un trozo de dibujo marcado como texto concentra
+#: el 0.91 de su tinta en una sola forma, mientras que los diálogos reales van de 0.05 a
+#: 0.82 —incluso los de dos o tres caracteres—. Contar manchas no sirve para distinguirlos:
+#: ese mismo dibujo tenía 23.
+MAX_BLOB_SHARE = 0.86
+
+
+def looks_like_text(alpha: np.ndarray) -> bool:
+    """¿La tinta de este bloque está escrita, o es un pedazo de dibujo?
+
+    En un diálogo la tinta está repartida entre las letras; en un trozo de dibujo se
+    concentra en una forma que domina el bloque. El detector marca de vez en cuando como
+    texto una zona del arte, y si se levanta queda un hueco blanco en la página hasta que
+    ese supuesto diálogo se revela.
+    """
+    ink = (alpha > 60).astype(np.uint8)
+    if not ink.any():
+        return False
+
+    total = int(np.count_nonzero(ink))
+    n, _, stats, _ = cv2.connectedComponentsWithStats(ink, connectivity=8)
+    areas = sorted((int(stats[i, cv2.CC_STAT_AREA]) for i in range(1, n)), reverse=True)
+    # Las manchas de un píxel son ruido de compresión, no letras.
+    areas = [a for a in areas if a >= 6]
+    if len(areas) < MIN_INK_BLOBS:
+        return False
+    return areas[0] / max(total, 1) <= MAX_BLOB_SHARE
+
+
 def paper_ratio(pixels: np.ndarray) -> float:
     """Qué proporción de esos píxeles es papel."""
     if pixels.size == 0:
@@ -124,6 +157,8 @@ def extract(image: np.ndarray, polygon: list[tuple[int, int]]) -> Sprite | None:
 
     ink = float(np.count_nonzero(alpha > 40) / max(alpha.size, 1))
     if ink < 0.005:  # el modelo marcó texto donde no hay nada legible
+        return None
+    if not looks_like_text(alpha):
         return None
 
     rgba = np.dstack([crop, alpha])
