@@ -192,15 +192,24 @@ export class Stage {
     sx.filter = "none";
     sx.drawImage(bitmap, 0, 0);
 
-    // Recorte con borde difuso: se conserva solo lo que cae bajo la silueta, y difuminar
-    // la silueta hace que el pase de nítido a borroso ocurra en una franja, no en una línea.
+    // Recorte con borde difuso: se conserva solo lo que cae bajo la silueta.
+    //
+    // La silueta se dilata trazándola con grosor antes de difuminarla. Sin eso el degradado
+    // queda centrado en el borde de la viñeta y la mitad de la transición cae adentro, o
+    // sea que la propia viñeta se ve algo desenfocada en los bordes. Dilatada, la viñeta
+    // queda entera nítida y el desvanecido ocurre por fuera.
+    const feather = this.focusFeather;
     sx.globalCompositeOperation = "destination-in";
-    sx.filter = this.focusFeather > 0 ? `blur(${this.focusFeather / 2}px)` : "none";
+    sx.filter = feather > 0 ? `blur(${feather / 3}px)` : "none";
     sx.fillStyle = "#fff";
+    sx.strokeStyle = "#fff";
+    sx.lineJoin = "round";
+    sx.lineWidth = feather;
     sx.beginPath();
     frame.polygon!.forEach(([x, y], i) => (i === 0 ? sx.moveTo(x, y) : sx.lineTo(x, y)));
     sx.closePath();
     sx.fill();
+    if (feather > 0) sx.stroke();
     sx.globalCompositeOperation = "source-over";
     sx.filter = "none";
 
