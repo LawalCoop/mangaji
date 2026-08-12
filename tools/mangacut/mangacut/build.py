@@ -45,6 +45,13 @@ class BuildStats:
 
 #: Dos detecciones que se solapan más que esto son la misma viñeta vista dos veces.
 DEDUPE_IOU = 0.6
+#: Techo de tamaño de un bloque de diálogo, como fracción de la página.
+#:
+#: Un diálogo ocupa poquísimo: medido sobre 111 bloques del capítulo, la mediana es 0.44 %
+#: de la página. Las detecciones que se pasan de largo no son texto sino pedazos de dibujo,
+#: y levantarlas borra arte —una viñeta entera desapareció así—. Con 4 % hay margen de
+#: sobra para el diálogo más cargado y quedan afuera los cuatro casos que rompían.
+MAX_TEXT_AREA_RATIO = 0.04
 
 
 def _polygon_iou(a: list[tuple[int, int]], b: list[tuple[int, int]], scale: float = 0.125) -> float:
@@ -259,6 +266,8 @@ def analyse_page(
     lifted: list[tuple[Detection, Sprite]] = []
     if lift_text:
         for text in texts:
+            if text.bbox[2] * text.bbox[3] > MAX_TEXT_AREA_RATIO * page_area:
+                continue  # demasiado grande para ser diálogo: es dibujo
             sprite = dialogue.extract(image, text.polygon)
             if sprite:
                 lifted.append((text, sprite))
