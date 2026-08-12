@@ -23,7 +23,7 @@ const OFF_PANEL_DIALOGUE_ALPHA = 0.5;
  * foco. Así el globo nunca se ve vacío: un globo en blanco que de golpe se llena se lee
  * como un corte, y encima delata el truco de haber sacado el texto del arte.
  */
-const DIALOGUE_ENTRY_BLUR = 16;
+const DIALOGUE_ENTRY_BLUR = 9;
 
 export class Stage {
   readonly camera = new Camera();
