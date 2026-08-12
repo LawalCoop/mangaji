@@ -1,4 +1,4 @@
-import { Application, BlurFilter, Container, Graphics, Sprite, Texture } from "pixi.js";
+import { Application, Container, Sprite, Texture } from "pixi.js";
 import { Camera, type Transform } from "./camera";
 import type { Frame, Rect } from "./types";
 
@@ -6,89 +6,49 @@ import type { Frame, Rect } from "./types";
  * La superficie de render. Dibuja un encuadre —un recorte de una página— aplicando la
  * transformación de la cámara al contenedor del mundo.
  *
- * v2 usa el mismo Stage con `frame.polygon` para enmascarar viñetas no rectangulares;
- * v4 agrega las capas de diálogo dentro de `#layers`. El resto del motor no cambia.
+ * El foco sobre la viñeta activa se compone en un canvas y se sube como textura, en vez de
+ * resolverse con máscaras y filtros del motor: enmascarar con un objeto filtrado rompe el
+ * recorte, y crear texturas por viñeta dejaba al renderer usando texturas ya liberadas.
+ * Componer a mano es predecible y se paga una vez por encuadre, no por cuadro.
  */
 
 /** Texturas vivas alrededor de la página actual. Cada página son ~4 MP en VRAM. */
 const TEXTURE_LIMIT = 5;
-
-/** Resolución de la máscara respecto de la página: es difusa, no necesita más. */
-const MASK_SCALE = 0.25;
-
-/**
- * Pinta en `canvas` la silueta de la viñeta con el borde difuminado.
- *
- * El camino directo —un Graphics con filtro de desenfoque— no sirve: ponerle un filtro a
- * una máscara la rompe y el sprite enmascarado deja de dibujarse. Pintar el degradado en
- * la propia textura no depende de cómo el motor trate los filtros de máscara.
- */
-function paintMask(
-  canvas: HTMLCanvasElement,
-  polygon: [number, number][],
-  feather: number,
-): void {
-  const ctx = canvas.getContext("2d")!;
-  ctx.setTransform(1, 0, 0, 1, 0, 0);
-  ctx.clearRect(0, 0, canvas.width, canvas.height);
-  ctx.filter = feather > 0 ? `blur(${(feather / 2) * MASK_SCALE}px)` : "none";
-  ctx.fillStyle = "#fff";
-  ctx.beginPath();
-  polygon.forEach(([x, y], i) => {
-    const px = x * MASK_SCALE;
-    const py = y * MASK_SCALE;
-    i === 0 ? ctx.moveTo(px, py) : ctx.lineTo(px, py);
-  });
-  ctx.closePath();
-  ctx.fill();
-}
+/** Cuánto se atenúa el diálogo de las viñetas que no son la activa. */
+const OFF_PANEL_DIALOGUE_ALPHA = 0.5;
 
 export class Stage {
   readonly camera = new Camera();
   /**
-   * Cuánto se atenúa la página fuera de la viñeta activa: se difumina y se oscurece un
-   * poco, sin recortar. La página sigue entera y visible, pero la viñeta que se está
-   * leyendo toma protagonismo. En 0 no se dibuja nada de esto.
+   * Cuánto se apaga la página fuera de la viñeta activa. En 0 se muestra tal cual, sin
+   * componer nada.
    */
   focusStrength = 0.16;
-  /** Radio del desenfoque del entorno, en píxeles de pantalla. */
-  focusBlur = 2.5;
-  /**
-   * Ancho de la franja donde la viñeta nítida se funde con el entorno difuminado.
-   *
-   * Sin esto el borde de la máscara es una línea, y el pase de nítido a borroso se ve como
-   * un corte —justo lo que este modo quiere evitar—.
-   */
-  focusFeather = 40;
+  /** Radio del desenfoque del entorno, en píxeles de la página. */
+  focusBlur = 6;
+  /** Ancho de la franja donde la viñeta nítida se funde con el entorno. */
+  focusFeather = 48;
 
   #app: Application;
   #world = new Container();
-  /** Todo lo que va difuminado: la página y el diálogo de las viñetas que no son la activa. */
-  #blurred = new Container();
-  #back = new Sprite();
-  #backDialogue = new Container();
-  #shade = new Graphics();
-  /** La misma página, nítida, recortada a la viñeta activa. */
   #art = new Sprite();
-  #artMask: Sprite | null = null;
-  #maskCanvas: HTMLCanvasElement | null = null;
   #dialogue = new Container();
   #sprites = new Map<string, Sprite>();
   /** Posición final de cada sprite, para animar desde un pequeño desplazamiento. */
   #rests = new Map<string, number>();
   #textures = new Map<number, Texture>();
+  #bitmaps = new Map<number, ImageBitmap>();
   #page = -1;
-  #blur = new BlurFilter({ strength: 2.5, quality: 3 });
+
+  /** Lienzos de composición del foco, creados una vez y reescritos en cada encuadre. */
+  #focusCanvas: HTMLCanvasElement | null = null;
+  #sharpCanvas: HTMLCanvasElement | null = null;
+  #focusTexture: Texture | null = null;
+  #focusKey = "";
 
   private constructor(app: Application) {
     this.#app = app;
-    // El desenfoque se aplica al grupo, no solo a la página: el diálogo de las viñetas
-    // que no son la activa tiene que difuminarse con ellas, no quedar nítido flotando.
-    this.#blurred.addChild(this.#back, this.#backDialogue);
-    this.#blurred.filters = [this.#blur];
-    // De atrás hacia adelante: lo difuminado, un velo que lo apaga, la viñeta nítida
-    // recortada encima, y su diálogo sobre todo.
-    this.#world.addChild(this.#blurred, this.#shade, this.#art, this.#dialogue);
+    this.#world.addChild(this.#art, this.#dialogue);
     app.stage.addChild(this.#world);
   }
 
@@ -118,18 +78,31 @@ export class Stage {
   }
 
   /**
-   * Muestra un encuadre. Solo cambia la textura si cambió de página, así avanzar entre
-   * viñetas de la misma página no re-sube nada a la GPU.
+   * Muestra un encuadre. La textura solo se rehace cuando cambia la página o la viñeta
+   * enfocada, así avanzar dentro de la misma página no re-sube el arte entero.
    */
   show(frame: Frame, bitmap: ImageBitmap): void {
     if (frame.page !== this.#page) {
-      const texture = this.#texture(frame.page, bitmap);
-      this.#art.texture = texture;
-      this.#back.texture = texture;
+      this.#bitmaps.set(frame.page, bitmap);
       this.#page = frame.page;
       this.#evict(frame.page);
     }
-    this.#drawFocus(frame);
+
+    const focused =
+      this.focusStrength > 0 && Boolean(frame.polygon && frame.polygon.length >= 3);
+
+    if (focused) {
+      const key = `${frame.page}:${frame.id}:${this.focusStrength}:${this.focusBlur}`;
+      if (key !== this.#focusKey) {
+        this.#composeFocus(frame, bitmap);
+        this.#focusKey = key;
+      }
+      this.#art.texture = this.#focusTexture!;
+    } else {
+      this.#focusKey = "";
+      this.#art.texture = this.#texture(frame.page, bitmap);
+    }
+
     this.#placeDialogue(frame);
   }
 
@@ -139,42 +112,30 @@ export class Stage {
     this.#world.scale.set(t.scale);
   }
 
-  /** Refresca la atenuación cuando cambia su intensidad sin cambiar de encuadre. */
+  /** Rehace el foco cuando cambian sus ajustes sin cambiar de encuadre. */
   refocus(frame: Frame): void {
-    this.#drawFocus(frame);
+    this.#focusKey = "";
+    const bitmap = this.#bitmaps.get(frame.page);
+    if (bitmap) this.show(frame, bitmap);
   }
 
   /**
-   * Coloca el diálogo de la viñeta, oculto. El arte base ya no lo tiene: el pipeline lo
+   * Coloca el diálogo de la página, oculto. El arte base ya no lo tiene: el pipeline lo
    * levantó y dejó el globo vacío, así que hasta que se revele el globo se ve en blanco.
    */
   setDialogue(entries: { id: string; bitmap: ImageBitmap; rect: Rect }[]): void {
     this.#dialogue.removeChildren().forEach((child) => child.destroy());
-    this.#backDialogue.removeChildren().forEach((child) => child.destroy());
     this.#sprites.clear();
-
     this.#rests.clear();
+
     for (const entry of entries) {
       const sprite = new Sprite(Texture.from(entry.bitmap));
       sprite.position.set(entry.rect.x, entry.rect.y);
-      sprite.width = entry.rect.w;
-      sprite.height = entry.rect.h;
+      sprite.setSize(entry.rect.w, entry.rect.h);
       sprite.alpha = 0;
       this.#dialogue.addChild(sprite);
       this.#sprites.set(entry.id, sprite);
       this.#rests.set(entry.id, entry.rect.y);
-    }
-  }
-
-  /**
-   * Reparte el diálogo entre la capa nítida y la difuminada según a qué viñeta pertenece.
-   * Así el texto ya leído se apaga con su viñeta en vez de flotar nítido sobre el resto.
-   */
-  #placeDialogue(frame: Frame): void {
-    const mine = new Set((frame.layers ?? []).map((l) => l.id));
-    for (const [id, sprite] of this.#sprites) {
-      const target = mine.has(id) ? this.#dialogue : this.#backDialogue;
-      if (sprite.parent !== target) target.addChild(sprite);
     }
   }
 
@@ -183,25 +144,99 @@ export class Stage {
     const sprite = this.#sprites.get(id);
     if (!sprite) return;
     const t = Math.min(Math.max(progress, 0), 1);
-    sprite.alpha = t;
+    sprite.alpha = t * (sprite.label === "off" ? OFF_PANEL_DIALOGUE_ALPHA : 1);
     // Un desplazamiento mínimo hacia arriba: da la sensación de que el globo "habla" en
     // vez de que una imagen aparezca de la nada.
     sprite.y = this.#rests.get(id)! + (1 - t) * 6;
   }
 
-  /** Deja todo el diálogo visible de una vez (al saltar beats o al retroceder). */
-  showAllDialogue(): void {
-    for (const id of this.#sprites.keys()) this.revealDialogue(id, 1);
-  }
-
   destroy(): void {
     for (const [, tex] of this.#textures) tex.destroy(true);
     this.#textures.clear();
-    this.#art.mask = null;
-    this.#artMask?.destroy({ texture: true, textureSource: true });
-    this.#artMask = null;
-    this.#maskCanvas = null;
+    this.#bitmaps.clear();
+    this.#art.texture = Texture.EMPTY;
+    this.#focusTexture?.destroy(true);
+    this.#focusTexture = null;
     this.#app.destroy(true, { children: true });
+  }
+
+  /**
+   * Compone la página con la viñeta activa nítida y el resto difuminado y apagado.
+   *
+   * Se dibuja el fondo con desenfoque y luego encima la copia nítida recortada a la
+   * silueta con borde difuso, usando `destination-in` sobre un lienzo auxiliar. Todo en
+   * canvas 2D: no intervienen máscaras ni filtros del motor.
+   */
+  #composeFocus(frame: Frame, bitmap: ImageBitmap): void {
+    const { width, height } = bitmap;
+    const focus = this.#ensureCanvas("focus", width, height);
+    const sharp = this.#ensureCanvas("sharp", width, height);
+
+    const fx = focus.getContext("2d")!;
+    fx.setTransform(1, 0, 0, 1, 0, 0);
+    fx.clearRect(0, 0, width, height);
+    fx.filter = `blur(${this.focusBlur}px)`;
+    fx.drawImage(bitmap, 0, 0);
+    fx.filter = "none";
+    fx.fillStyle = `rgba(0,0,0,${this.focusStrength})`;
+    fx.fillRect(0, 0, width, height);
+
+    const sx = sharp.getContext("2d")!;
+    sx.setTransform(1, 0, 0, 1, 0, 0);
+    sx.globalCompositeOperation = "source-over";
+    sx.clearRect(0, 0, width, height);
+    sx.filter = "none";
+    sx.drawImage(bitmap, 0, 0);
+
+    // Recorte con borde difuso: se conserva solo lo que cae bajo la silueta, y difuminar
+    // la silueta hace que el pase de nítido a borroso ocurra en una franja, no en una línea.
+    sx.globalCompositeOperation = "destination-in";
+    sx.filter = this.focusFeather > 0 ? `blur(${this.focusFeather / 2}px)` : "none";
+    sx.fillStyle = "#fff";
+    sx.beginPath();
+    frame.polygon!.forEach(([x, y], i) => (i === 0 ? sx.moveTo(x, y) : sx.lineTo(x, y)));
+    sx.closePath();
+    sx.fill();
+    sx.globalCompositeOperation = "source-over";
+    sx.filter = "none";
+
+    fx.drawImage(sharp, 0, 0);
+
+    if (!this.#focusTexture) {
+      this.#focusTexture = Texture.from(focus);
+    }
+    this.#focusTexture.source.update();
+  }
+
+  #ensureCanvas(which: "focus" | "sharp", width: number, height: number): HTMLCanvasElement {
+    const current = which === "focus" ? this.#focusCanvas : this.#sharpCanvas;
+    if (current && current.width === width && current.height === height) return current;
+
+    const canvas = document.createElement("canvas");
+    canvas.width = width;
+    canvas.height = height;
+    if (which === "focus") {
+      this.#focusCanvas = canvas;
+      // La textura queda ligada al lienzo: si el lienzo cambia, hay que rehacerla.
+      this.#focusTexture?.destroy(true);
+      this.#focusTexture = null;
+    } else {
+      this.#sharpCanvas = canvas;
+    }
+    return canvas;
+  }
+
+  /**
+   * Marca qué diálogo pertenece a la viñeta activa. El de las otras se atenúa para que no
+   * compita, ya que la página que lo rodea está difuminada.
+   */
+  #placeDialogue(frame: Frame): void {
+    const mine = new Set((frame.layers ?? []).map((l) => l.id));
+    for (const [id, sprite] of this.#sprites) {
+      const own = mine.has(id);
+      sprite.label = own ? "own" : "off";
+      if (sprite.alpha > 0) sprite.alpha = own ? 1 : OFF_PANEL_DIALOGUE_ALPHA;
+    }
   }
 
   #texture(page: number, bitmap: ImageBitmap): Texture {
@@ -210,59 +245,6 @@ export class Stage {
     const tex = Texture.from(bitmap);
     this.#textures.set(page, tex);
     return tex;
-  }
-
-  /**
-   * Da protagonismo a la viñeta activa sin recortarla: el resto de la página queda
-   * difuminado y algo apagado, pero visible. Es lo contrario de enmascarar — la hoja
-   * sigue entera, y lo que cambia es dónde está el foco.
-   *
-   * Se logra con dos copias de la misma página: la de atrás lleva el desenfoque, y encima
-   * va la nítida recortada a la silueta de la viñeta.
-   */
-  #drawFocus(frame: Frame): void {
-    this.#shade.clear();
-
-    const focused = this.focusStrength > 0 && frame.polygon && frame.polygon.length >= 3;
-    this.#blurred.visible = Boolean(focused);
-    if (!focused) {
-      // Sin foco no hay recorte: la página nítida se ve entera.
-      this.#art.mask = null;
-      if (this.#artMask) this.#artMask.visible = false;
-      return;
-    }
-
-    this.#blur.strength = this.focusBlur;
-
-    const { width, height } = this.#art.texture;
-    // Margen amplio: al alejarse, la cámara ve más allá del borde de la página.
-    this.#shade
-      .rect(-width, -height, width * 3, height * 3)
-      .fill({ color: 0x000000, alpha: this.focusStrength });
-
-    // El canvas y su textura se crean una sola vez y se reescriben. Crearlos y destruirlos
-    // por viñeta dejaba al renderer usando una textura ya liberada.
-    const cw = Math.max(1, Math.ceil(width * MASK_SCALE));
-    const ch = Math.max(1, Math.ceil(height * MASK_SCALE));
-    if (!this.#maskCanvas || this.#maskCanvas.width !== cw || this.#maskCanvas.height !== ch) {
-      const canvas = document.createElement("canvas");
-      canvas.width = cw;
-      canvas.height = ch;
-      this.#maskCanvas = canvas;
-
-      this.#artMask?.destroy({ texture: true, textureSource: true });
-      const sprite = new Sprite(Texture.from(canvas));
-      this.#world.addChild(sprite);
-      this.#artMask = sprite;
-    }
-
-    paintMask(this.#maskCanvas, frame.polygon!, this.focusFeather);
-
-    const mask = this.#artMask!;
-    mask.texture.source.update();
-    mask.visible = true;
-    mask.setSize(width, height);
-    this.#art.mask = mask;
   }
 
   /**
@@ -275,6 +257,9 @@ export class Stage {
         tex.destroy(true);
         this.#textures.delete(p);
       }
+    }
+    for (const p of this.#bitmaps.keys()) {
+      if (Math.abs(p - page) > TEXTURE_LIMIT) this.#bitmaps.delete(p);
     }
   }
 }
