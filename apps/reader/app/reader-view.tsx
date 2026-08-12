@@ -1,14 +1,32 @@
 "use client";
 
+import { MANIFEST_FILENAME, safeParseManifest, type CameraMove } from "@manganime/format";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { CbzSource } from "@/lib/archive";
-import { Camera } from "@/lib/camera";
+import { Camera, type Viewport } from "@/lib/camera";
 import { Director } from "@/lib/director";
-import { PageFrameSource } from "@/lib/frame-sources";
+import { PageFrameSource, PanelFrameSource } from "@/lib/frame-sources";
 import { Stage } from "@/lib/stage";
+import type { Rect } from "@/lib/types";
 
 /** Hasta que la página se decodifica no se sabe su tamaño; esto evita un encuadre en cero. */
 const ASSUMED_PAGE = { w: 1600, h: 2300 };
+/** Aire alrededor del encuadre: pegar la viñeta al borde se siente asfixiante. */
+const FIT_MARGIN = 0.94;
+
+/** Traduce un movimiento de cámara del manifest a un par de encuadres concretos. */
+function framing(cam: CameraMove | undefined, rect: Rect, view: Viewport) {
+  const at = (zoom: number) => Camera.fit(rect, view, FIT_MARGIN * zoom);
+  switch (cam?.kind) {
+    case "punchIn":
+    case "pullBack":
+      return { from: at(cam.from), to: at(cam.to) };
+    case "kenBurns":
+      return { from: at(1), to: at(cam.zoom) };
+    default:
+      return { from: at(1), to: at(1) };
+  }
+}
 
 type Status = { kind: "idle" } | { kind: "loading" } | { kind: "ready" } | { kind: "error"; message: string };
 
@@ -19,12 +37,15 @@ export default function ReaderView() {
     stage: Stage;
     director: Director;
     sizes: { w: number; h: number }[];
+    pageFrames: PageFrameSource;
+    panelFrames: PanelFrameSource | null;
     dispose: () => void;
   } | null>(null);
 
   const [status, setStatus] = useState<Status>({ kind: "idle" });
   const [label, setLabel] = useState("");
   const [title, setTitle] = useState("");
+  const [panelMode, setPanelMode] = useState(false);
 
   const teardown = useCallback(() => {
     engine.current?.dispose();
@@ -45,9 +66,25 @@ export default function ReaderView() {
 
         const source = await CbzSource.open(file);
         const sizes = Array.from({ length: source.pageCount }, () => ({ ...ASSUMED_PAGE }));
-        const frames = new PageFrameSource(sizes);
+        const pageFrames = new PageFrameSource(sizes);
+
+        // Un `.cbza` trae manifest y se lee viñeta por viñeta; un CBZ común, página a página.
+        let panelFrames: PanelFrameSource | null = null;
+        if (source.has(MANIFEST_FILENAME)) {
+          const parsed = safeParseManifest(JSON.parse(await source.text(MANIFEST_FILENAME)));
+          if (parsed.success) {
+            panelFrames = new PanelFrameSource(parsed.data);
+            parsed.data.pages.forEach((page, i) => {
+              sizes[i] = { w: page.size[0], h: page.size[1] };
+            });
+          } else {
+            console.warn("manifest inválido, se lee como CBZ común", parsed.error.issues);
+          }
+        }
+        setPanelMode(panelFrames !== null);
+
         const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-        const director = new Director(frames, { reducedMotion });
+        const director = new Director(panelFrames ?? pageFrames, { reducedMotion });
         const stage = await Stage.create(canvas);
 
         // Cada cambio de encuadre pide su página; `token` descarta las respuestas que
@@ -69,8 +106,10 @@ export default function ReaderView() {
             const fresh = director.frame;
             stage.show(fresh, bitmap);
 
-            const fit = Camera.fit(fresh.rect, stage.viewport);
-            immediate || director.reducedMotion ? stage.camera.cut(fit) : stage.camera.glide(fit, 220);
+            const { from } = framing(fresh.beats[0]?.cam, fresh.rect, stage.viewport);
+            immediate || director.reducedMotion
+              ? stage.camera.cut(from)
+              : stage.camera.glide(from, 220);
             stage.render();
           } catch (err) {
             if (mine === token) setStatus({ kind: "error", message: (err as Error).message });
@@ -78,7 +117,20 @@ export default function ReaderView() {
         };
 
         const offDirector = director.on((ev) => {
-          if (ev.type === "frame") void draw(ev.immediate);
+          if (ev.type === "frame") {
+            void draw(ev.immediate);
+            return;
+          }
+          if (ev.type === "beat" && ev.beat.cam) {
+            // El beat manda la cámara: v2 emite un acercamiento suave, v5 emitirá más.
+            const { from, to } = framing(ev.beat.cam, ev.frame.rect, stage.viewport);
+            if (director.reducedMotion || ev.beat.ms <= 0) {
+              stage.camera.cut(to);
+            } else {
+              stage.camera.cut(from);
+              stage.camera.glide(to, ev.beat.ms);
+            }
+          }
         });
 
         const offTick = stage.onTick((dt) => {
@@ -88,8 +140,8 @@ export default function ReaderView() {
         });
 
         const onResize = () => {
-          const fit = Camera.fit(director.frame.rect, stage.viewport);
-          stage.camera.cut(fit);
+          const { to } = framing(director.frame.beats[0]?.cam, director.frame.rect, stage.viewport);
+          stage.camera.cut(to);
           stage.render();
         };
         window.addEventListener("resize", onResize);
@@ -99,6 +151,8 @@ export default function ReaderView() {
           stage,
           director,
           sizes,
+          pageFrames,
+          panelFrames,
           dispose: () => {
             window.removeEventListener("resize", onResize);
             offTick();
@@ -135,8 +189,18 @@ export default function ReaderView() {
           eng.director.prev();
           break;
         case "f":
-          eng.stage.camera.cut(Camera.fit(eng.director.frame.rect, eng.stage.viewport));
+          eng.stage.camera.cut(
+            Camera.fit(eng.director.frame.rect, eng.stage.viewport, FIT_MARGIN),
+          );
           break;
+        case "v": {
+          // Alternar viñeta ↔ página es cambiar de fuente. Nada más del motor se entera.
+          if (!eng.panelFrames) break;
+          const toPanels = eng.director.length === eng.pageFrames.length;
+          eng.director.setSource(toPanels ? eng.panelFrames : eng.pageFrames);
+          setPanelMode(toPanels);
+          break;
+        }
         case "Home":
           eng.director.seek(0);
           break;
@@ -250,7 +314,14 @@ export default function ReaderView() {
       {status.kind === "ready" && (
         <div className="pointer-events-none absolute inset-x-0 bottom-0 flex items-center justify-between gap-4 bg-gradient-to-t from-black/70 to-transparent p-4 text-xs text-neutral-400">
           <span className="truncate">{title}</span>
-          <span className="tabular-nums">{label}</span>
+          <span className="flex items-center gap-3">
+            {engine.current?.panelFrames && (
+              <span className="rounded border border-neutral-700 px-1.5 py-0.5 text-[10px] uppercase tracking-wide">
+                {panelMode ? "viñeta" : "página"} · v
+              </span>
+            )}
+            <span className="tabular-nums">{label}</span>
+          </span>
         </div>
       )}
     </main>

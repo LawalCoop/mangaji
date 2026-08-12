@@ -1,0 +1,163 @@
+"""Detección de viñetas, globos y texto con el modelo de segmentación, vía onnxruntime.
+
+Corre sin Ultralytics (AGPL) ni torch: el `.pt` se exporta una sola vez a ONNX con
+`mangacut export-onnx`, y el pipeline solo necesita onnxruntime + opencv.
+
+El modelo exportado trae NMS incorporado — su salida es [1, 300, 38] con las detecciones
+ya filtradas — así que no hace falta implementar supresión de no-máximos:
+
+    columnas 0..3   bbox xyxy en píxeles de la entrada de 1280
+    columna  4      confianza
+    columna  5      clase (0 frame, 1 text, 2 balloon)
+    columnas 6..37  coeficientes de máscara, que multiplican los prototipos de output1
+"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass
+from pathlib import Path
+
+import cv2
+import numpy as np
+
+CLASSES = {0: "frame", 1: "text", 2: "balloon"}
+INPUT_SIZE = 1280
+#: Douglas-Peucker en píxeles. Medido sobre 94 viñetas: 202 vértices de mediana → 22,
+#: conservando IoU 0.991 en el peor caso. Un épsilon proporcional al perímetro deforma
+#: justo los contornos serpenteantes, que son los que más cuidado necesitan.
+SIMPLIFY_EPS_PX = 2.0
+
+
+@dataclass(slots=True)
+class Detection:
+    cls: str
+    conf: float
+    bbox: tuple[float, float, float, float]  # x, y, w, h en coords de la página
+    polygon: list[tuple[int, int]]
+
+    @property
+    def area(self) -> float:
+        return abs(cv2.contourArea(np.array(self.polygon, np.int32)))
+
+
+def letterbox(img: np.ndarray, size: int = INPUT_SIZE) -> tuple[np.ndarray, float, int, int]:
+    """Escala manteniendo proporción y rellena hasta el cuadrado de entrada.
+
+    La imagen se ancla en la esquina superior izquierda, así que deshacer la
+    transformación es dividir por la escala — sin restar desplazamientos.
+    """
+    h, w = img.shape[:2]
+    scale = min(size / h, size / w)
+    nh, nw = int(round(h * scale)), int(round(w * scale))
+    canvas = np.full((size, size, 3), 114, np.uint8)
+    canvas[:nh, :nw] = cv2.resize(img, (nw, nh), interpolation=cv2.INTER_LINEAR)
+    return canvas, scale, nh, nw
+
+
+def clean_mask(mask: np.ndarray) -> np.ndarray:
+    """Deja una sola región compacta.
+
+    Las máscaras crudas traen hilos de 1 px y fragmentos sueltos: al contornearlos aparecen
+    "puentes" que no aportan área pero sí trazan líneas que cruzan la página. La apertura
+    los corta y quedarse con la componente mayor descarta los restos.
+    """
+    kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5))
+    opened = cv2.morphologyEx(mask, cv2.MORPH_OPEN, kernel)
+    if not opened.any():
+        opened = mask  # una viñeta muy fina no debe desaparecer por la limpieza
+
+    n, labels, stats, _ = cv2.connectedComponentsWithStats(opened, connectivity=8)
+    if n <= 2:
+        return opened
+    biggest = 1 + int(np.argmax(stats[1:, cv2.CC_STAT_AREA]))
+    return (labels == biggest).astype(np.uint8)
+
+
+def mask_to_polygon(mask: np.ndarray, eps_px: float = SIMPLIFY_EPS_PX) -> list[tuple[int, int]]:
+    contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    if not contours:
+        return []
+    contour = max(contours, key=cv2.contourArea)
+    simple = cv2.approxPolyDP(contour, eps_px, True).reshape(-1, 2)
+    if len(simple) < 3:
+        return []
+    return [(int(x), int(y)) for x, y in simple]
+
+
+class Detector:
+    """Envuelve la sesión de onnxruntime. Reutilizable entre páginas: crearla es lo caro."""
+
+    def __init__(self, model: str | Path, conf: float = 0.25, threads: int = 0):
+        import onnxruntime as ort
+
+        opts = ort.SessionOptions()
+        if threads:
+            opts.intra_op_num_threads = threads
+        self.session = ort.InferenceSession(
+            str(model), opts, providers=["CPUExecutionProvider"]
+        )
+        self.input_name = self.session.get_inputs()[0].name
+        self.conf = conf
+
+    def __call__(self, image: np.ndarray) -> list[Detection]:
+        """`image` en BGR, tal como lo devuelve cv2.imread."""
+        h0, w0 = image.shape[:2]
+        canvas, scale, nh, nw = letterbox(image)
+
+        blob = canvas[:, :, ::-1].transpose(2, 0, 1)[None].astype(np.float32) / 255.0
+        preds, protos = self.session.run(None, {self.input_name: blob})
+
+        rows = preds[0]
+        rows = rows[rows[:, 4] >= self.conf]
+        if len(rows) == 0:
+            return []
+
+        protos = protos[0]  # (32, 320, 320)
+        pc, ph, pw = protos.shape
+        flat = protos.reshape(pc, -1)
+
+        # Región válida dentro del lienzo, en coordenadas de los prototipos.
+        vh, vw = int(round(nh * ph / INPUT_SIZE)), int(round(nw * pw / INPUT_SIZE))
+        vh, vw = max(vh, 1), max(vw, 1)
+
+        out: list[Detection] = []
+        for row in rows:
+            x1, y1, x2, y2 = row[:4]
+            conf, cls_id, coeffs = float(row[4]), int(row[5]), row[6:]
+
+            logits = (coeffs @ flat).reshape(ph, pw)
+            mask = (1 / (1 + np.exp(-logits)) > 0.5).astype(np.uint8)
+
+            # Recortar a la caja evita que la máscara sangre a otras viñetas.
+            bx1, by1 = int(x1 * pw / INPUT_SIZE), int(y1 * ph / INPUT_SIZE)
+            bx2, by2 = int(np.ceil(x2 * pw / INPUT_SIZE)), int(np.ceil(y2 * ph / INPUT_SIZE))
+            keep = np.zeros_like(mask)
+            keep[max(by1, 0) : by2, max(bx1, 0) : bx2] = 1
+            mask &= keep
+
+            mask = mask[:vh, :vw]
+            if not mask.any():
+                continue
+
+            mask = cv2.resize(mask, (w0, h0), interpolation=cv2.INTER_NEAREST)
+            polygon = mask_to_polygon(clean_mask(mask))
+            if not polygon:
+                continue
+
+            out.append(
+                Detection(
+                    cls=CLASSES.get(cls_id, str(cls_id)),
+                    conf=conf,
+                    # float() explícito: numpy devolvería float32, que json no serializa.
+                    bbox=(
+                        float(x1 / scale),
+                        float(y1 / scale),
+                        float((x2 - x1) / scale),
+                        float((y2 - y1) / scale),
+                    ),
+                    polygon=polygon,
+                )
+            )
+
+        out.sort(key=lambda d: -d.conf)
+        return out

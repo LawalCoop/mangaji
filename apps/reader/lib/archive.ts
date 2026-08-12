@@ -7,6 +7,9 @@
 export interface ArchiveSource {
   readonly pageCount: number;
   entryName(index: number): string;
+  /** Entradas que no son páginas — el manifest de un `.cbza`, por ejemplo. */
+  has(name: string): boolean;
+  text(name: string): Promise<string>;
   /** Decodifica (o devuelve de caché) la página. Cancelable cerrando la fuente. */
   bitmap(index: number): Promise<ImageBitmap>;
   /** Sugerencia de precarga; los errores se ignoran a propósito. */
@@ -24,6 +27,7 @@ const CACHE_LIMIT = 5;
 export class CbzSource implements ArchiveSource {
   #worker: Worker;
   #entries: string[] = [];
+  #all = new Set<string>();
   #pending = new Map<number, Pending>();
   #seq = 0;
   #cache = new Map<number, Promise<ImageBitmap>>();
@@ -46,10 +50,12 @@ export class CbzSource implements ArchiveSource {
     });
     const source = new CbzSource(worker);
     const buffer = await file.arrayBuffer();
-    const { entries } = (await source.#send({ kind: "open", buffer }, [buffer])) as {
+    const { entries, all } = (await source.#send({ kind: "open", buffer }, [buffer])) as {
       entries: string[];
+      all: string[];
     };
     source.#entries = entries;
+    source.#all = new Set(all);
     return source;
   }
 
@@ -59,6 +65,15 @@ export class CbzSource implements ArchiveSource {
 
   entryName(index: number): string {
     return this.#entries[index] ?? "";
+  }
+
+  has(name: string): boolean {
+    return this.#all.has(name);
+  }
+
+  async text(name: string): Promise<string> {
+    const { text } = (await this.#send({ kind: "text", name })) as { text: string };
+    return text;
   }
 
   bitmap(index: number): Promise<ImageBitmap> {
