@@ -23,11 +23,15 @@ export class Stage {
    * Cuánto se apaga la página fuera de la viñeta activa. En 0 se muestra tal cual, sin
    * componer nada.
    */
-  focusStrength = 0.16;
+  focusStrength = 0.11;
   /** Radio del desenfoque del entorno, en píxeles de la página. */
-  focusBlur = 6;
-  /** Ancho de la franja donde la viñeta nítida se funde con el entorno. */
-  focusFeather = 48;
+  focusBlur = 3;
+  /**
+   * Ancho de la franja donde la viñeta nítida se funde con el entorno, en píxeles de la
+   * página. Generoso a propósito: que se vea parte de la viñeta vecina no molesta, y una
+   * transición larga disimula el efecto mejor que una angosta.
+   */
+  focusFeather = 180;
 
   #app: Application;
   #world = new Container();
