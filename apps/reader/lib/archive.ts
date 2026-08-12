@@ -10,6 +10,8 @@ export interface ArchiveSource {
   /** Entradas que no son páginas — el manifest de un `.cbza`, por ejemplo. */
   has(name: string): boolean;
   text(name: string): Promise<string>;
+  /** Decodifica una entrada de imagen por nombre (los sprites de diálogo). */
+  bitmapOf(name: string): Promise<ImageBitmap>;
   /** Decodifica (o devuelve de caché) la página. Cancelable cerrando la fuente. */
   bitmap(index: number): Promise<ImageBitmap>;
   /** Sugerencia de precarga; los errores se ignoran a propósito. */
@@ -31,6 +33,8 @@ export class CbzSource implements ArchiveSource {
   #pending = new Map<number, Pending>();
   #seq = 0;
   #cache = new Map<number, Promise<ImageBitmap>>();
+  /** Sprites de diálogo, cacheados por nombre. Son chicos y se reusan al volver atrás. */
+  #named = new Map<string, Promise<ImageBitmap>>();
   #closed = false;
 
   private constructor(worker: Worker) {
@@ -76,6 +80,17 @@ export class CbzSource implements ArchiveSource {
     return text;
   }
 
+  async bitmapOf(name: string): Promise<ImageBitmap> {
+    const cached = this.#named.get(name);
+    if (cached) return cached;
+    const task = this.#send({ kind: "bitmapOf", name }).then(
+      (r) => (r as { bitmap: ImageBitmap }).bitmap,
+    );
+    this.#named.set(name, task);
+    task.catch(() => this.#named.delete(name));
+    return task;
+  }
+
   bitmap(index: number): Promise<ImageBitmap> {
     const hit = this.#cache.get(index);
     if (hit) return hit;
@@ -105,6 +120,8 @@ export class CbzSource implements ArchiveSource {
   close(): void {
     if (this.#closed) return;
     this.#closed = true;
+    for (const task of this.#named.values()) void task.then((b) => b.close()).catch(() => {});
+    this.#named.clear();
     for (const i of [...this.#cache.keys()]) this.release(i);
     for (const p of this.#pending.values()) p.reject(new Error("Archivo cerrado"));
     this.#pending.clear();

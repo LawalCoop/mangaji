@@ -13,6 +13,10 @@ import type { Rect } from "@/lib/types";
 const ASSUMED_PAGE = { w: 1600, h: 2300 };
 /** Aire alrededor del encuadre: pegar la viñeta al borde se siente asfixiante. */
 const FIT_MARGIN = 0.94;
+/** Duración del viaje de la cámara entre viñetas de la misma página. */
+const TRAVEL_MS = 520;
+/** Cuánto se oscurece el resto de la página. Se cicla con la tecla `o`. */
+const FOCUS_LEVELS = [0, 0.35, 0.6];
 
 /** Traduce un movimiento de cámara del manifest a un par de encuadres concretos. */
 function framing(cam: CameraMove | undefined, rect: Rect, view: Viewport) {
@@ -90,6 +94,9 @@ export default function ReaderView() {
         // Cada cambio de encuadre pide su página; `token` descarta las respuestas que
         // llegan tarde cuando el lector ya avanzó.
         let token = 0;
+        let shownPage = -1;
+        /** Apariciones de diálogo en curso, avanzadas por el ticker. */
+        const revealing = new Map<string, { elapsed: number; ms: number }>();
         const draw = async (immediate: boolean) => {
           const mine = ++token;
           const frame = director.frame;
@@ -104,38 +111,71 @@ export default function ReaderView() {
 
             sizes[frame.page] = { w: bitmap.width, h: bitmap.height };
             const fresh = director.frame;
+            const samePage = fresh.page === shownPage;
+            shownPage = fresh.page;
             stage.show(fresh, bitmap);
 
-            const { from } = framing(fresh.beats[0]?.cam, fresh.rect, stage.viewport);
-            immediate || director.reducedMotion
-              ? stage.camera.cut(from)
-              : stage.camera.glide(from, 220);
+            // El diálogo de esta viñeta, oculto hasta que su beat lo revele.
+            revealing.clear();
+            const withSprite = (fresh.layers ?? []).filter((l) => l.src);
+            if (withSprite.length) {
+              const loaded = await Promise.all(
+                withSprite.map(async (layer) => ({
+                  id: layer.id,
+                  rect: layer.rect,
+                  bitmap: await source.bitmapOf(layer.src),
+                })),
+              );
+              if (mine !== token) return;
+              stage.setDialogue(loaded);
+            } else {
+              stage.setDialogue([]);
+            }
+
+            const { from, to } = framing(fresh.beats[0]?.cam, fresh.rect, stage.viewport);
+
+            if (immediate || director.reducedMotion) {
+              stage.camera.cut(to);
+            } else if (samePage) {
+              // Dentro de la página la cámara viaja: es lo que da la sensación de estar
+              // recorriendo la hoja en vez de ver recortes sueltos.
+              stage.camera.glide(to, TRAVEL_MS);
+            } else {
+              // Página nueva: se entra con el movimiento que pida el beat.
+              stage.camera.cut(from);
+              stage.camera.glide(to, Math.max(fresh.beats[0]?.ms ?? 0, 260));
+            }
             stage.render();
           } catch (err) {
             if (mine === token) setStatus({ kind: "error", message: (err as Error).message });
           }
         };
 
+        // La cámara la resuelve `draw`, que es quien sabe si cambió de página. Los beats
+        // se ocupan del diálogo, y en v5 de los efectos.
         const offDirector = director.on((ev) => {
           if (ev.type === "frame") {
             void draw(ev.immediate);
             return;
           }
-          if (ev.type === "beat" && ev.beat.cam) {
-            // El beat manda la cámara: v2 emite un acercamiento suave, v5 emitirá más.
-            const { from, to } = framing(ev.beat.cam, ev.frame.rect, stage.viewport);
-            if (director.reducedMotion || ev.beat.ms <= 0) {
-              stage.camera.cut(to);
-            } else {
-              stage.camera.cut(from);
-              stage.camera.glide(to, ev.beat.ms);
-            }
+          if (ev.type === "beat" && ev.beat.reveal) {
+            if (director.reducedMotion) stage.revealDialogue(ev.beat.reveal, 1);
+            else revealing.set(ev.beat.reveal, { elapsed: 0, ms: Math.max(ev.beat.ms, 1) });
           }
         });
 
         const offTick = stage.onTick((dt) => {
           director.tick(dt);
           stage.camera.update(dt);
+
+          for (const [id, anim] of revealing) {
+            anim.elapsed += dt;
+            const t = Math.min(anim.elapsed / anim.ms, 1);
+            // Suavizado de salida: entra rápido y se asienta, que se lee mejor que lineal.
+            stage.revealDialogue(id, 1 - (1 - t) * (1 - t));
+            if (t >= 1) revealing.delete(id);
+          }
+
           stage.render();
         });
 
@@ -193,6 +233,14 @@ export default function ReaderView() {
             Camera.fit(eng.director.frame.rect, eng.stage.viewport, FIT_MARGIN),
           );
           break;
+        case "o": {
+          // Atenuar el entorno da foco sin recortar: la página sigue entera debajo.
+          const next = FOCUS_LEVELS[(FOCUS_LEVELS.indexOf(eng.stage.focusStrength) + 1) % FOCUS_LEVELS.length];
+          eng.stage.focusStrength = next;
+          eng.stage.refocus(eng.director.frame);
+          eng.stage.render();
+          break;
+        }
         case "v": {
           // Alternar viñeta ↔ página es cambiar de fuente. Nada más del motor se entera.
           if (!eng.panelFrames) break;

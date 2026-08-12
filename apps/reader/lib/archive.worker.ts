@@ -16,6 +16,7 @@ let entries: string[] = [];
 type Req =
   | { id: number; kind: "open"; buffer: ArrayBuffer }
   | { id: number; kind: "bitmap"; index: number }
+  | { id: number; kind: "bitmapOf"; name: string }
   | { id: number; kind: "text"; name: string };
 
 self.onmessage = async (ev: MessageEvent<Req>) => {
@@ -38,10 +39,10 @@ self.onmessage = async (ev: MessageEvent<Req>) => {
       return;
     }
 
-    if (msg.kind === "bitmap") {
+    if (msg.kind === "bitmap" || msg.kind === "bitmapOf") {
       if (!archive) throw new Error("No hay archivo abierto");
-      const name = entries[msg.index];
-      if (!name) throw new Error(`Página fuera de rango: ${msg.index}`);
+      const name = msg.kind === "bitmapOf" ? msg.name : entries[msg.index];
+      if (!name) throw new Error("Entrada inexistente");
       const bytes = await inflateOne(archive, name);
       // El tipo lo infiere el decodificador; no hace falta acertar el mime exacto.
       const bitmap = await createImageBitmap(new Blob([bytes as BlobPart]));

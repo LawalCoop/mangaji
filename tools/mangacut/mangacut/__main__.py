@@ -13,7 +13,11 @@ import sys
 from pathlib import Path
 
 DEFAULT_MODEL = Path(".mangacut/models/panel-seg-1280.onnx")
+#: Detector dedicado al diálogo. El de segmentación es mejor para viñetas —da máscaras—
+#: pero con texto de scanlations en español se queda muy corto.
+DEFAULT_TEXT_MODEL = Path(".mangacut/models/alt-panel-1280.onnx")
 HF_REPO = "ShadowB/Manga109-panel-balloon-text-yolov26-segmentation"
+TEXT_HF_REPO = "leoxs22/manga-panel-detector-yolo26n"
 
 
 def cmd_build(args: argparse.Namespace) -> int:
@@ -41,6 +45,9 @@ def cmd_build(args: argparse.Namespace) -> int:
         conf=args.conf,
         limit=args.limit,
         title=args.title,
+        lift_text=not args.keep_text,
+        quality=args.quality,
+        text_model=args.text_model if args.text_model and args.text_model.exists() else None,
         progress=progress if not args.quiet else None,
     )
 
@@ -49,6 +56,8 @@ def cmd_build(args: argparse.Namespace) -> int:
         f"\n{total.pages} páginas · {total.panels} viñetas · {total.balloons} globos"
         f" · {total.splashes} splash"
     )
+    if total.lifted:
+        print(f"diálogo levantado del arte en {total.lifted} globos")
     if total.duplicates or total.dropped:
         print(f"descartados: {total.duplicates} duplicados, {total.dropped} bajo el área mínima")
     print(
@@ -99,7 +108,9 @@ def cmd_debug(args: argparse.Namespace) -> int:
         if args.limit and index >= args.limit:
             break
         image = cv2.imdecode(np.frombuffer(page.data, np.uint8), cv2.IMREAD_COLOR)
-        meta, _ = analyse_page(page, detector, f"p{index + 1:03d}", rtl=not args.ltr)
+        meta, _, _, _ = analyse_page(
+            page, detector, f"p{index + 1:03d}", rtl=not args.ltr, lift_text=False
+        )
 
         for panel in meta["panels"]:
             pts = np.array(panel["polygon"], np.int32)
@@ -128,6 +139,12 @@ def main(argv: list[str] | None = None) -> int:
     common = argparse.ArgumentParser(add_help=False)
     common.add_argument("source", type=Path, help="archivo CBZ o CBR")
     common.add_argument("--model", type=Path, default=DEFAULT_MODEL)
+    common.add_argument(
+        "--text-model",
+        type=Path,
+        default=DEFAULT_TEXT_MODEL,
+        help="detector dedicado al diálogo (vacío para usar solo el de segmentación)",
+    )
     common.add_argument("--conf", type=float, default=0.25)
     common.add_argument("--limit", type=int, default=0, help="procesar solo N páginas")
     common.add_argument("--ltr", action="store_true", help="cómic occidental")
@@ -136,6 +153,12 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("-o", "--out", type=Path, default=None)
     p.add_argument("--title", default=None)
     p.add_argument("--quiet", action="store_true")
+    p.add_argument("--quality", type=int, default=88, help="calidad WebP de las páginas")
+    p.add_argument(
+        "--keep-text",
+        action="store_true",
+        help="deja el diálogo en el arte, sin levantarlo como sprite",
+    )
     p.set_defaults(func=cmd_build)
 
     p = sub.add_parser("debug", parents=[common], help="overlays para inspección")

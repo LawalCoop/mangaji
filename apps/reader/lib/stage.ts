@@ -1,6 +1,6 @@
 import { Application, Container, Graphics, Sprite, Texture } from "pixi.js";
 import { Camera, type Transform } from "./camera";
-import type { Frame } from "./types";
+import type { Frame, Rect } from "./types";
 
 /**
  * La superficie de render. Dibuja un encuadre —un recorte de una página— aplicando la
@@ -15,17 +15,29 @@ const TEXTURE_LIMIT = 5;
 
 export class Stage {
   readonly camera = new Camera();
+  /**
+   * Cuánto se oscurece la página fuera de la viñeta activa. 0 = nada, que es el default:
+   * el foco lo da el encuadre de la cámara, no un recorte. Recortar duro rompe la ilusión
+   * de estar leyendo una página y deja bordes que cantan.
+   */
+  focusStrength = 0;
+
   #app: Application;
   #world = new Container();
   #art = new Sprite();
-  #mask: Graphics | null = null;
-  #layers = new Container();
+  #focus = new Graphics();
+  #dialogue = new Container();
+  #sprites = new Map<string, Sprite>();
+  /** Posición final de cada sprite, para animar desde un pequeño desplazamiento. */
+  #rests = new Map<string, number>();
   #textures = new Map<number, Texture>();
   #page = -1;
 
   private constructor(app: Application) {
     this.#app = app;
-    this.#world.addChild(this.#art, this.#layers);
+    // El diálogo va encima del arte pero debajo de la atenuación, para que la viñeta
+    // activa se lea y las vecinas queden parejas.
+    this.#world.addChild(this.#art, this.#dialogue, this.#focus);
     app.stage.addChild(this.#world);
   }
 
@@ -56,7 +68,7 @@ export class Stage {
 
   /**
    * Muestra un encuadre. Solo cambia la textura si cambió de página, así avanzar entre
-   * viñetas de la misma página (v2) no re-sube nada a la GPU.
+   * viñetas de la misma página no re-sube nada a la GPU.
    */
   show(frame: Frame, bitmap: ImageBitmap): void {
     if (frame.page !== this.#page) {
@@ -64,13 +76,55 @@ export class Stage {
       this.#page = frame.page;
       this.#evict(frame.page);
     }
-    this.#applyMask(frame);
+    this.#drawFocus(frame);
   }
 
   /** Aplica la cámara. Llamar después de `camera.update()`. */
   render(t: Transform = this.camera.transform): void {
     this.#world.position.set(t.x, t.y);
     this.#world.scale.set(t.scale);
+  }
+
+  /** Refresca la atenuación cuando cambia su intensidad sin cambiar de encuadre. */
+  refocus(frame: Frame): void {
+    this.#drawFocus(frame);
+  }
+
+  /**
+   * Coloca el diálogo de la viñeta, oculto. El arte base ya no lo tiene: el pipeline lo
+   * levantó y dejó el globo vacío, así que hasta que se revele el globo se ve en blanco.
+   */
+  setDialogue(entries: { id: string; bitmap: ImageBitmap; rect: Rect }[]): void {
+    this.#dialogue.removeChildren().forEach((child) => child.destroy());
+    this.#sprites.clear();
+
+    this.#rests.clear();
+    for (const entry of entries) {
+      const sprite = new Sprite(Texture.from(entry.bitmap));
+      sprite.position.set(entry.rect.x, entry.rect.y);
+      sprite.width = entry.rect.w;
+      sprite.height = entry.rect.h;
+      sprite.alpha = 0;
+      this.#dialogue.addChild(sprite);
+      this.#sprites.set(entry.id, sprite);
+      this.#rests.set(entry.id, entry.rect.y);
+    }
+  }
+
+  /** Muestra un bloque de diálogo. `progress` de 0 a 1 anima su aparición. */
+  revealDialogue(id: string, progress: number): void {
+    const sprite = this.#sprites.get(id);
+    if (!sprite) return;
+    const t = Math.min(Math.max(progress, 0), 1);
+    sprite.alpha = t;
+    // Un desplazamiento mínimo hacia arriba: da la sensación de que el globo "habla" en
+    // vez de que una imagen aparezca de la nada.
+    sprite.y = this.#rests.get(id)! + (1 - t) * 6;
+  }
+
+  /** Deja todo el diálogo visible de una vez (al saltar beats o al retroceder). */
+  showAllDialogue(): void {
+    for (const id of this.#sprites.keys()) this.revealDialogue(id, 1);
   }
 
   destroy(): void {
@@ -87,20 +141,23 @@ export class Stage {
     return tex;
   }
 
-  /** Recorta a la silueta de la viñeta. Sin polígono (v1) no hay máscara. */
-  #applyMask(frame: Frame): void {
-    if (this.#mask) {
-      this.#world.mask = null;
-      this.#mask.destroy();
-      this.#mask = null;
-    }
-    if (!frame.polygon || frame.polygon.length < 3) return;
+  /**
+   * Atenúa la página fuera de la viñeta activa, dejándola visible por debajo.
+   *
+   * Es lo contrario de recortar: la página sigue entera, y la viñeta se destaca por el
+   * encuadre. Con `focusStrength` en 0 no dibuja nada.
+   */
+  #drawFocus(frame: Frame): void {
+    const g = this.#focus;
+    g.clear();
+    if (this.focusStrength <= 0 || !frame.polygon || frame.polygon.length < 3) return;
 
-    const g = new Graphics();
-    g.poly(frame.polygon.flat()).fill(0xffffff);
-    this.#world.addChild(g);
-    this.#world.mask = g;
-    this.#mask = g;
+    const { width, height } = this.#art.texture;
+    // Margen amplio: al alejarse la cámara se ve más allá del borde de la página.
+    g.rect(-width, -height, width * 3, height * 3);
+    g.poly(frame.polygon.flat());
+    g.cut();
+    g.fill({ color: 0x000000, alpha: this.focusStrength });
   }
 
   /**
