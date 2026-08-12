@@ -104,6 +104,34 @@ def _dedupe(dets: list[Detection], threshold: float = DEDUPE_IOU) -> list[Detect
     return kept
 
 
+def _inside_polygon(
+    polygon: list[tuple[int, int]],
+    inner: tuple[float, float, float, float],
+    scale: float = 0.25,
+) -> float:
+    """Fracción de `inner` que cae dentro de la silueta del polígono.
+
+    Contra la caja de la viñeta no sirve: con bordes diagonales las cajas de dos viñetas
+    vecinas se pisan, y un globo de una puede puntuar más alto en la de al lado. Entonces
+    su diálogo aparecía mientras la cámara encuadraba la viñeta equivocada.
+    """
+    x, y, w, h = (v * scale for v in inner)
+    if w < 1 or h < 1:
+        return 0.0
+
+    pts = (np.array(polygon, np.float32) * scale).astype(np.int32)
+    x0, y0 = int(min(x, pts[:, 0].min())) - 1, int(min(y, pts[:, 1].min())) - 1
+    x1 = int(max(x + w, pts[:, 0].max())) + 1
+    y1 = int(max(y + h, pts[:, 1].max())) + 1
+
+    canvas = np.zeros((y1 - y0, x1 - x0), np.uint8)
+    cv2.fillPoly(canvas, [pts - [x0, y0]], 1)
+
+    bx, by = int(x) - x0, int(y) - y0
+    region = canvas[by : by + max(int(h), 1), bx : bx + max(int(w), 1)]
+    return float(np.count_nonzero(region)) / max(region.size, 1)
+
+
 def _contains(outer: tuple[float, float, float, float], inner: tuple[float, float, float, float]) -> float:
     """Fracción de `inner` que cae dentro de `outer`."""
     ox, oy, ow, oh = outer
@@ -246,11 +274,14 @@ def analyse_page(
     for group in groups:
         best, score = None, 0.0
         for pi, panel in enumerate(panels):
-            overlap = _contains(panel.bbox, group[0])
+            overlap = _inside_polygon(panel.polygon, group[0])
             if overlap > score:
                 best, score = pi, overlap
         if best is None:
-            best = 0
+            # Ningún polígono lo contiene: se cae a la caja para no perder el globo.
+            best = max(
+                range(len(panels)), key=lambda pi: _contains(panels[pi].bbox, group[0])
+            )
         per_panel.setdefault(best, []).append(group)
 
     out_panels = []
