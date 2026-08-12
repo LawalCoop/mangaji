@@ -24,13 +24,13 @@ DILATE_PX = 3
 #: fuera del contorno y mide el arte de al lado, lo que hace rechazar globos perfectamente
 #: seguros. Medido sobre 31 bloques de texto reales, con 3 px se levantan todos.
 RING_PX = 3
-#: Fracción mínima del anillo que tiene que ser papel para poder borrar sin dejar cicatriz.
+#: Fracción mínima de papel para dar por sentado que hay un fondo detrás del texto.
 #:
-#: Se mide la proporción de píxeles claros y no la desviación: el anillo casi siempre roza
-#: el borde entintado del globo, y esa línea negra dispara cualquier medida de dispersión
-#: aunque el fondo sea perfectamente plano. La proporción tolera ese borde y sigue
-#: distinguiendo un interior de globo de un fondo con dibujo.
-MIN_PAPER_RATIO = 0.6
+#: Es un piso bajo a propósito. La proporción de papel no distingue un globo de un dibujo:
+#: un diálogo con letra gruesa llena de tinta su propio bloque y baja al 0.37 aunque esté
+#: sobre un globo impecable. Lo que decide es `PAPER_LEVEL` sobre el percentil alto —si el
+#: fondo *es* papel—, y esto solo descarta los bloques donde no queda fondo visible.
+MIN_PAPER_RATIO = 0.22
 #: A partir de qué nivel un píxel cuenta como papel.
 PAPER_LEVEL = 195
 
@@ -63,12 +63,20 @@ def paper_ratio(pixels: np.ndarray) -> float:
 def is_safe_to_lift(inside: np.ndarray) -> bool:
     """¿Se puede borrar el texto sin que se note?
 
-    Solo si está apoyado sobre papel, y eso se ve **entre las letras**, no alrededor del
-    bloque: un globo chico sobre fondo oscuro tiene el entorno negro aunque su interior sea
-    blanco impecable, y medir por fuera lo rechazaba. Dentro de un bloque de diálogo el
-    espacio entre letras es papel; sobre el dibujo, no.
+    Solo si está apoyado sobre papel, y eso se ve **entre las letras**: un globo chico sobre
+    fondo oscuro tiene el entorno negro aunque su interior sea blanco impecable, así que
+    medir por fuera del bloque lo rechazaba.
+
+    Lo que decide es **de qué tono es el fondo**, no cuánto fondo hay. Un diálogo con letra
+    gruesa llena de tinta su propio bloque —baja al 0.37 de papel— y aun así está sobre un
+    globo blanco: pedirle una proporción alta lo dejaba sin levantar. Sobre el dibujo, en
+    cambio, ni siquiera la parte más clara llega a ser papel.
     """
-    return paper_ratio(inside) >= MIN_PAPER_RATIO
+    if inside.size == 0:
+        return False
+    level = inside.max(axis=1) if inside.ndim > 1 else inside
+    background = float(np.percentile(level, 85))
+    return background >= PAPER_LEVEL and paper_ratio(inside) >= MIN_PAPER_RATIO
 
 
 def _fill_tone(pixels: np.ndarray) -> np.ndarray:
