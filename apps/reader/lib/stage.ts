@@ -17,11 +17,11 @@ const TEXTURE_LIMIT = 5;
 /** Cuánto se atenúa el diálogo de las viñetas que no son la activa. */
 const OFF_PANEL_DIALOGUE_ALPHA = 0.5;
 /**
- * Desenfoque del diálogo que todavía no fue revelado, en píxeles de la página.
+ * Desenfoque con el que entra un bloque de diálogo, en píxeles de la página.
  *
- * El texto está desde el principio, ilegible, y lo único que pasa al revelarlo es que toma
- * foco. Así el globo nunca se ve vacío: un globo en blanco que de golpe se llena se lee
- * como un corte, y encima delata el truco de haber sacado el texto del arte.
+ * El globo se ve vacío hasta que le toca, y el texto entra apareciendo y enfocándose a la
+ * vez. Se probó dejar el texto puesto desde el principio y solo enfocarlo, pero el globo
+ * en blanco resultó preferible: se lee más limpio y marca mejor el turno de cada diálogo.
  */
 const DIALOGUE_ENTRY_BLUR = 5;
 
@@ -159,14 +159,10 @@ export class Stage {
       const sprite = new Sprite(Texture.from(entry.bitmap));
       sprite.position.set(entry.rect.x, entry.rect.y);
       sprite.setSize(entry.rect.w, entry.rect.h);
+      sprite.alpha = 0; // el globo se ve vacío hasta que le toca
       this.#dialogue.addChild(sprite);
       this.#sprites.set(entry.id, sprite);
-
-      // Nace puesto pero ilegible: revelar es enfocar, no hacer aparecer.
-      const blur = new BlurFilter({ strength: DIALOGUE_ENTRY_BLUR, quality: 2 });
-      this.#blurs.set(entry.id, blur);
-      sprite.filters = [blur];
-      sprite.alpha = 1;
+      this.#blurs.set(entry.id, new BlurFilter({ strength: DIALOGUE_ENTRY_BLUR, quality: 2 }));
     }
   }
 
@@ -249,7 +245,8 @@ export class Stage {
     const sprite = this.#sprites.get(id);
     if (!sprite) return;
     const t = Math.min(Math.max(progress, 0), 1);
-    sprite.alpha = sprite.label === "off" ? OFF_PANEL_DIALOGUE_ALPHA : 1;
+    const full = sprite.label === "off" ? OFF_PANEL_DIALOGUE_ALPHA : 1;
+    sprite.alpha = full * t;
 
     const blur = this.#blurs.get(id);
     if (!blur) return;
