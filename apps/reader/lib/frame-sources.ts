@@ -1,4 +1,4 @@
-import type { Manifest } from "@manganime/format";
+import type { Manifest } from "@mangaji/format";
 import type { Frame, FrameSource } from "./types";
 
 /**

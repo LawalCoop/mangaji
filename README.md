@@ -1,4 +1,4 @@
-# Manganime
+# Mangaji
 
 Lector de manga que en vez de mostrar la página estática **dirige** la lectura: recorta cada
 viñeta, mueve la cámara sobre ella, hace aparecer el diálogo secuenciado y suma pequeños

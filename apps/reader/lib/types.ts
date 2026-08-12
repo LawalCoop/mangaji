@@ -1,4 +1,4 @@
-import type { Beat } from "@manganime/format";
+import type { Beat } from "@mangaji/format";
 
 export type Rect = { x: number; y: number; w: number; h: number };
 

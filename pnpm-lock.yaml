@@ -10,7 +10,7 @@ importers:
 
   apps/reader:
     dependencies:
-      '@manganime/format':
+      '@mangaji/format':
         specifier: workspace:*
         version: link:../../packages/format
       '@tonejs/midi':

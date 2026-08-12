@@ -1,6 +1,6 @@
 "use client";
 
-import { MANIFEST_FILENAME, safeParseManifest, type CameraMove } from "@manganime/format";
+import { MANIFEST_FILENAME, safeParseManifest, type CameraMove } from "@mangaji/format";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { CbzSource } from "@/lib/archive";
 import { Camera, type Viewport } from "@/lib/camera";

@@ -1,4 +1,4 @@
-import type { Beat } from "@manganime/format";
+import type { Beat } from "@mangaji/format";
 import type { Frame, FrameSource } from "./types";
 
 /**
