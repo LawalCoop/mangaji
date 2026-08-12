@@ -11,10 +11,11 @@ from pathlib import Path
 import cv2
 import numpy as np
 
-from . import dialogue
+from . import dialogue, direct
 from .archive import Page, read_pages
 from .detect import Detector, Detection
 from .dialogue import Sprite
+from .direct import Look
 from .order import Box, default_tolerance, reading_order
 
 #: Descarta fragmentos espurios: una viñeta real nunca es tan chica.
@@ -166,18 +167,29 @@ def read_ms(ink_ratio: float) -> int:
     return int(min(max(lo + ink_ratio * READ_SCALE, lo), hi))
 
 
-def _beats(balloons: list[dict]) -> list[dict]:
-    """Timeline de la viñeta: entra la cámara y el diálogo aparece en orden de lectura."""
-    beats: list[dict] = [
-        {"t": 0, "ms": ENTER_MS, "cam": {"kind": "punchIn", "from": 1.06, "to": 1.0}}
-    ]
+def _beats(balloons: list[dict], look: Look | None) -> list[dict]:
+    """Timeline de la viñeta: entra la cámara, golpea el efecto y aparece el diálogo.
 
-    t = ENTER_MS
+    El efecto va pegado a la entrada, no al final: en el momento en que la cámara aterriza
+    sobre la viñeta. Meterlo después se sentiría como un adorno agregado en vez de como el
+    impacto de lo que se está viendo.
+    """
+    enter = direct.enter_ms(look) if look else ENTER_MS
+    cam = direct.camera_for(look) if look else {"kind": "punchIn", "from": 1.06, "to": 1.0}
+
+    beats: list[dict] = [{"t": 0, "ms": enter, "cam": cam}]
+
+    fx = direct.fx_for(look) if look else None
+    if fx:
+        beats.append({"t": max(enter - 80, 0), "ms": 420, "fx": fx})
+
+    t = enter
     for balloon in balloons:
         beats.append({"t": t, "ms": REVEAL_MS, "reveal": balloon["id"]})
         t += REVEAL_MS + read_ms(balloon["inkArea"])
 
-    beats.append({"t": t, "ms": 0, "hold": TAIL_MS})
+    tail = TAIL_MS if balloons else (direct.hold_ms(look) if look else TAIL_MS)
+    beats.append({"t": t, "ms": 0, "hold": tail})
     return beats
 
 
@@ -353,7 +365,10 @@ def analyse_page(
                 "bbox": [round(v, 1) for v in panel.bbox],
                 "confidence": round(panel.conf, 3),
                 "balloons": out_balloons,
-                "beats": _beats([b for b in out_balloons if b["sprite"]]),
+                "beats": _beats(
+                    [b for b in out_balloons if b["sprite"]],
+                    direct.measure(image, panel.polygon, page_area),
+                ),
             }
         )
 

@@ -19,8 +19,24 @@ export class Camera {
   /** 0 = sin movimiento (corte seco). Sube con la duración del beat. */
   #smoothing = 0;
 
+  /** Sacudida en curso: amplitud actual y cuánto le queda. */
+  #shake = { amp: 0, left: 0, total: 1 };
+
   get transform(): Transform {
-    return this.#current;
+    if (this.#shake.left <= 0) return this.#current;
+    // Decae hacia el final para que el golpe se sienta seco y se asiente solo.
+    const k = this.#shake.left / this.#shake.total;
+    const amp = this.#shake.amp * k * k;
+    return {
+      x: this.#current.x + (Math.random() * 2 - 1) * amp,
+      y: this.#current.y + (Math.random() * 2 - 1) * amp,
+      scale: this.#current.scale,
+    };
+  }
+
+  /** Sacude la cámara. `amp` en píxeles de pantalla. */
+  shake(amp: number, ms: number): void {
+    this.#shake = { amp, left: ms, total: Math.max(ms, 1) };
   }
 
   /** Encuadre que contiene `rect` completo, centrado. `zoom` > 1 lo acerca. */
@@ -69,7 +85,8 @@ export class Camera {
 
   /** Interpolación exponencial: independiente del framerate, sin overshoot. */
   update(dtMs: number): boolean {
-    if (this.#smoothing <= 0) return false;
+    if (this.#shake.left > 0) this.#shake.left -= dtMs;
+    if (this.#smoothing <= 0) return this.#shake.left > 0;
     // 5 constantes de tiempo ≈ 99 % del recorrido dentro de la duración nominal.
     const k = 1 - Math.exp((-5 * dtMs) / this.#smoothing);
     const c = this.#current;

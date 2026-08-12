@@ -1,4 +1,4 @@
-import { Application, Container, Sprite, Texture } from "pixi.js";
+import { Application, Container, Graphics, Sprite, Texture } from "pixi.js";
 import { Camera, type Transform } from "./camera";
 import type { Frame, Rect } from "./types";
 
@@ -51,10 +51,21 @@ export class Stage {
   #focusTexture: Texture | null = null;
   #focusKey = "";
 
+  /** Capa de efectos, en coordenadas de pantalla. */
+  #fx = new Container();
+  #flash = new Graphics();
+  #streaks = new Graphics();
+  #fxState: { kind: "flash" | "speedlines"; left: number; total: number; power: number } | null =
+    null;
+
   private constructor(app: Application) {
     this.#app = app;
     this.#world.addChild(this.#art, this.#dialogue);
-    app.stage.addChild(this.#world);
+    // Los efectos van fuera del mundo: se dibujan sobre la pantalla y no los arrastra la
+    // cámara, que es lo que hace que un destello se sienta como un golpe y no como algo
+    // pegado a la página.
+    this.#fx.addChild(this.#streaks, this.#flash);
+    app.stage.addChild(this.#world, this.#fx);
   }
 
   static async create(canvas: HTMLCanvasElement): Promise<Stage> {
@@ -141,6 +152,80 @@ export class Stage {
       this.#dialogue.addChild(sprite);
       this.#sprites.set(entry.id, sprite);
       this.#rests.set(entry.id, entry.rect.y);
+    }
+  }
+
+  /**
+   * Dispara un efecto sobre la pantalla.
+   *
+   * Uno por vez: el que entra reemplaza al anterior. Superponerlos es lo que convierte un
+   * golpe en un revoltijo.
+   */
+  playFx(kind: string, power: number, ms: number): void {
+    if (kind === "shake") {
+      this.camera.shake(power, ms);
+      return;
+    }
+    if (kind === "flash" || kind === "speedlines") {
+      this.#fxState = { kind, left: ms, total: Math.max(ms, 1), power };
+    }
+  }
+
+  /** Avanza los efectos en curso. Devuelve si queda alguno vivo. */
+  updateFx(dtMs: number): boolean {
+    const state = this.#fxState;
+    this.#flash.clear();
+    this.#streaks.clear();
+    if (!state) return false;
+
+    state.left -= dtMs;
+    if (state.left <= 0) {
+      this.#fxState = null;
+      return false;
+    }
+
+    const { w, h } = this.viewport;
+    const t = 1 - state.left / state.total;
+
+    if (state.kind === "flash") {
+      // Sube de golpe y baja: un destello que se enciende despacio no golpea.
+      const alpha = state.power * (t < 0.18 ? t / 0.18 : Math.pow(1 - (t - 0.18) / 0.82, 2));
+      this.#flash.rect(0, 0, w, h).fill({ color: 0xffffff, alpha });
+      return true;
+    }
+
+    this.#drawSpeedlines(w, h, state.power, t);
+    return true;
+  }
+
+  /**
+   * Líneas de velocidad radiales: la firma visual del anime para el impacto.
+   *
+   * Salen del centro hacia los bordes dejando un hueco limpio en el medio, para que el
+   * dibujo se siga leyendo. El hueco se abre a medida que el efecto avanza, y eso es lo que
+   * da la sensación de que algo estalla hacia afuera.
+   */
+  #drawSpeedlines(w: number, h: number, power: number, t: number): void {
+    const cx = w / 2;
+    const cy = h / 2;
+    const reach = Math.hypot(w, h) / 2;
+    const hole = reach * (0.28 + 0.34 * t);
+    const alpha = (t < 0.15 ? t / 0.15 : Math.pow(1 - (t - 0.15) / 0.85, 1.6)) * 0.9;
+    const count = Math.round(70 + 130 * power);
+
+    for (let i = 0; i < count; i++) {
+      // Distribución fija por índice: las mismas líneas cada cuadro, sin hervir.
+      const seed = Math.sin(i * 12.9898) * 43758.5453;
+      const jitter = seed - Math.floor(seed);
+      const angle = (i / count) * Math.PI * 2 + jitter * 0.05;
+      const start = hole * (0.85 + jitter * 0.3);
+      const end = reach * (1.05 + jitter * 0.25);
+      const width = 1 + jitter * (2 + 3 * power);
+
+      this.#streaks
+        .moveTo(cx + Math.cos(angle) * start, cy + Math.sin(angle) * start)
+        .lineTo(cx + Math.cos(angle) * end, cy + Math.sin(angle) * end)
+        .stroke({ width, color: jitter > 0.5 ? 0x000000 : 0xffffff, alpha });
     }
   }
 

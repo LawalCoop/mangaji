@@ -94,7 +94,9 @@ describe("Director", () => {
 
   it("sin diálogo pendiente, un solo avance cambia de encuadre", () => {
     // Una viñeta muda no debe exigir dos toques.
-    const d = new Director(makeSource([{ beats: [{ t: 0, ms: 400 }, { t: 400, hold: 2000 }] }, {}]));
+    const d = new Director(
+      makeSource([{ beats: [{ t: 0, ms: 400 }, { t: 400, ms: 0, hold: 2000 }] }, {}]),
+    );
     d.next();
     expect(d.index).toBe(1);
   });

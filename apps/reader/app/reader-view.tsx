@@ -198,17 +198,34 @@ export default function ReaderView() {
             void draw(ev.immediate);
             return;
           }
-          if (ev.type === "beat" && ev.beat.reveal) {
+          if (ev.type !== "beat") return;
+
+          if (ev.beat.reveal) {
             const id = ev.beat.reveal;
             if (director.reducedMotion || revealed.has(id)) stage.revealDialogue(id, 1);
             else revealing.set(id, { elapsed: 0, ms: Math.max(ev.beat.ms, 1) });
             revealed.add(id);
+          }
+
+          // Con movimiento reducido no se dispara ninguno: son todos movimiento.
+          if (ev.beat.fx && !director.reducedMotion) {
+            const fx = ev.beat.fx;
+            const power =
+              fx.kind === "shake"
+                ? fx.amp
+                : fx.kind === "flash"
+                  ? fx.strength
+                  : fx.kind === "speedlines"
+                    ? fx.density
+                    : 0;
+            stage.playFx(fx.kind, power, Math.max(ev.beat.ms, 120));
           }
         });
 
         const offTick = stage.onTick((dt) => {
           director.tick(dt);
           stage.camera.update(dt);
+          stage.updateFx(dt);
 
           for (const [id, anim] of revealing) {
             anim.elapsed += dt;
