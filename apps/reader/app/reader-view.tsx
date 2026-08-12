@@ -97,6 +97,12 @@ export default function ReaderView() {
         let shownPage = -1;
         /** Apariciones de diálogo en curso, avanzadas por el ticker. */
         const revealing = new Map<string, { elapsed: number; ms: number }>();
+        /**
+         * Diálogo ya revelado en esta página. Un globo apoyado sobre el borde pertenece a
+         * las dos viñetas que liga, y al pasar a la vecina tiene que seguir ahí en vez de
+         * volver a aparecer.
+         */
+        const revealed = new Set<string>();
         const draw = async (immediate: boolean) => {
           const mine = ++token;
           const frame = director.frame;
@@ -117,6 +123,8 @@ export default function ReaderView() {
 
             // El diálogo de esta viñeta, oculto hasta que su beat lo revele.
             revealing.clear();
+            if (!samePage) revealed.clear();
+
             const withSprite = (fresh.layers ?? []).filter((l) => l.src);
             if (withSprite.length) {
               const loaded = await Promise.all(
@@ -128,6 +136,10 @@ export default function ReaderView() {
               );
               if (mine !== token) return;
               stage.setDialogue(loaded);
+              // Lo que ya se leyó en la viñeta anterior sigue puesto, sin volver a animarse.
+              for (const layer of loaded) {
+                if (revealed.has(layer.id)) stage.revealDialogue(layer.id, 1);
+              }
             } else {
               stage.setDialogue([]);
             }
@@ -159,8 +171,10 @@ export default function ReaderView() {
             return;
           }
           if (ev.type === "beat" && ev.beat.reveal) {
-            if (director.reducedMotion) stage.revealDialogue(ev.beat.reveal, 1);
-            else revealing.set(ev.beat.reveal, { elapsed: 0, ms: Math.max(ev.beat.ms, 1) });
+            const id = ev.beat.reveal;
+            if (director.reducedMotion || revealed.has(id)) stage.revealDialogue(id, 1);
+            else revealing.set(id, { elapsed: 0, ms: Math.max(ev.beat.ms, 1) });
+            revealed.add(id);
           }
         });
 

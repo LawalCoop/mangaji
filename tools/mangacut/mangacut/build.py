@@ -21,6 +21,9 @@ from .order import Box, default_tolerance, reading_order
 MIN_PANEL_AREA_RATIO = 0.02
 #: Un globo tiene que estar dentro de una viñeta para pertenecerle.
 BALLOON_IN_PANEL_RATIO = 0.6
+#: Con esta fracción dentro de una viñeta, el globo también le pertenece. Sirve para los
+#: globos apoyados sobre el borde, que ligan dos viñetas a propósito.
+SHARED_BALLOON_RATIO = 0.25
 
 
 @dataclass(slots=True)
@@ -193,6 +196,7 @@ def analyse_page(
     """
     stats = BuildStats(pages=1)
     sprites: dict[str, bytes] = {}
+    lifted_names: set[str] = set()
 
     image = cv2.imdecode(np.frombuffer(page.data, np.uint8), cv2.IMREAD_COLOR)
     if image is None:
@@ -270,19 +274,31 @@ def analyse_page(
 
     # 3. Cada grupo va a la viñeta con la que más se solapa. Sin umbral: un globo siempre
     #    pertenece a alguna viñeta, aunque cruce un borde.
-    per_panel: dict[int, list[tuple[tuple[float, float, float, float], list[Sprite]]]] = {}
-    for group in groups:
-        best, score = None, 0.0
-        for pi, panel in enumerate(panels):
-            overlap = _inside_polygon(panel.polygon, group[0])
-            if overlap > score:
-                best, score = pi, overlap
-        if best is None:
-            # Ningún polígono lo contiene: se cae a la caja para no perder el globo.
-            best = max(
-                range(len(panels)), key=lambda pi: _contains(panels[pi].bbox, group[0])
+    per_panel: dict[int, list[tuple[str, tuple[float, float, float, float], list[Sprite]]]] = {}
+    for gi, (gbox, parts) in enumerate(groups):
+        # El id identifica al globo dentro de la página, no dentro de la viñeta: un globo
+        # puede pertenecer a dos, y así comparte sprite y el reader sabe que es el mismo.
+        gid = f"{page_id}.b{gi}"
+
+        shares = [
+            (pi, _inside_polygon(panel.polygon, gbox)) for pi, panel in enumerate(panels)
+        ]
+        best_pi, best_score = max(shares, key=lambda s: s[1])
+        if best_score <= 0:
+            best_pi = max(
+                range(len(panels)), key=lambda pi: _contains(panels[pi].bbox, gbox)
             )
-        per_panel.setdefault(best, []).append(group)
+            owners = [best_pi]
+        else:
+            # Un globo apoyado sobre el borde pertenece a las dos viñetas que liga: es un
+            # recurso de composición, y dejarlo en una sola deja a la otra con un globo
+            # vacío, que se ve peor que el error que se quería evitar.
+            owners = [pi for pi, share in shares if share >= SHARED_BALLOON_RATIO]
+            if best_pi not in owners:
+                owners.append(best_pi)
+
+        for pi in owners:
+            per_panel.setdefault(pi, []).append((gid, gbox, parts))
 
     out_panels = []
     for position, idx in enumerate(order):
@@ -291,20 +307,20 @@ def analyse_page(
 
         # Dentro de la viñeta, el diálogo también se lee de derecha a izquierda.
         inner = reading_order(
-            [Box(*bbox) for bbox, _ in mine], rtl=rtl, tol=default_tolerance(w, h)
+            [Box(*bbox) for _, bbox, _ in mine], rtl=rtl, tol=default_tolerance(w, h)
         )
 
         out_balloons = []
         for bpos, bidx in enumerate(inner):
-            bbox, parts = mine[bidx]
-            balloon_id = f"{page_id}.k{position}.b{bpos}"
+            balloon_id, bbox, parts = mine[bidx]
 
             sprite_name = ""
             ink = 0.0
             if parts:
                 merged = _merge_sprites(parts)
                 sprite_name = f"sprites/{balloon_id}.png"
-                sprites[sprite_name] = dialogue.encode(merged)
+                # Un globo compartido por dos viñetas guarda un solo sprite.
+                sprites.setdefault(sprite_name, dialogue.encode(merged))
                 bbox = (
                     float(merged.bbox[0]),
                     float(merged.bbox[1]),
@@ -312,7 +328,9 @@ def analyse_page(
                     float(merged.bbox[3]),
                 )
                 ink = merged.ink * (merged.bbox[2] * merged.bbox[3]) / page_area
-                stats.lifted += 1
+                if sprite_name not in lifted_names:
+                    lifted_names.add(sprite_name)
+                    stats.lifted += 1
 
             out_balloons.append(
                 {
