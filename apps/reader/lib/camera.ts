@@ -21,6 +21,11 @@ export class Camera {
 
   /** Sacudida en curso: amplitud actual y cuánto le queda. */
   #shake = { amp: 0, left: 0, total: 1 };
+  /**
+   * Deriva continua, por segundo. Una toma que queda perfectamente quieta se lee como una
+   * imagen; un movimiento apenas perceptible la mantiene viva mientras se lee.
+   */
+  #drift = { x: 0, y: 0, zoom: 0 };
 
   get transform(): Transform {
     if (this.#shake.left <= 0) return this.#current;
@@ -39,6 +44,14 @@ export class Camera {
     this.#shake = { amp, left: ms, total: Math.max(ms, 1) };
   }
 
+  /**
+   * Deja la cámara a la deriva. `zoom` es la fracción de escala por segundo, y `x`/`y` el
+   * desplazamiento en píxeles por segundo. Se corta sola en el próximo encuadre.
+   */
+  drift(x: number, y: number, zoom: number): void {
+    this.#drift = { x, y, zoom };
+  }
+
   /** Encuadre que contiene `rect` completo, centrado. `zoom` > 1 lo acerca. */
   static fit(rect: Rect, view: Viewport, zoom = 1): Transform {
     const scale = Math.min(view.w / rect.w, view.h / rect.h) * zoom;
@@ -54,6 +67,11 @@ export class Camera {
     this.#current = { ...t };
     this.#target = { ...t };
     this.#smoothing = 0;
+  }
+
+  /** Corta la deriva. Se llama al cambiar de encuadre. */
+  settle(): void {
+    this.#drift = { x: 0, y: 0, zoom: 0 };
   }
 
   /**
@@ -86,7 +104,20 @@ export class Camera {
   /** Interpolación exponencial: independiente del framerate, sin overshoot. */
   update(dtMs: number): boolean {
     if (this.#shake.left > 0) this.#shake.left -= dtMs;
-    if (this.#smoothing <= 0) return this.#shake.left > 0;
+
+    const drifting = this.#drift.x || this.#drift.y || this.#drift.zoom;
+    if (drifting) {
+      const s = dtMs / 1000;
+      // Se mueven current y target juntos: si no, la interpolación tiraría de vuelta.
+      const k = 1 + this.#drift.zoom * s;
+      for (const t of [this.#current, this.#target]) {
+        t.x += this.#drift.x * s;
+        t.y += this.#drift.y * s;
+        t.scale *= k;
+      }
+    }
+
+    if (this.#smoothing <= 0) return this.#shake.left > 0 || Boolean(drifting);
     // 5 constantes de tiempo ≈ 99 % del recorrido dentro de la duración nominal.
     const k = 1 - Math.exp((-5 * dtMs) / this.#smoothing);
     const c = this.#current;

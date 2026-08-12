@@ -15,6 +15,26 @@ const ASSUMED_PAGE = { w: 1600, h: 2300 };
 const FIT_MARGIN = 0.94;
 /** Duración del viaje de la cámara entre viñetas de la misma página. */
 const TRAVEL_MS = 520;
+
+/**
+ * Deriva que queda corriendo una vez que la cámara llegó, según el movimiento del beat.
+ *
+ * Una toma perfectamente quieta se lee como una imagen. Esto es apenas perceptible cuadro a
+ * cuadro —un 1,2 % de escala por segundo— pero es lo que hace que la viñeta se sienta una
+ * toma y no una foto mientras la leés.
+ */
+function driftFor(cam: CameraMove | undefined, view: Viewport): [number, number, number] {
+  switch (cam?.kind) {
+    case "panH":
+      return [view.w * 0.012, 0, 0];
+    case "tiltV":
+      return [0, -view.h * 0.012, 0];
+    case "pullBack":
+      return [0, 0, -0.008];
+    default:
+      return [0, 0, 0.012];
+  }
+}
 /**
  * Cuánto se destaca la viñeta activa sobre el resto de la página. Se cicla con `o`.
  * El default es suave a propósito: lo justo para dar protagonismo sin que se note el truco.
@@ -172,7 +192,13 @@ export default function ReaderView() {
             }
             for (const id of revealed) stage.revealDialogue(id, 1);
 
-            const { from, to } = framing(fresh.beats[0]?.cam, fresh.rect, stage.viewport);
+            const cam = fresh.beats[0]?.cam;
+            const { from, to } = framing(cam, fresh.rect, stage.viewport);
+
+            stage.camera.settle();
+            if (!director.reducedMotion) {
+              stage.camera.drift(...driftFor(cam, stage.viewport));
+            }
 
             if (immediate || director.reducedMotion) {
               stage.camera.cut(to);

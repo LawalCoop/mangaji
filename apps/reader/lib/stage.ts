@@ -48,6 +48,8 @@ export class Stage {
   #sprites = new Map<string, Sprite>();
   /** Desenfoque de entrada de cada bloque de diálogo. */
   #blurs = new Map<string, BlurFilter>();
+  /** Medida original de cada sprite, para animar sin acumular error. */
+  #rects = new Map<string, Rect>();
   #textures = new Map<number, Texture>();
   #bitmaps = new Map<number, ImageBitmap>();
   #page = -1;
@@ -63,6 +65,8 @@ export class Stage {
   #fx = new Container();
   #flash = new Graphics();
   #streaks = new Graphics();
+  /** Invierte lo que hay debajo: el impact frame del anime. */
+  #invert = new Graphics();
   #fxState: { kind: "flash" | "speedlines"; left: number; total: number; power: number } | null =
     null;
 
@@ -72,7 +76,9 @@ export class Stage {
     // Los efectos van fuera del mundo: se dibujan sobre la pantalla y no los arrastra la
     // cámara, que es lo que hace que un destello se sienta como un golpe y no como algo
     // pegado a la página.
-    this.#fx.addChild(this.#streaks, this.#flash);
+    this.#invert.blendMode = "difference";
+    this.#invert.visible = false;
+    this.#fx.addChild(this.#streaks, this.#invert, this.#flash);
     app.stage.addChild(this.#world, this.#fx);
   }
 
@@ -155,6 +161,7 @@ export class Stage {
     this.#sprites.clear();
 
     this.#blurs.clear();
+    this.#rects.clear();
     for (const entry of entries) {
       const sprite = new Sprite(Texture.from(entry.bitmap));
       sprite.position.set(entry.rect.x, entry.rect.y);
@@ -162,6 +169,7 @@ export class Stage {
       sprite.alpha = 0; // el globo se ve vacío hasta que le toca
       this.#dialogue.addChild(sprite);
       this.#sprites.set(entry.id, sprite);
+      this.#rects.set(entry.id, entry.rect);
       this.#blurs.set(entry.id, new BlurFilter({ strength: DIALOGUE_ENTRY_BLUR, quality: 2 }));
     }
   }
@@ -187,7 +195,10 @@ export class Stage {
     const state = this.#fxState;
     this.#flash.clear();
     this.#streaks.clear();
-    if (!state) return false;
+    if (!state) {
+      this.#invert.visible = false;
+      return false;
+    }
 
     state.left -= dtMs;
     if (state.left <= 0) {
@@ -199,8 +210,16 @@ export class Stage {
     const t = 1 - state.left / state.total;
 
     if (state.kind === "flash") {
-      // Sube de golpe y baja: un destello que se enciende despacio no golpea.
-      const alpha = state.power * (t < 0.18 ? t / 0.18 : Math.pow(1 - (t - 0.18) / 0.82, 2));
+      // Arranca invirtiendo la imagen unos pocos cuadros —el impact frame del anime— y
+      // recién después destella. Invertir marca el golpe mucho más que iluminar.
+      if (t < 0.12) {
+        this.#invert.visible = true;
+        this.#invert.clear().rect(0, 0, w, h).fill({ color: 0xffffff, alpha: 1 });
+        return true;
+      }
+      this.#invert.visible = false;
+      const u = (t - 0.12) / 0.88;
+      const alpha = state.power * (u < 0.12 ? u / 0.12 : Math.pow(1 - (u - 0.12) / 0.88, 2));
       this.#flash.rect(0, 0, w, h).fill({ color: 0xffffff, alpha });
       return true;
     }
@@ -247,6 +266,18 @@ export class Stage {
     const t = Math.min(Math.max(progress, 0), 1);
     const full = sprite.label === "off" ? OFF_PANEL_DIALOGUE_ALPHA : 1;
     sprite.alpha = full * t;
+
+    // Entra apenas más grande y se asienta: le da peso, como si el globo se plantara.
+    // Se calcula siempre desde la medida original, para que no se acumule cuadro a cuadro.
+    const rect = this.#rects.get(id);
+    if (rect) {
+      const bounce = 1 + 0.07 * Math.sin(Math.PI * t) * (1 - t);
+      sprite.setSize(rect.w * bounce, rect.h * bounce);
+      sprite.position.set(
+        rect.x - (rect.w * (bounce - 1)) / 2,
+        rect.y - (rect.h * (bounce - 1)) / 2,
+      );
+    }
 
     const blur = this.#blurs.get(id);
     if (!blur) return;
