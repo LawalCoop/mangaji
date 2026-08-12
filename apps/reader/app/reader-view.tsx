@@ -7,7 +7,7 @@ import { Camera, type Viewport } from "@/lib/camera";
 import { Director } from "@/lib/director";
 import { PageFrameSource, PanelFrameSource } from "@/lib/frame-sources";
 import { Stage } from "@/lib/stage";
-import type { Rect } from "@/lib/types";
+import type { Frame, Rect } from "@/lib/types";
 
 /** Hasta que la página se decodifica no se sabe su tamaño; esto evita un encuadre en cero. */
 const ASSUMED_PAGE = { w: 1600, h: 2300 };
@@ -19,27 +19,45 @@ const TRAVEL_MS = 520;
 /** Tope acumulado de la deriva: pasado esto se planta, para no salirse del encuadre. */
 const DRIFT_LIMIT = { zoom: 0.035, pan: 0.05 };
 
+/** Número estable entre 0 y 1 a partir de un texto. */
+function hashOf(text: string): number {
+  let h = 2166136261;
+  for (let i = 0; i < text.length; i++) {
+    h ^= text.charCodeAt(i);
+    h = Math.imul(h, 16777619);
+  }
+  return ((h >>> 0) % 10000) / 10000;
+}
+
 /**
- * Deriva que queda corriendo una vez que la cámara llegó, según el movimiento del beat.
+ * Deriva que queda corriendo una vez que la cámara llegó.
  *
  * Una toma perfectamente quieta se lee como una imagen. Es deliberadamente lentísima —medio
- * punto de escala por segundo— y con tope: alcanza para que la viñeta respire, sin que
- * termine desplazándose fuera de su propio encuadre si te quedás leyendo.
+ * punto de escala por segundo— y con tope, para que la viñeta respire sin salirse de su
+ * propio encuadre si te quedás leyendo.
+ *
+ * La dirección sale del identificador de la viñeta: cada una deriva distinto, pero siempre
+ * igual a sí misma. Que todas se movieran para el mismo lado delataba el mecanismo.
  */
 function driftFor(
-  cam: CameraMove | undefined,
+  frame: Frame,
   view: Viewport,
 ): [number, number, number, { x: number; y: number; zoom: number }] {
   const stop = { x: view.w * DRIFT_LIMIT.pan, y: view.h * DRIFT_LIMIT.pan, zoom: DRIFT_LIMIT.zoom };
-  switch (cam?.kind) {
+  const seed = hashOf(frame.id);
+  const angle = seed * Math.PI * 2;
+  // Un tercio de las viñetas se aleja en vez de acercarse; el resto acerca.
+  const zoom = (seed > 0.66 ? -0.004 : 0.005) * (0.7 + seed * 0.6);
+  const speed = view.w * 0.004;
+
+  switch (frame.beats[0]?.cam?.kind) {
     case "panH":
-      return [view.w * 0.005, 0, 0, stop];
+      // Sigue el sentido de lectura, pero cada viñeta con su propia inclinación.
+      return [-speed, (seed - 0.5) * speed * 0.5, 0, stop];
     case "tiltV":
-      return [0, -view.h * 0.005, 0, stop];
-    case "pullBack":
-      return [0, 0, -0.004, stop];
+      return [(seed - 0.5) * speed * 0.5, -speed, 0, stop];
     default:
-      return [0, 0, 0.005, stop];
+      return [Math.cos(angle) * speed * 0.45, Math.sin(angle) * speed * 0.45, zoom, stop];
   }
 }
 /**
@@ -204,7 +222,7 @@ export default function ReaderView() {
 
             stage.camera.settle();
             if (!director.reducedMotion) {
-              stage.camera.drift(...driftFor(cam, stage.viewport));
+              stage.camera.drift(...driftFor(fresh, stage.viewport));
             }
 
             if (immediate || director.reducedMotion) {
