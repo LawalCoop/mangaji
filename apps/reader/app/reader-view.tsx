@@ -19,6 +19,14 @@ const ASSUMED_PAGE = { w: 1600, h: 2300 };
 const FIT_MARGIN = 0.94;
 /** Duración del viaje de la cámara entre viñetas de la misma página. */
 const TRAVEL_MS = 520;
+/**
+ * Apertura: la primera página no aparece, se descubre.
+ *
+ * La cámara arranca encima del borde superior derecho —donde empieza la lectura del manga—
+ * y se abre hasta la portada completa mientras la pantalla se despeja. Es el momento en que
+ * el lector tiene que entender de qué se trata, así que se toma su tiempo.
+ */
+const OPENING = { ms: 2600, zoom: 2.3, curtain: 1100 };
 
 // La cámara se detiene al llegar a la viñeta. Se probó dejarla derivando muy despacio para
 // que la toma no quedara del todo quieta, y en marcha distrae más de lo que aporta: el
@@ -113,6 +121,8 @@ export default function ReaderView() {
         // llegan tarde cuando el lector ya avanzó.
         let token = 0;
         let shownPage = -1;
+        /** La apertura ocurre una sola vez, al abrir el archivo. */
+        let opening = true;
         /** Apariciones de diálogo en curso, avanzadas por el ticker. */
         const revealing = new Map<string, { elapsed: number; ms: number }>();
         /**
@@ -195,7 +205,20 @@ export default function ReaderView() {
             const cam = fresh.beats[0]?.cam;
             const { from, to } = framing(cam, fresh.rect, stage.viewport);
 
-            if (immediate || director.reducedMotion) {
+            if (immediate && !director.reducedMotion && opening) {
+              opening = false;
+              // Plano cerrado sobre el ángulo por donde se empieza a leer, y desde ahí se
+              // abre a la página entera.
+              const close = Camera.fit(fresh.rect, stage.viewport, FIT_MARGIN * OPENING.zoom);
+              stage.camera.cut({
+                scale: close.scale,
+                x: close.x - stage.viewport.w * 0.3,
+                y: close.y + stage.viewport.h * 0.28,
+              });
+              stage.camera.glide(to, OPENING.ms * moodRef.current.pace);
+              stage.openCurtain(OPENING.curtain);
+            } else if (immediate || director.reducedMotion) {
+              opening = false;
               stage.camera.cut(to);
             } else if (samePage) {
               // Dentro de la página la cámara viaja: es lo que da la sensación de estar

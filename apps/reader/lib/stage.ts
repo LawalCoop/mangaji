@@ -103,6 +103,9 @@ export class Stage {
   #streaks = new Graphics();
   /** Invierte lo que hay debajo: el impact frame del anime. */
   #invert = new Graphics();
+  /** Telón de apertura: cubre la pantalla y se abre sobre la primera página. */
+  #curtain = new Graphics();
+  #curtainState: { left: number; total: number; color: number } | null = null;
   #fxState: { kind: "flash" | "speedlines"; left: number; total: number; power: number } | null =
     null;
 
@@ -114,7 +117,7 @@ export class Stage {
     // pegado a la página.
     this.#invert.blendMode = "difference";
     this.#invert.visible = false;
-    this.#fx.addChild(this.#streaks, this.#invert, this.#flash);
+    this.#fx.addChild(this.#streaks, this.#invert, this.#flash, this.#curtain);
     app.stage.addChild(this.#world, this.#fx);
   }
 
@@ -229,14 +232,40 @@ export class Stage {
     }
   }
 
+  /**
+   * Cubre la pantalla y la despeja en `ms`.
+   *
+   * Se usa al abrir: la primera página no aparece de golpe, se descubre mientras la cámara
+   * se abre sobre ella.
+   */
+  openCurtain(ms: number, color = 0x101014): void {
+    this.#curtainState = { left: ms, total: Math.max(ms, 1), color };
+  }
+
   /** Avanza los efectos en curso. Devuelve si queda alguno vivo. */
   updateFx(dtMs: number): boolean {
-    const state = this.#fxState;
     this.#flash.clear();
     this.#streaks.clear();
+    this.#curtain.clear();
+
+    // El telón corre por su cuenta: se abre aunque no haya ningún efecto en curso.
+    const curtain = this.#curtainState;
+    if (curtain) {
+      curtain.left -= dtMs;
+      if (curtain.left <= 0) {
+        this.#curtainState = null;
+      } else {
+        const { w, h } = this.viewport;
+        // Se despeja al principio despacio y al final rápido: deja ver la portada entrando.
+        const alpha = Math.pow(curtain.left / curtain.total, 0.7);
+        this.#curtain.rect(0, 0, w, h).fill({ color: curtain.color, alpha });
+      }
+    }
+
+    const state = this.#fxState;
     if (!state) {
       this.#invert.visible = false;
-      return false;
+      return this.#curtainState !== null;
     }
 
     state.left -= dtMs;
