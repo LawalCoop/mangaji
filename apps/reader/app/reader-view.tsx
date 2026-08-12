@@ -15,8 +15,15 @@ const ASSUMED_PAGE = { w: 1600, h: 2300 };
 const FIT_MARGIN = 0.94;
 /** Duración del viaje de la cámara entre viñetas de la misma página. */
 const TRAVEL_MS = 520;
-/** Cuánto se oscurece el resto de la página. Se cicla con la tecla `o`. */
-const FOCUS_LEVELS = [0, 0.35, 0.6];
+/**
+ * Cuánto se destaca la viñeta activa sobre el resto de la página. Se cicla con `o`.
+ * El default es suave a propósito: lo justo para dar protagonismo sin que se note el truco.
+ */
+const FOCUS_LEVELS = [
+  { shade: 0.22, blur: 5 },
+  { shade: 0.4, blur: 10 },
+  { shade: 0, blur: 0 },
+];
 
 /** Traduce un movimiento de cámara del manifest a un par de encuadres concretos. */
 function framing(cam: CameraMove | undefined, rect: Rect, view: Viewport) {
@@ -123,16 +130,27 @@ export default function ReaderView() {
             // cambiara y después se esperara a los sprites, el ticker seguiría dibujando
             // durante esa espera: se vería la página nueva con el encuadre de la anterior,
             // que es un parpadeo en cada cambio de página.
+            // El diálogo se carga por página entera, no por viñeta: lo que ya se leyó
+            // tiene que seguir en su globo cuando la cámara viaja a la viñeta siguiente.
+            // Un globo apoyado sobre el borde figura en las dos viñetas que liga.
+            const pageLayers = [
+              ...new Map(
+                director
+                  .framesOfPage(frame.page)
+                  .flatMap((f) => f.layers ?? [])
+                  .filter((l) => l.src)
+                  .map((l) => [l.id, l] as const),
+              ).values(),
+            ];
+
             const [bitmap, dialogue] = await Promise.all([
               source.bitmap(frame.page),
               Promise.all(
-                (frame.layers ?? [])
-                  .filter((l) => l.src)
-                  .map(async (layer) => ({
-                    id: layer.id,
-                    rect: layer.rect,
-                    bitmap: await source.bitmapOf(layer.src),
-                  })),
+                pageLayers.map(async (layer) => ({
+                  id: layer.id,
+                  rect: layer.rect,
+                  bitmap: await source.bitmapOf(layer.src),
+                })),
               ),
             ]);
             if (mine !== token) return;
@@ -146,12 +164,13 @@ export default function ReaderView() {
             stage.show(fresh, bitmap);
 
             revealing.clear();
-            if (!samePage) revealed.clear();
-            stage.setDialogue(dialogue);
-            // Lo que ya se leyó en la viñeta anterior sigue puesto, sin volver a animarse.
-            for (const layer of dialogue) {
-              if (revealed.has(layer.id)) stage.revealDialogue(layer.id, 1);
+            if (!samePage) {
+              // Los sprites se rehacen solo al cambiar de hoja; dentro de la misma página
+              // se dejan como están, y así el diálogo ya leído conserva su lugar.
+              revealed.clear();
+              stage.setDialogue(dialogue);
             }
+            for (const id of revealed) stage.revealDialogue(id, 1);
 
             const { from, to } = framing(fresh.beats[0]?.cam, fresh.rect, stage.viewport);
 
@@ -257,9 +276,13 @@ export default function ReaderView() {
           );
           break;
         case "o": {
-          // Atenuar el entorno da foco sin recortar: la página sigue entera debajo.
-          const next = FOCUS_LEVELS[(FOCUS_LEVELS.indexOf(eng.stage.focusStrength) + 1) % FOCUS_LEVELS.length];
-          eng.stage.focusStrength = next;
+          // Cicla cuánto se destaca la viñeta sobre el resto de la página.
+          const i = FOCUS_LEVELS.findIndex(
+            (l) => l.shade === eng.stage.focusStrength && l.blur === eng.stage.focusBlur,
+          );
+          const next = FOCUS_LEVELS[(i + 1) % FOCUS_LEVELS.length];
+          eng.stage.focusStrength = next.shade;
+          eng.stage.focusBlur = next.blur;
           eng.stage.refocus(eng.director.frame);
           eng.stage.render();
           break;

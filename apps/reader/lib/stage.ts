@@ -1,4 +1,4 @@
-import { Application, Container, Graphics, Sprite, Texture } from "pixi.js";
+import { Application, BlurFilter, Container, Graphics, Sprite, Texture } from "pixi.js";
 import { Camera, type Transform } from "./camera";
 import type { Frame, Rect } from "./types";
 
@@ -16,28 +16,36 @@ const TEXTURE_LIMIT = 5;
 export class Stage {
   readonly camera = new Camera();
   /**
-   * Cuánto se oscurece la página fuera de la viñeta activa. 0 = nada, que es el default:
-   * el foco lo da el encuadre de la cámara, no un recorte. Recortar duro rompe la ilusión
-   * de estar leyendo una página y deja bordes que cantan.
+   * Cuánto se atenúa la página fuera de la viñeta activa: se difumina y se oscurece un
+   * poco, sin recortar. La página sigue entera y visible, pero la viñeta que se está
+   * leyendo toma protagonismo. En 0 no se dibuja nada de esto.
    */
-  focusStrength = 0;
+  focusStrength = 0.22;
+  /** Radio del desenfoque del entorno, en píxeles de pantalla. */
+  focusBlur = 5;
 
   #app: Application;
   #world = new Container();
+  /** La página entera, difuminada: es lo que se ve alrededor de la viñeta activa. */
+  #back = new Sprite();
+  #shade = new Graphics();
+  /** La misma página, nítida, recortada a la viñeta activa. */
   #art = new Sprite();
-  #focus = new Graphics();
+  #artMask: Graphics | null = null;
   #dialogue = new Container();
   #sprites = new Map<string, Sprite>();
   /** Posición final de cada sprite, para animar desde un pequeño desplazamiento. */
   #rests = new Map<string, number>();
   #textures = new Map<number, Texture>();
   #page = -1;
+  #blur = new BlurFilter({ strength: 5, quality: 3 });
 
   private constructor(app: Application) {
     this.#app = app;
-    // El diálogo va encima del arte pero debajo de la atenuación, para que la viñeta
-    // activa se lea y las vecinas queden parejas.
-    this.#world.addChild(this.#art, this.#dialogue, this.#focus);
+    this.#back.filters = [this.#blur];
+    // De atrás hacia adelante: la página difuminada, un velo que la apaga, la viñeta
+    // nítida recortada encima, y el diálogo sobre todo.
+    this.#world.addChild(this.#back, this.#shade, this.#art, this.#dialogue);
     app.stage.addChild(this.#world);
   }
 
@@ -72,7 +80,9 @@ export class Stage {
    */
   show(frame: Frame, bitmap: ImageBitmap): void {
     if (frame.page !== this.#page) {
-      this.#art.texture = this.#texture(frame.page, bitmap);
+      const texture = this.#texture(frame.page, bitmap);
+      this.#art.texture = texture;
+      this.#back.texture = texture;
       this.#page = frame.page;
       this.#evict(frame.page);
     }
@@ -142,22 +152,37 @@ export class Stage {
   }
 
   /**
-   * Atenúa la página fuera de la viñeta activa, dejándola visible por debajo.
+   * Da protagonismo a la viñeta activa sin recortarla: el resto de la página queda
+   * difuminado y algo apagado, pero visible. Es lo contrario de enmascarar — la hoja
+   * sigue entera, y lo que cambia es dónde está el foco.
    *
-   * Es lo contrario de recortar: la página sigue entera, y la viñeta se destaca por el
-   * encuadre. Con `focusStrength` en 0 no dibuja nada.
+   * Se logra con dos copias de la misma página: la de atrás lleva el desenfoque, y encima
+   * va la nítida recortada a la silueta de la viñeta.
    */
   #drawFocus(frame: Frame): void {
-    const g = this.#focus;
-    g.clear();
-    if (this.focusStrength <= 0 || !frame.polygon || frame.polygon.length < 3) return;
+    if (this.#artMask) {
+      this.#art.mask = null;
+      this.#artMask.destroy();
+      this.#artMask = null;
+    }
+    this.#shade.clear();
+
+    const focused = this.focusStrength > 0 && frame.polygon && frame.polygon.length >= 3;
+    this.#back.visible = Boolean(focused);
+    if (!focused) return;
+
+    this.#blur.strength = this.focusBlur;
 
     const { width, height } = this.#art.texture;
-    // Margen amplio: al alejarse la cámara se ve más allá del borde de la página.
-    g.rect(-width, -height, width * 3, height * 3);
-    g.poly(frame.polygon.flat());
-    g.cut();
-    g.fill({ color: 0x000000, alpha: this.focusStrength });
+    // Margen amplio: al alejarse, la cámara ve más allá del borde de la página.
+    this.#shade
+      .rect(-width, -height, width * 3, height * 3)
+      .fill({ color: 0x000000, alpha: this.focusStrength });
+
+    const mask = new Graphics().poly(frame.polygon!.flat()).fill(0xffffff);
+    this.#world.addChild(mask);
+    this.#art.mask = mask;
+    this.#artMask = mask;
   }
 
   /**

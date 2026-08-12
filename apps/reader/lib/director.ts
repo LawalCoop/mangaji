@@ -70,6 +70,22 @@ export class Director {
     return i >= 0 && i < this.#source.length ? this.#source.at(i) : null;
   }
 
+  /**
+   * Todos los encuadres de una página, en orden.
+   *
+   * El diálogo se pone por página y no por viñeta: lo que ya se leyó tiene que seguir en
+   * su globo cuando la cámara viaja a la viñeta siguiente.
+   */
+  framesOfPage(page: number): Frame[] {
+    const out: Frame[] = [];
+    for (let i = 0; i < this.#source.length; i++) {
+      const frame = this.#source.at(i);
+      if (frame.page === page) out.push(frame);
+      else if (out.length) break; // los de una página son contiguos
+    }
+    return out;
+  }
+
   on(fn: Listener): () => void {
     this.#listeners.add(fn);
     return () => this.#listeners.delete(fn);
