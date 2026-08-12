@@ -272,17 +272,18 @@ class Detector:
             if not polygon:
                 continue
 
+            # La caja se deriva de la silueta y no de la salida cruda del modelo: esa se
+            # sale de la hoja —llega a tener más ancho que la página, y coordenadas
+            # negativas—, y entonces la cámara termina encuadrando un rectángulo que no
+            # es la viñeta.
+            bx, by, bw, bh = cv2.boundingRect(np.array(polygon, np.int32))
+
             out.append(
                 Detection(
                     cls=name,
                     conf=conf,
                     # float() explícito: numpy devolvería float32, que json no serializa.
-                    bbox=(
-                        float(x1 / scale),
-                        float(y1 / scale),
-                        float((x2 - x1) / scale),
-                        float((y2 - y1) / scale),
-                    ),
+                    bbox=(float(bx), float(by), float(bw), float(bh)),
                     polygon=polygon,
                 )
             )

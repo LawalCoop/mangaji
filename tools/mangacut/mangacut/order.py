@@ -151,17 +151,69 @@ def reading_order(
                 first, second = (right, left) if rtl else (left, right)
                 return walk([idx[i] for i in first]) + walk([idx[i] for i in second])
 
-        # Paso 3: hoja inseparable. El estimador original les da un único orden; acá hace
-        # falta uno total, así que se desempata por la esquina donde empieza la lectura.
-        return sorted(
-            idx,
-            key=lambda i: (
-                min(p[1] for p in shapes[i]),
-                -max(p[0] for p in shapes[i]) if rtl else min(p[0] for p in shapes[i]),
-            ),
-        )
+        # Paso 3: hoja inseparable. El estimador original les asigna un único orden; acá
+        # hace falta uno total, y ordenar por altura no sirve: dos viñetas de la misma fila
+        # que ningún pivote separó se leen por columna, y una diferencia de pocos píxeles
+        # en el borde superior invertiría la fila entera.
+        return _untangle(idx, shapes, rtl=rtl)
 
     return walk(list(range(len(boxes))))
+
+
+#: Cuánto tienen que compartir dos viñetas en vertical para considerarse de la misma fila.
+SAME_BAND_RATIO = 0.5
+
+
+def _extent(poly: Polygon, axis: int) -> tuple[float, float]:
+    values = [p[axis] for p in poly]
+    return min(values), max(values)
+
+
+def _untangle(idx: list[int], shapes: list[Polygon], *, rtl: bool) -> list[int]:
+    """Ordena un grupo que ningún pivote pudo separar.
+
+    Si dos viñetas comparten franja vertical, manda la columna —derecha primero en manga—;
+    si no la comparten, manda la altura. Las precedencias se resuelven con un orden
+    topológico, que las respeta de a pares sin exigir que la comparación sea transitiva.
+    """
+    n = len(idx)
+    spans = [(_extent(shapes[i], 0), _extent(shapes[i], 1)) for i in idx]
+
+    after: list[set[int]] = [set() for _ in range(n)]
+    indegree = [0] * n
+    for i in range(n):
+        (ax0, ax1), (ay0, ay1) = spans[i]
+        for j in range(i + 1, n):
+            (bx0, bx1), (by0, by1) = spans[j]
+            overlap = min(ay1, by1) - max(ay0, by0)
+            same_row = overlap > SAME_BAND_RATIO * min(ay1 - ay0, by1 - by0)
+            if same_row:
+                first, second = (i, j) if ((ax1 > bx1) == rtl) else (j, i)
+            else:
+                first, second = (i, j) if ay0 <= by0 else (j, i)
+            if second not in after[first]:
+                after[first].add(second)
+                indegree[second] += 1
+
+    def rank(k: int) -> tuple[float, float]:
+        (x0, x1), (y0, _) = spans[k]
+        return (y0, -x1 if rtl else x0)
+
+    ready = sorted((k for k in range(n) if indegree[k] == 0), key=rank)
+    out: list[int] = []
+    while ready:
+        k = ready.pop(0)
+        out.append(idx[k])
+        for nxt in sorted(after[k], key=rank):
+            indegree[nxt] -= 1
+            if indegree[nxt] == 0:
+                ready.append(nxt)
+        ready.sort(key=rank)
+
+    if len(out) < n:  # ciclo entre precedencias: se completa por cercanía al origen
+        done = set(out)
+        out.extend(idx[k] for k in sorted(range(n), key=rank) if idx[k] not in done)
+    return out
 
 
 def default_tolerance(page_w: float, page_h: float) -> float:
