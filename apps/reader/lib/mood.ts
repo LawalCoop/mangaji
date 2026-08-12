@@ -29,6 +29,10 @@ export type Mood = {
     weight: number;
     /** Pulso percusivo, de 0 a 1. */
     drive: number;
+    /** Timbre: cuanto más rica la onda, más áspero suena. */
+    wave: OscillatorType;
+    /** Apertura del filtro en Hz. Bajo = velado y lejano; alto = presente y filoso. */
+    bright: number;
   };
 };
 
@@ -40,7 +44,16 @@ export const MOODS: Record<MoodId, Mood> = {
     pace: 1.5,
     focus: { shade: 0.06, blur: 2 },
     // Pentatónica mayor: no tiene semitonos, así que ningún acorde suena a tensión.
-    music: { scale: [0, 2, 4, 7, 9], root: 174.61, step: 6.5, weight: 0.5, drive: 0 },
+    // Seno y filtro cerrado: casi sin armónicos, suena lejano.
+    music: {
+      scale: [0, 2, 4, 7, 9],
+      root: 174.61,
+      step: 6.5,
+      weight: 0.5,
+      drive: 0,
+      wave: "sine",
+      bright: 700,
+    },
   },
   chill: {
     id: "chill",
@@ -48,7 +61,15 @@ export const MOODS: Record<MoodId, Mood> = {
     fx: 0.55,
     pace: 1.15,
     focus: { shade: 0.11, blur: 3 },
-    music: { scale: [0, 2, 3, 7, 9], root: 164.81, step: 4.5, weight: 0.7, drive: 0.1 },
+    music: {
+      scale: [0, 2, 3, 7, 9],
+      root: 164.81,
+      step: 4.5,
+      weight: 0.7,
+      drive: 0.1,
+      wave: "triangle",
+      bright: 1200,
+    },
   },
   tense: {
     id: "tense",
@@ -57,7 +78,15 @@ export const MOODS: Record<MoodId, Mood> = {
     pace: 0.9,
     focus: { shade: 0.18, blur: 5 },
     // Menor con segunda menor: el semitono de arriba es lo que pone el nervio.
-    music: { scale: [0, 1, 3, 7, 8], root: 146.83, step: 3.2, weight: 0.9, drive: 0.35 },
+    music: {
+      scale: [0, 1, 3, 7, 8],
+      root: 146.83,
+      step: 3.2,
+      weight: 0.9,
+      drive: 0.35,
+      wave: "sawtooth",
+      bright: 900,
+    },
   },
   war: {
     id: "war",
@@ -65,7 +94,16 @@ export const MOODS: Record<MoodId, Mood> = {
     fx: 1.7,
     pace: 0.62,
     focus: { shade: 0.26, blur: 7 },
-    music: { scale: [0, 1, 5, 6, 7], root: 110, step: 2.1, weight: 1, drive: 0.85 },
+    // Sierra abierta y una octava más abajo: áspero y presente.
+    music: {
+      scale: [0, 1, 5, 6, 7],
+      root: 110,
+      step: 2.1,
+      weight: 1,
+      drive: 0.85,
+      wave: "sawtooth",
+      bright: 2200,
+    },
   },
 };
 

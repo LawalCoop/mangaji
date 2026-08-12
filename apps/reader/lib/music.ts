@@ -73,8 +73,19 @@ export class Music {
     window.setTimeout(() => void ctx.close(), 1000);
   }
 
+  /**
+   * Cambia de paleta y suena el cambio enseguida.
+   *
+   * Sin reprogramar, el acorde siguiente ya estaba agendado con el tiempo del mood anterior
+   * y el cambio tardaba en oírse —hasta seis segundos y medio viniendo de zen—, que se
+   * siente como que el control no hizo nada.
+   */
   setMood(mood: Mood): void {
     this.#mood = mood;
+    if (!this.#ctx) return;
+    if (this.#timer) window.clearTimeout(this.#timer);
+    this.#timer = null;
+    this.#tick();
   }
 
   /** Sube la intensidad. Se llama cuando una viñeta trae un efecto fuerte. */
@@ -87,7 +98,7 @@ export class Music {
     const master = this.#master;
     if (!ctx || !master) return;
 
-    const { scale, root, step, weight, drive } = this.#mood.music;
+    const { scale, root, step, weight, drive, wave, bright } = this.#mood.music;
     const t = ctx.currentTime + 0.05;
     const heat = this.#heat;
 
@@ -95,10 +106,12 @@ export class Music {
     const degree = scale[(this.#step * 2 + (this.#step % 3)) % scale.length];
     const freq = root * Math.pow(2, degree / 12);
 
-    this.#pad(t, freq * 0.5, step * 1.8, 0.16 * weight);
-    this.#pad(t + step * 0.15, freq, step * 1.2, 0.1);
+    this.#pad(t, freq * 0.5, step * 1.8, 0.16 * weight, wave, bright);
+    this.#pad(t + step * 0.15, freq, step * 1.2, 0.1, wave, bright);
     // La quinta entra sola cuando hay intensidad: engorda sin ensuciar.
-    if (heat > 0.25) this.#pad(t + step * 0.3, freq * 1.5, step * 0.8, 0.07 * heat);
+    if (heat > 0.25) {
+      this.#pad(t + step * 0.3, freq * 1.5, step * 0.8, 0.07 * heat, wave, bright);
+    }
 
     if (drive > 0 && this.#step % 2 === 0) this.#pulse(t, drive * (0.5 + heat * 0.5));
 
@@ -108,13 +121,20 @@ export class Music {
   };
 
   /** Nota sostenida con ataque y caída largos. */
-  #pad(at: number, freq: number, dur: number, level: number): void {
+  #pad(
+    at: number,
+    freq: number,
+    dur: number,
+    level: number,
+    wave: OscillatorType,
+    bright: number,
+  ): void {
     const ctx = this.#ctx;
     const master = this.#master;
     if (!ctx || !master) return;
 
     const osc = ctx.createOscillator();
-    osc.type = "triangle";
+    osc.type = wave;
     osc.frequency.value = freq;
     // Un segundo oscilador apenas desafinado: es lo que da cuerpo al sonido.
     const osc2 = ctx.createOscillator();
@@ -123,7 +143,8 @@ export class Music {
 
     const filter = ctx.createBiquadFilter();
     filter.type = "lowpass";
-    filter.frequency.setValueAtTime(400 + 2600 * this.#heat, at);
+    // El brillo lo fija el mood; la intensidad de la lectura lo abre un poco más.
+    filter.frequency.setValueAtTime(bright + 2200 * this.#heat, at);
     filter.Q.value = 0.7;
 
     const gain = ctx.createGain();
