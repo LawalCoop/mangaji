@@ -17,24 +17,21 @@ const TEXTURE_LIMIT = 5;
 const MASK_SCALE = 0.25;
 
 /**
- * Máscara de la viñeta con el borde ya difuminado, pintada en un canvas.
+ * Pinta en `canvas` la silueta de la viñeta con el borde difuminado.
  *
- * El camino directo —un Graphics con un filtro de desenfoque— no sirve: ponerle un filtro
- * a una máscara la rompe y el sprite enmascarado deja de dibujarse. Pintar el degradado en
+ * El camino directo —un Graphics con filtro de desenfoque— no sirve: ponerle un filtro a
+ * una máscara la rompe y el sprite enmascarado deja de dibujarse. Pintar el degradado en
  * la propia textura no depende de cómo el motor trate los filtros de máscara.
  */
-function featheredMask(
+function paintMask(
+  canvas: HTMLCanvasElement,
   polygon: [number, number][],
   feather: number,
-  width: number,
-  height: number,
-): HTMLCanvasElement {
-  const canvas = document.createElement("canvas");
-  canvas.width = Math.max(1, Math.ceil(width * MASK_SCALE));
-  canvas.height = Math.max(1, Math.ceil(height * MASK_SCALE));
-
+): void {
   const ctx = canvas.getContext("2d")!;
-  if (feather > 0) ctx.filter = `blur(${(feather / 2) * MASK_SCALE}px)`;
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  ctx.filter = feather > 0 ? `blur(${(feather / 2) * MASK_SCALE}px)` : "none";
   ctx.fillStyle = "#fff";
   ctx.beginPath();
   polygon.forEach(([x, y], i) => {
@@ -44,7 +41,6 @@ function featheredMask(
   });
   ctx.closePath();
   ctx.fill();
-  return canvas;
 }
 
 export class Stage {
@@ -75,6 +71,7 @@ export class Stage {
   /** La misma página, nítida, recortada a la viñeta activa. */
   #art = new Sprite();
   #artMask: Sprite | null = null;
+  #maskCanvas: HTMLCanvasElement | null = null;
   #dialogue = new Container();
   #sprites = new Map<string, Sprite>();
   /** Posición final de cada sprite, para animar desde un pequeño desplazamiento. */
@@ -200,6 +197,10 @@ export class Stage {
   destroy(): void {
     for (const [, tex] of this.#textures) tex.destroy(true);
     this.#textures.clear();
+    this.#art.mask = null;
+    this.#artMask?.destroy({ texture: true, textureSource: true });
+    this.#artMask = null;
+    this.#maskCanvas = null;
     this.#app.destroy(true, { children: true });
   }
 
@@ -220,17 +221,16 @@ export class Stage {
    * va la nítida recortada a la silueta de la viñeta.
    */
   #drawFocus(frame: Frame): void {
-    if (this.#artMask) {
-      this.#art.mask = null;
-      this.#artMask.destroy({ texture: true, textureSource: true });
-      this.#artMask = null;
-    }
     this.#shade.clear();
 
     const focused = this.focusStrength > 0 && frame.polygon && frame.polygon.length >= 3;
     this.#blurred.visible = Boolean(focused);
-    // Sin foco no hay recorte: la página nítida se ve entera.
-    if (!focused) return;
+    if (!focused) {
+      // Sin foco no hay recorte: la página nítida se ve entera.
+      this.#art.mask = null;
+      if (this.#artMask) this.#artMask.visible = false;
+      return;
+    }
 
     this.#blur.strength = this.focusBlur;
 
@@ -240,14 +240,29 @@ export class Stage {
       .rect(-width, -height, width * 3, height * 3)
       .fill({ color: 0x000000, alpha: this.focusStrength });
 
-    const canvas = featheredMask(frame.polygon!, this.focusFeather, width, height);
-    const mask = new Sprite(Texture.from(canvas));
-    mask.width = width;
-    mask.height = height;
+    // El canvas y su textura se crean una sola vez y se reescriben. Crearlos y destruirlos
+    // por viñeta dejaba al renderer usando una textura ya liberada.
+    const cw = Math.max(1, Math.ceil(width * MASK_SCALE));
+    const ch = Math.max(1, Math.ceil(height * MASK_SCALE));
+    if (!this.#maskCanvas || this.#maskCanvas.width !== cw || this.#maskCanvas.height !== ch) {
+      const canvas = document.createElement("canvas");
+      canvas.width = cw;
+      canvas.height = ch;
+      this.#maskCanvas = canvas;
 
-    this.#world.addChild(mask);
+      this.#artMask?.destroy({ texture: true, textureSource: true });
+      const sprite = new Sprite(Texture.from(canvas));
+      this.#world.addChild(sprite);
+      this.#artMask = sprite;
+    }
+
+    paintMask(this.#maskCanvas, frame.polygon!, this.focusFeather);
+
+    const mask = this.#artMask!;
+    mask.texture.source.update();
+    mask.visible = true;
+    mask.setSize(width, height);
     this.#art.mask = mask;
-    this.#artMask = mask;
   }
 
   /**
