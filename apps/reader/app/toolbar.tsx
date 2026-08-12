@@ -16,6 +16,9 @@ export type ToolbarProps = {
   progress: number;
   mood: MoodId;
   music: boolean;
+  /** 0..1 */
+  volume: number;
+  onVolume: (value: number) => void;
   panelMode: boolean;
   hasPanels: boolean;
   onPage: (page: number) => void;
@@ -104,6 +107,23 @@ export function Toolbar(props: ToolbarProps) {
           <Button onClick={() => props.onMusic(!props.music)} active={props.music} title="Música (m)">
             {props.music ? "♪ on" : "♪ off"}
           </Button>
+          {/* El volumen solo tiene sentido con la música puesta. */}
+          {props.music && (
+            <label className="flex items-center gap-2 px-2.5 py-1.5" title="Volumen">
+              <input
+                type="range"
+                min={0}
+                max={100}
+                value={Math.round(props.volume * 100)}
+                onChange={(e) => props.onVolume(Number(e.target.value) / 100)}
+                aria-label="Volumen de la música"
+                className="h-1 w-20 cursor-pointer appearance-none rounded-full bg-neutral-700 [&::-webkit-slider-thumb]:h-2.5 [&::-webkit-slider-thumb]:w-2.5 [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-neutral-100"
+              />
+              <span className="w-7 text-right text-[10px] tabular-nums text-neutral-500">
+                {Math.round(props.volume * 100)}
+              </span>
+            </label>
+          )}
         </Group>
 
         <span className="ml-auto truncate text-[11px] text-neutral-500">

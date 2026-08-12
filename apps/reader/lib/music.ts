@@ -37,9 +37,27 @@ export class Music {
   #loading: string | null = null;
   /** 0..1, sube en las viñetas intensas y baja solo. */
   #heat = 0;
+  /** Volumen elegido por quien lee. Los fundidos van hacia este valor, no a uno fijo. */
+  #volume = 0.42;
 
-  constructor(mood: Mood) {
+  constructor(mood: Mood, volume = 0.42) {
     this.#mood = mood;
+    this.#volume = volume;
+  }
+
+  get volume(): number {
+    return this.#volume;
+  }
+
+  setVolume(value: number): void {
+    this.#volume = Math.min(Math.max(value, 0), 1);
+    const ctx = this.#ctx;
+    const master = this.#master;
+    if (!ctx || !master) return;
+    // Rampa corta: saltar de golpe produce un chasquido.
+    master.gain.cancelScheduledValues(ctx.currentTime);
+    master.gain.setValueAtTime(master.gain.value, ctx.currentTime);
+    master.gain.linearRampToValueAtTime(this.#volume, ctx.currentTime + 0.08);
   }
 
   get playing(): boolean {
@@ -54,7 +72,7 @@ export class Music {
 
     const master = ctx.createGain();
     master.gain.value = 0;
-    master.gain.linearRampToValueAtTime(0.42, ctx.currentTime + 2);
+    master.gain.linearRampToValueAtTime(this.#volume, ctx.currentTime + 2);
 
     // Un eco corto y realimentado da profundidad sin una respuesta de sala.
     const delay = ctx.createDelay(1.5);
@@ -112,7 +130,7 @@ export class Music {
 
     this.#cursor = 0;
     this.#origin = ctx.currentTime + 0.1;
-    master.gain.linearRampToValueAtTime(0.42, ctx.currentTime + 1.2);
+    master.gain.linearRampToValueAtTime(this.#volume, ctx.currentTime + 1.2);
   }
 
   /** Sube la intensidad. Se llama cuando una viñeta trae un efecto fuerte. */

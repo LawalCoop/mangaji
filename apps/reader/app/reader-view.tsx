@@ -58,12 +58,15 @@ export default function ReaderView() {
   const [panelMode, setPanelMode] = useState(false);
   const [mood, setMood] = useState<MoodId>(DEFAULT_MOOD);
   const [music, setMusic] = useState(false);
+  const [volume, setVolume] = useState(0.42);
   /** Posición de lectura, refrescada en cada encuadre. */
   const [at, setAt] = useState({ page: 1, pages: 1, panel: 0, panels: 0, progress: 0 });
 
   /** El mood se lee dentro del ciclo de render, que no ve el estado de React. */
   const moodRef = useRef(MOODS[DEFAULT_MOOD]);
   const musicRef = useRef<Music | null>(null);
+  /** El volumen elegido sobrevive a apagar y volver a encender la música. */
+  const volumeRef = useRef(0.42);
 
   const teardown = useCallback(() => {
     engine.current?.dispose();
@@ -318,7 +321,7 @@ export default function ReaderView() {
       return;
     }
     // Debe arrancar desde un gesto del usuario: el navegador no deja sonar audio sin eso.
-    const player = new Music(moodRef.current);
+    const player = new Music(moodRef.current, volumeRef.current);
     musicRef.current = player;
     void player.start().then(
       () => setMusic(true),
@@ -327,6 +330,12 @@ export default function ReaderView() {
         setMusic(false);
       },
     );
+  }, []);
+
+  const changeVolume = useCallback((value: number) => {
+    volumeRef.current = value;
+    setVolume(value);
+    musicRef.current?.setVolume(value);
   }, []);
 
   useEffect(() => () => musicRef.current?.stop(), []);
@@ -523,6 +532,8 @@ export default function ReaderView() {
           progress={at.progress}
           mood={mood}
           music={music}
+          volume={volume}
+          onVolume={changeVolume}
           panelMode={panelMode}
           hasPanels={Boolean(engine.current?.panelFrames)}
           onPage={(page) => engine.current?.director.seekToPage(page - 1)}
