@@ -65,15 +65,37 @@ describe("Director", () => {
     expect(events).toEqual(["beat:0", "beat:100", "beat:500"]);
   });
 
-  it("el primer avance completa los beats pendientes en vez de saltear el encuadre", () => {
-    const d = new Director(makeSource([{ beats: [{ t: 0, ms: 0 }, { t: 9999, ms: 0 }] }, {}]));
+  it("cada avance revela un diálogo pendiente, y recién después pasa de encuadre", () => {
+    const d = new Director(
+      makeSource([
+        {
+          beats: [
+            { t: 0, ms: 0 },
+            { t: 500, ms: 0, reveal: "b0" },
+            { t: 9000, ms: 0, reveal: "b1" },
+          ],
+        },
+        {},
+      ]),
+    );
     const events = collect(d);
 
-    d.next(); // quedan beats sin disparar: los completa y se queda
+    d.next(); // adelanta el primer globo, sin saltearse el segundo
     expect(d.index).toBe(0);
-    expect(events).toEqual(["beat:0", "beat:9999"]);
+    expect(events).toEqual(["beat:0", "beat:500"]);
 
-    d.next(); // ahora sí avanza
+    d.next(); // adelanta el segundo
+    expect(d.index).toBe(0);
+    expect(events).toEqual(["beat:0", "beat:500", "beat:9000"]);
+
+    d.next(); // ya está todo a la vista: ahora avanza
+    expect(d.index).toBe(1);
+  });
+
+  it("sin diálogo pendiente, un solo avance cambia de encuadre", () => {
+    // Una viñeta muda no debe exigir dos toques.
+    const d = new Director(makeSource([{ beats: [{ t: 0, ms: 400 }, { t: 400, hold: 2000 }] }, {}]));
+    d.next();
     expect(d.index).toBe(1);
   });
 

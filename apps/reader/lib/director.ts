@@ -117,16 +117,26 @@ export class Director {
   }
 
   /**
-   * Avance del usuario. Si el encuadre todavía tiene beats sin disparar los completa de
-   * golpe y se queda; recién el siguiente avanza. Así un tap nunca "se pierde": o completa
-   * lo que estaba pasando, o pasa al que sigue.
+   * Avance del usuario: adelanta el diálogo que falta, y si no falta ninguno pasa de
+   * encuadre.
+   *
+   * Cada toque revela un globo, no todos: quien toca quiere leer más rápido, no saltearse
+   * lo que sigue. Y cuando ya está todo a la vista, el toque avanza en lugar de perderse
+   * —que era lo que obligaba a tocar dos veces—.
    */
   next(): void {
-    if (this.#fired < this.frame.beats.length) {
-      this.#fireUpTo(Number.POSITIVE_INFINITY);
-      this.#elapsed = frameDuration(this.frame, this.defaultHold);
+    const beats = this.frame.beats;
+    const pending = beats.findIndex((b, i) => i >= this.#fired && b.reveal !== undefined);
+
+    if (pending >= 0) {
+      this.#elapsed = Math.max(this.#elapsed, beats[pending].t);
+      this.#fireUpTo(this.#elapsed);
       return;
     }
+
+    // Sin diálogo pendiente: se completan los beats que queden (cámara, pausas) y se pasa.
+    this.#fireUpTo(Number.POSITIVE_INFINITY);
+
     if (this.#index >= this.#source.length - 1) {
       this.#playing = false;
       this.#emit({ type: "end" });
