@@ -47,6 +47,7 @@ export class Stage {
   /** Lienzos de composición del foco, creados una vez y reescritos en cada encuadre. */
   #focusCanvas: HTMLCanvasElement | null = null;
   #sharpCanvas: HTMLCanvasElement | null = null;
+  #maskCanvas: HTMLCanvasElement | null = null;
   #focusTexture: Texture | null = null;
   #focusKey = "";
 
@@ -192,26 +193,34 @@ export class Stage {
     sx.filter = "none";
     sx.drawImage(bitmap, 0, 0);
 
-    // Recorte con borde difuso: se conserva solo lo que cae bajo la silueta.
+    // La silueta se arma aparte y se aplica de una sola vez.
     //
-    // La silueta se dilata trazándola con grosor antes de difuminarla. Sin eso el degradado
-    // queda centrado en el borde de la viñeta y la mitad de la transición cae adentro, o
-    // sea que la propia viñeta se ve algo desenfocada en los bordes. Dilatada, la viñeta
-    // queda entera nítida y el desvanecido ocurre por fuera.
+    // Con `destination-in` cada operación de dibujo recorta, así que rellenar y después
+    // trazar dejaba solo el anillo del trazo: la viñeta salía nítida en los bordes y
+    // borrosa en el centro, justo al revés.
+    const mask = this.#ensureCanvas("mask", width, height);
+    const mx = mask.getContext("2d")!;
     const feather = this.focusFeather;
+    mx.setTransform(1, 0, 0, 1, 0, 0);
+    mx.globalCompositeOperation = "source-over";
+    mx.clearRect(0, 0, width, height);
+    // Trazar con grosor además de rellenar dilata la silueta, y así el desvanecido cae por
+    // fuera de la viñeta en vez de repartirse a ambos lados de su borde.
+    mx.filter = feather > 0 ? `blur(${feather / 3}px)` : "none";
+    mx.fillStyle = "#fff";
+    mx.strokeStyle = "#fff";
+    mx.lineJoin = "round";
+    mx.lineWidth = feather;
+    mx.beginPath();
+    frame.polygon!.forEach(([x, y], i) => (i === 0 ? mx.moveTo(x, y) : mx.lineTo(x, y)));
+    mx.closePath();
+    mx.fill();
+    if (feather > 0) mx.stroke();
+    mx.filter = "none";
+
     sx.globalCompositeOperation = "destination-in";
-    sx.filter = feather > 0 ? `blur(${feather / 3}px)` : "none";
-    sx.fillStyle = "#fff";
-    sx.strokeStyle = "#fff";
-    sx.lineJoin = "round";
-    sx.lineWidth = feather;
-    sx.beginPath();
-    frame.polygon!.forEach(([x, y], i) => (i === 0 ? sx.moveTo(x, y) : sx.lineTo(x, y)));
-    sx.closePath();
-    sx.fill();
-    if (feather > 0) sx.stroke();
+    sx.drawImage(mask, 0, 0);
     sx.globalCompositeOperation = "source-over";
-    sx.filter = "none";
 
     fx.drawImage(sharp, 0, 0);
 
@@ -221,8 +230,13 @@ export class Stage {
     this.#focusTexture.source.update();
   }
 
-  #ensureCanvas(which: "focus" | "sharp", width: number, height: number): HTMLCanvasElement {
-    const current = which === "focus" ? this.#focusCanvas : this.#sharpCanvas;
+  #ensureCanvas(
+    which: "focus" | "sharp" | "mask",
+    width: number,
+    height: number,
+  ): HTMLCanvasElement {
+    const current =
+      which === "focus" ? this.#focusCanvas : which === "sharp" ? this.#sharpCanvas : this.#maskCanvas;
     if (current && current.width === width && current.height === height) return current;
 
     const canvas = document.createElement("canvas");
@@ -233,8 +247,10 @@ export class Stage {
       // La textura queda ligada al lienzo: si el lienzo cambia, hay que rehacerla.
       this.#focusTexture?.destroy(true);
       this.#focusTexture = null;
-    } else {
+    } else if (which === "sharp") {
       this.#sharpCanvas = canvas;
+    } else {
+      this.#maskCanvas = canvas;
     }
     return canvas;
   }
