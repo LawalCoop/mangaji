@@ -1,21 +1,40 @@
+import { Midi } from "@tonejs/midi";
 import type { Mood } from "./mood";
 
 /**
- * Acompañamiento generado en el navegador.
+ * Acompañamiento del lector: una pieza MIDI por mood, en bucle.
  *
- * No hay archivos: la música se sintetiza a partir de la paleta del mood. Además de evitar
- * empaquetar audio ajeno, permite que reaccione a lo que está pasando —densa en una página
- * de batalla, quieta en una de diálogo— cosa que una pista grabada no puede hacer.
+ * Las piezas son de dominio público (CC0) y viven en `public/music`. El navegador no
+ * reproduce MIDI, así que se parsea y se sintetiza acá: además de evitar cargar un banco de
+ * sonidos de varios MB, deja que el timbre lo ponga el mood y que la música responda a la
+ * lectura —cada efecto fuerte abre el filtro y baja solo—, cosa que una pista grabada no
+ * puede hacer.
  *
- * Se construye sobre lo mínimo: osciladores con envolvente, un filtro que abre y cierra
- * según la intensidad, y un eco que hace las veces de sala.
+ * Las notas se programan por ventanas y no de una vez: una pieza entera son miles de notas,
+ * y agendarlas todas al arrancar traba el hilo y hace imposible el bucle.
  */
+
+/** Cada cuánto se despierta el programador, en ms. */
+const TICK_MS = 120;
+/** Cuánto por delante se agenda, en segundos. */
+const LOOKAHEAD = 0.45;
+/** Tope de notas simultáneas: de más solo ensucia y cuesta. */
+const MAX_VOICES = 14;
+
+type Note = { time: number; duration: number; freq: number; velocity: number; drum: boolean };
+
 export class Music {
   #ctx: AudioContext | null = null;
   #master: GainNode | null = null;
   #timer: number | null = null;
   #mood: Mood;
-  #step = 0;
+
+  #notes: Note[] = [];
+  #length = 0;
+  #cursor = 0;
+  /** Momento del reloj de audio en que empezó la vuelta actual. */
+  #origin = 0;
+  #loading: string | null = null;
   /** 0..1, sube en las viñetas intensas y baja solo. */
   #heat = 0;
 
@@ -35,16 +54,16 @@ export class Music {
 
     const master = ctx.createGain();
     master.gain.value = 0;
-    master.gain.linearRampToValueAtTime(0.5, ctx.currentTime + 2.5);
+    master.gain.linearRampToValueAtTime(0.42, ctx.currentTime + 2);
 
-    // Un eco corto y realimentado da profundidad sin necesidad de una respuesta de sala.
+    // Un eco corto y realimentado da profundidad sin una respuesta de sala.
     const delay = ctx.createDelay(1.5);
-    delay.delayTime.value = 0.42;
+    delay.delayTime.value = 0.38;
     const feedback = ctx.createGain();
-    feedback.gain.value = 0.34;
+    feedback.gain.value = 0.26;
     const damp = ctx.createBiquadFilter();
     damp.type = "lowpass";
-    damp.frequency.value = 1800;
+    damp.frequency.value = 2000;
 
     master.connect(ctx.destination);
     master.connect(delay);
@@ -55,37 +74,45 @@ export class Music {
 
     this.#ctx = ctx;
     this.#master = master;
-    this.#tick();
+
+    await this.#load(this.#mood.id);
+    this.#origin = ctx.currentTime + 0.2;
+    this.#schedule();
   }
 
   stop(): void {
-    if (this.#timer) window.clearTimeout(this.#timer);
+    if (this.#timer) window.clearInterval(this.#timer);
     this.#timer = null;
     const ctx = this.#ctx;
     const master = this.#master;
     this.#ctx = null;
     this.#master = null;
+    this.#notes = [];
     if (!ctx || !master) return;
-    // Se apaga con una caída, no de golpe.
     master.gain.cancelScheduledValues(ctx.currentTime);
     master.gain.setValueAtTime(master.gain.value, ctx.currentTime);
-    master.gain.linearRampToValueAtTime(0, ctx.currentTime + 0.8);
-    window.setTimeout(() => void ctx.close(), 1000);
+    master.gain.linearRampToValueAtTime(0, ctx.currentTime + 0.6);
+    window.setTimeout(() => void ctx.close(), 800);
   }
 
-  /**
-   * Cambia de paleta y suena el cambio enseguida.
-   *
-   * Sin reprogramar, el acorde siguiente ya estaba agendado con el tiempo del mood anterior
-   * y el cambio tardaba en oírse —hasta seis segundos y medio viniendo de zen—, que se
-   * siente como que el control no hizo nada.
-   */
-  setMood(mood: Mood): void {
+  /** Cambia de pieza. Se cruza con un fundido corto para que no corte de golpe. */
+  async setMood(mood: Mood): Promise<void> {
     this.#mood = mood;
-    if (!this.#ctx) return;
-    if (this.#timer) window.clearTimeout(this.#timer);
-    this.#timer = null;
-    this.#tick();
+    const ctx = this.#ctx;
+    const master = this.#master;
+    if (!ctx || !master) return;
+
+    const level = master.gain.value;
+    master.gain.cancelScheduledValues(ctx.currentTime);
+    master.gain.setValueAtTime(level, ctx.currentTime);
+    master.gain.linearRampToValueAtTime(0.0001, ctx.currentTime + 0.5);
+
+    await this.#load(mood.id);
+    if (!this.#ctx) return; // se apagó mientras cargaba
+
+    this.#cursor = 0;
+    this.#origin = ctx.currentTime + 0.1;
+    master.gain.linearRampToValueAtTime(0.42, ctx.currentTime + 1.2);
   }
 
   /** Sube la intensidad. Se llama cuando una viñeta trae un efecto fuerte. */
@@ -93,63 +120,97 @@ export class Music {
     this.#heat = Math.min(1, this.#heat + amount);
   }
 
-  #tick = (): void => {
+  async #load(id: string): Promise<void> {
+    if (this.#loading === id) return;
+    this.#loading = id;
+    try {
+      const res = await fetch(`/music/${id}.mid`);
+      if (!res.ok) throw new Error(`sin pieza para ${id}`);
+      const midi = new Midi(await res.arrayBuffer());
+
+      const notes: Note[] = [];
+      for (const track of midi.tracks) {
+        // El canal 10 del estándar MIDI es percusión: sus notas son instrumentos, no tonos.
+        const drum = track.channel === 9;
+        for (const n of track.notes) {
+          notes.push({
+            time: n.time,
+            duration: Math.min(n.duration, 4),
+            freq: 440 * Math.pow(2, (n.midi - 69) / 12),
+            velocity: n.velocity,
+            drum,
+          });
+        }
+      }
+      notes.sort((a, b) => a.time - b.time);
+
+      this.#notes = notes;
+      this.#length = Math.max(midi.duration, 1);
+      this.#cursor = 0;
+    } catch {
+      this.#notes = [];
+      this.#length = 1;
+    }
+  }
+
+  #schedule(): void {
+    if (this.#timer) window.clearInterval(this.#timer);
+    this.#timer = window.setInterval(() => this.#pump(), TICK_MS);
+  }
+
+  #pump(): void {
     const ctx = this.#ctx;
-    const master = this.#master;
-    if (!ctx || !master) return;
+    if (!ctx || this.#notes.length === 0) return;
 
-    const { scale, root, step, weight, drive, wave, bright } = this.#mood.music;
-    const t = ctx.currentTime + 0.05;
-    const heat = this.#heat;
+    const horizon = ctx.currentTime + LOOKAHEAD;
+    let voices = 0;
 
-    // Grado de la escala: avanza de a poco y a veces salta, para que no quede en bucle.
-    const degree = scale[(this.#step * 2 + (this.#step % 3)) % scale.length];
-    const freq = root * Math.pow(2, degree / 12);
-
-    this.#pad(t, freq * 0.5, step * 1.8, 0.16 * weight, wave, bright);
-    this.#pad(t + step * 0.15, freq, step * 1.2, 0.1, wave, bright);
-    // La quinta entra sola cuando hay intensidad: engorda sin ensuciar.
-    if (heat > 0.25) {
-      this.#pad(t + step * 0.3, freq * 1.5, step * 0.8, 0.07 * heat, wave, bright);
+    while (this.#cursor < this.#notes.length) {
+      const note = this.#notes[this.#cursor];
+      const at = this.#origin + note.time;
+      if (at > horizon) break;
+      if (voices < MAX_VOICES && at >= ctx.currentTime - 0.05) {
+        note.drum ? this.#hit(at, note) : this.#voice(at, note);
+        voices++;
+      }
+      this.#cursor++;
     }
 
-    if (drive > 0 && this.#step % 2 === 0) this.#pulse(t, drive * (0.5 + heat * 0.5));
+    // Fin de la pieza: vuelve a empezar sin corte.
+    if (this.#cursor >= this.#notes.length) {
+      this.#origin += this.#length;
+      this.#cursor = 0;
+    }
 
-    this.#step++;
-    this.#heat = Math.max(0, heat - 0.22);
-    this.#timer = window.setTimeout(this.#tick, step * 1000);
-  };
+    this.#heat = Math.max(0, this.#heat - 0.015);
+  }
 
-  /** Nota sostenida con ataque y caída largos. */
-  #pad(
-    at: number,
-    freq: number,
-    dur: number,
-    level: number,
-    wave: OscillatorType,
-    bright: number,
-  ): void {
+  #voice(at: number, note: Note): void {
     const ctx = this.#ctx;
     const master = this.#master;
     if (!ctx || !master) return;
+
+    const { wave, bright, weight } = this.#mood.music;
+    const dur = Math.max(note.duration, 0.08);
 
     const osc = ctx.createOscillator();
     osc.type = wave;
-    osc.frequency.value = freq;
+    osc.frequency.value = note.freq;
     // Un segundo oscilador apenas desafinado: es lo que da cuerpo al sonido.
     const osc2 = ctx.createOscillator();
     osc2.type = "sine";
-    osc2.frequency.value = freq * 1.004;
+    osc2.frequency.value = note.freq * 1.005;
 
     const filter = ctx.createBiquadFilter();
     filter.type = "lowpass";
-    // El brillo lo fija el mood; la intensidad de la lectura lo abre un poco más.
-    filter.frequency.setValueAtTime(bright + 2200 * this.#heat, at);
-    filter.Q.value = 0.7;
+    // El brillo lo fija el mood; la intensidad de la lectura lo abre por encima.
+    filter.frequency.setValueAtTime(bright + 2600 * this.#heat, at);
+    filter.Q.value = 0.6;
 
     const gain = ctx.createGain();
+    const level = 0.16 * note.velocity * weight;
     gain.gain.setValueAtTime(0, at);
-    gain.gain.linearRampToValueAtTime(level, at + dur * 0.35);
+    gain.gain.linearRampToValueAtTime(level, at + Math.min(0.04, dur * 0.3));
     gain.gain.exponentialRampToValueAtTime(0.0001, at + dur);
 
     osc.connect(filter);
@@ -159,28 +220,32 @@ export class Music {
 
     osc.start(at);
     osc2.start(at);
-    osc.stop(at + dur + 0.1);
-    osc2.stop(at + dur + 0.1);
+    osc.stop(at + dur + 0.05);
+    osc2.stop(at + dur + 0.05);
   }
 
-  /** Golpe grave: ruido filtrado más una caída de tono. */
-  #pulse(at: number, level: number): void {
+  /** Percusión: golpe grave con caída de tono, o chasquido según la altura. */
+  #hit(at: number, note: Note): void {
     const ctx = this.#ctx;
     const master = this.#master;
     if (!ctx || !master) return;
 
+    const level = 0.5 * note.velocity * this.#mood.music.drive;
+    if (level <= 0.001) return;
+
+    const low = note.freq < 200;
     const osc = ctx.createOscillator();
-    osc.type = "sine";
-    osc.frequency.setValueAtTime(90, at);
-    osc.frequency.exponentialRampToValueAtTime(38, at + 0.22);
+    osc.type = low ? "sine" : "square";
+    osc.frequency.setValueAtTime(low ? 110 : 320, at);
+    osc.frequency.exponentialRampToValueAtTime(low ? 40 : 180, at + 0.12);
 
     const gain = ctx.createGain();
-    gain.gain.setValueAtTime(level * 0.5, at);
-    gain.gain.exponentialRampToValueAtTime(0.0001, at + 0.35);
+    gain.gain.setValueAtTime(level * (low ? 0.6 : 0.12), at);
+    gain.gain.exponentialRampToValueAtTime(0.0001, at + (low ? 0.3 : 0.09));
 
     osc.connect(gain);
     gain.connect(master);
     osc.start(at);
-    osc.stop(at + 0.4);
+    osc.stop(at + 0.35);
   }
 }

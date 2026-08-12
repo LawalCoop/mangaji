@@ -300,7 +300,7 @@ export default function ReaderView() {
     const next = MOODS[id];
     moodRef.current = next;
     setMood(id);
-    musicRef.current?.setMood(next);
+    void musicRef.current?.setMood(next);
 
     const eng = engine.current;
     if (!eng) return;
