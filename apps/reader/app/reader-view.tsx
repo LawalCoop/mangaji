@@ -20,8 +20,8 @@ const TRAVEL_MS = 520;
  * El default es suave a propósito: lo justo para dar protagonismo sin que se note el truco.
  */
 const FOCUS_LEVELS = [
-  { shade: 0.22, blur: 5 },
-  { shade: 0.4, blur: 10 },
+  { shade: 0.16, blur: 2.5 },
+  { shade: 0.32, blur: 6 },
   { shade: 0, blur: 0 },
 ];
 

@@ -13,6 +13,40 @@ import type { Frame, Rect } from "./types";
 /** Texturas vivas alrededor de la página actual. Cada página son ~4 MP en VRAM. */
 const TEXTURE_LIMIT = 5;
 
+/** Resolución de la máscara respecto de la página: es difusa, no necesita más. */
+const MASK_SCALE = 0.25;
+
+/**
+ * Máscara de la viñeta con el borde ya difuminado, pintada en un canvas.
+ *
+ * El camino directo —un Graphics con un filtro de desenfoque— no sirve: ponerle un filtro
+ * a una máscara la rompe y el sprite enmascarado deja de dibujarse. Pintar el degradado en
+ * la propia textura no depende de cómo el motor trate los filtros de máscara.
+ */
+function featheredMask(
+  polygon: [number, number][],
+  feather: number,
+  width: number,
+  height: number,
+): HTMLCanvasElement {
+  const canvas = document.createElement("canvas");
+  canvas.width = Math.max(1, Math.ceil(width * MASK_SCALE));
+  canvas.height = Math.max(1, Math.ceil(height * MASK_SCALE));
+
+  const ctx = canvas.getContext("2d")!;
+  if (feather > 0) ctx.filter = `blur(${(feather / 2) * MASK_SCALE}px)`;
+  ctx.fillStyle = "#fff";
+  ctx.beginPath();
+  polygon.forEach(([x, y], i) => {
+    const px = x * MASK_SCALE;
+    const py = y * MASK_SCALE;
+    i === 0 ? ctx.moveTo(px, py) : ctx.lineTo(px, py);
+  });
+  ctx.closePath();
+  ctx.fill();
+  return canvas;
+}
+
 export class Stage {
   readonly camera = new Camera();
   /**
@@ -20,32 +54,44 @@ export class Stage {
    * poco, sin recortar. La página sigue entera y visible, pero la viñeta que se está
    * leyendo toma protagonismo. En 0 no se dibuja nada de esto.
    */
-  focusStrength = 0.22;
+  focusStrength = 0.16;
   /** Radio del desenfoque del entorno, en píxeles de pantalla. */
-  focusBlur = 5;
+  focusBlur = 2.5;
+  /**
+   * Ancho de la franja donde la viñeta nítida se funde con el entorno difuminado.
+   *
+   * Sin esto el borde de la máscara es una línea, y el pase de nítido a borroso se ve como
+   * un corte —justo lo que este modo quiere evitar—.
+   */
+  focusFeather = 40;
 
   #app: Application;
   #world = new Container();
-  /** La página entera, difuminada: es lo que se ve alrededor de la viñeta activa. */
+  /** Todo lo que va difuminado: la página y el diálogo de las viñetas que no son la activa. */
+  #blurred = new Container();
   #back = new Sprite();
+  #backDialogue = new Container();
   #shade = new Graphics();
   /** La misma página, nítida, recortada a la viñeta activa. */
   #art = new Sprite();
-  #artMask: Graphics | null = null;
+  #artMask: Sprite | null = null;
   #dialogue = new Container();
   #sprites = new Map<string, Sprite>();
   /** Posición final de cada sprite, para animar desde un pequeño desplazamiento. */
   #rests = new Map<string, number>();
   #textures = new Map<number, Texture>();
   #page = -1;
-  #blur = new BlurFilter({ strength: 5, quality: 3 });
+  #blur = new BlurFilter({ strength: 2.5, quality: 3 });
 
   private constructor(app: Application) {
     this.#app = app;
-    this.#back.filters = [this.#blur];
-    // De atrás hacia adelante: la página difuminada, un velo que la apaga, la viñeta
-    // nítida recortada encima, y el diálogo sobre todo.
-    this.#world.addChild(this.#back, this.#shade, this.#art, this.#dialogue);
+    // El desenfoque se aplica al grupo, no solo a la página: el diálogo de las viñetas
+    // que no son la activa tiene que difuminarse con ellas, no quedar nítido flotando.
+    this.#blurred.addChild(this.#back, this.#backDialogue);
+    this.#blurred.filters = [this.#blur];
+    // De atrás hacia adelante: lo difuminado, un velo que lo apaga, la viñeta nítida
+    // recortada encima, y su diálogo sobre todo.
+    this.#world.addChild(this.#blurred, this.#shade, this.#art, this.#dialogue);
     app.stage.addChild(this.#world);
   }
 
@@ -87,6 +133,7 @@ export class Stage {
       this.#evict(frame.page);
     }
     this.#drawFocus(frame);
+    this.#placeDialogue(frame);
   }
 
   /** Aplica la cámara. Llamar después de `camera.update()`. */
@@ -106,6 +153,7 @@ export class Stage {
    */
   setDialogue(entries: { id: string; bitmap: ImageBitmap; rect: Rect }[]): void {
     this.#dialogue.removeChildren().forEach((child) => child.destroy());
+    this.#backDialogue.removeChildren().forEach((child) => child.destroy());
     this.#sprites.clear();
 
     this.#rests.clear();
@@ -118,6 +166,18 @@ export class Stage {
       this.#dialogue.addChild(sprite);
       this.#sprites.set(entry.id, sprite);
       this.#rests.set(entry.id, entry.rect.y);
+    }
+  }
+
+  /**
+   * Reparte el diálogo entre la capa nítida y la difuminada según a qué viñeta pertenece.
+   * Así el texto ya leído se apaga con su viñeta en vez de flotar nítido sobre el resto.
+   */
+  #placeDialogue(frame: Frame): void {
+    const mine = new Set((frame.layers ?? []).map((l) => l.id));
+    for (const [id, sprite] of this.#sprites) {
+      const target = mine.has(id) ? this.#dialogue : this.#backDialogue;
+      if (sprite.parent !== target) target.addChild(sprite);
     }
   }
 
@@ -162,13 +222,14 @@ export class Stage {
   #drawFocus(frame: Frame): void {
     if (this.#artMask) {
       this.#art.mask = null;
-      this.#artMask.destroy();
+      this.#artMask.destroy({ texture: true, textureSource: true });
       this.#artMask = null;
     }
     this.#shade.clear();
 
     const focused = this.focusStrength > 0 && frame.polygon && frame.polygon.length >= 3;
-    this.#back.visible = Boolean(focused);
+    this.#blurred.visible = Boolean(focused);
+    // Sin foco no hay recorte: la página nítida se ve entera.
     if (!focused) return;
 
     this.#blur.strength = this.focusBlur;
@@ -179,7 +240,11 @@ export class Stage {
       .rect(-width, -height, width * 3, height * 3)
       .fill({ color: 0x000000, alpha: this.focusStrength });
 
-    const mask = new Graphics().poly(frame.polygon!.flat()).fill(0xffffff);
+    const canvas = featheredMask(frame.polygon!, this.focusFeather, width, height);
+    const mask = new Sprite(Texture.from(canvas));
+    mask.width = width;
+    mask.height = height;
+
     this.#world.addChild(mask);
     this.#art.mask = mask;
     this.#artMask = mask;
