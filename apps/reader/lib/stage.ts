@@ -17,12 +17,13 @@ const TEXTURE_LIMIT = 5;
 /** Cuánto se atenúa el diálogo de las viñetas que no son la activa. */
 const OFF_PANEL_DIALOGUE_ALPHA = 0.5;
 /**
- * Desenfoque con el que entra un bloque de diálogo, en píxeles de la página.
+ * Desenfoque del diálogo que todavía no fue revelado, en píxeles de la página.
  *
- * El texto toma foco en vez de materializarse: aparecer de golpe sobre el globo vacío se
- * lee como un corte, y esto acompaña mejor al resto del movimiento.
+ * El texto está desde el principio, ilegible, y lo único que pasa al revelarlo es que toma
+ * foco. Así el globo nunca se ve vacío: un globo en blanco que de golpe se llena se lee
+ * como un corte, y encima delata el truco de haber sacado el texto del arte.
  */
-const DIALOGUE_ENTRY_BLUR = 14;
+const DIALOGUE_ENTRY_BLUR = 16;
 
 export class Stage {
   readonly camera = new Camera();
@@ -45,8 +46,6 @@ export class Stage {
   #art = new Sprite();
   #dialogue = new Container();
   #sprites = new Map<string, Sprite>();
-  /** Posición final de cada sprite, para animar desde un pequeño desplazamiento. */
-  #rests = new Map<string, number>();
   /** Desenfoque de entrada de cada bloque de diálogo. */
   #blurs = new Map<string, BlurFilter>();
   #textures = new Map<number, Texture>();
@@ -145,24 +144,29 @@ export class Stage {
   }
 
   /**
-   * Coloca el diálogo de la página, oculto. El arte base ya no lo tiene: el pipeline lo
-   * levantó y dejó el globo vacío, así que hasta que se revele el globo se ve en blanco.
+   * Coloca el diálogo de la página, desenfocado.
+   *
+   * El arte base ya no lo tiene —el pipeline lo levantó y dejó el globo vacío—, así que el
+   * sprite ocupa ese hueco desde el principio: se ve que hay texto pero no se lee, y
+   * revelarlo es enfocarlo. El globo nunca queda en blanco.
    */
   setDialogue(entries: { id: string; bitmap: ImageBitmap; rect: Rect }[]): void {
     this.#dialogue.removeChildren().forEach((child) => child.destroy());
     this.#sprites.clear();
-    this.#rests.clear();
 
     this.#blurs.clear();
     for (const entry of entries) {
       const sprite = new Sprite(Texture.from(entry.bitmap));
       sprite.position.set(entry.rect.x, entry.rect.y);
       sprite.setSize(entry.rect.w, entry.rect.h);
-      sprite.alpha = 0;
       this.#dialogue.addChild(sprite);
       this.#sprites.set(entry.id, sprite);
-      this.#rests.set(entry.id, entry.rect.y);
-      this.#blurs.set(entry.id, new BlurFilter({ strength: DIALOGUE_ENTRY_BLUR, quality: 2 }));
+
+      // Nace puesto pero ilegible: revelar es enfocar, no hacer aparecer.
+      const blur = new BlurFilter({ strength: DIALOGUE_ENTRY_BLUR, quality: 2 });
+      this.#blurs.set(entry.id, blur);
+      sprite.filters = [blur];
+      sprite.alpha = 1;
     }
   }
 
@@ -245,12 +249,7 @@ export class Stage {
     const sprite = this.#sprites.get(id);
     if (!sprite) return;
     const t = Math.min(Math.max(progress, 0), 1);
-    const full = sprite.label === "off" ? OFF_PANEL_DIALOGUE_ALPHA : 1;
-
-    // Entra desenfocado y toma foco. La opacidad arranca alta para que lo que se vea sea
-    // el texto enfocándose, y no una imagen que se materializa.
-    sprite.alpha = full * (0.35 + 0.65 * t);
-    sprite.y = this.#rests.get(id)! + (1 - t) * 6;
+    sprite.alpha = sprite.label === "off" ? OFF_PANEL_DIALOGUE_ALPHA : 1;
 
     const blur = this.#blurs.get(id);
     if (!blur) return;
