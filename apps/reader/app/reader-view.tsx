@@ -177,13 +177,10 @@ export default function ReaderView() {
             }
             for (const id of revealed) stage.revealDialogue(id, 1);
 
+            // El encuadre puede salirse de la hoja sin problema: el fondo toma el tono del
+            // papel, así que se lee como si la página continuara.
             const cam = fresh.beats[0]?.cam;
-            const page = sizes[fresh.page];
-            // Sin esto, una viñeta pegada a un borde deja una franja de fondo del lado del
-            // borde, que se lee como un margen puesto porque sí.
-            const framed = framing(cam, fresh.rect, stage.viewport);
-            const from = Camera.clampToPage(framed.from, page, stage.viewport);
-            const to = Camera.clampToPage(framed.to, page, stage.viewport);
+            const { from, to } = framing(cam, fresh.rect, stage.viewport);
 
             if (immediate || director.reducedMotion) {
               stage.camera.cut(to);
@@ -252,7 +249,7 @@ export default function ReaderView() {
         const onResize = () => {
           const frame = director.frame;
           const { to } = framing(frame.beats[0]?.cam, frame.rect, stage.viewport);
-          stage.camera.cut(Camera.clampToPage(to, sizes[frame.page], stage.viewport));
+          stage.camera.cut(to);
           stage.render();
         };
         window.addEventListener("resize", onResize);

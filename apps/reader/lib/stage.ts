@@ -14,6 +14,39 @@ import type { Frame, Rect } from "./types";
 
 /** Texturas vivas alrededor de la página actual. Cada página son ~4 MP en VRAM. */
 const TEXTURE_LIMIT = 5;
+
+/**
+ * Tono del papel de una página, tomado de sus bordes.
+ *
+ * Se muestrea una miniatura en vez de la página entera: para elegir un color de fondo sobra
+ * y cuesta una fracción de milisegundo. Se toma la mediana del marco exterior, que es papel
+ * salvo en las páginas a sangre; ahí devuelve el tono dominante del borde, que es
+ * justamente el que conviene continuar.
+ */
+function paperColor(bitmap: ImageBitmap): number {
+  const size = 24;
+  const canvas = document.createElement("canvas");
+  canvas.width = size;
+  canvas.height = size;
+  const ctx = canvas.getContext("2d", { willReadFrequently: true })!;
+  ctx.drawImage(bitmap, 0, 0, size, size);
+
+  const { data } = ctx.getImageData(0, 0, size, size);
+  const edge: number[][] = [[], [], []];
+  for (let y = 0; y < size; y++) {
+    for (let x = 0; x < size; x++) {
+      if (x > 1 && x < size - 2 && y > 1 && y < size - 2) continue;
+      const i = (y * size + x) * 4;
+      edge[0].push(data[i]);
+      edge[1].push(data[i + 1]);
+      edge[2].push(data[i + 2]);
+    }
+  }
+
+  const median = (v: number[]) => v.sort((a, b) => a - b)[v.length >> 1] ?? 0;
+  const [r, g, b] = edge.map(median);
+  return (r << 16) | (g << 8) | b;
+}
 /** Cuánto se atenúa el diálogo de las viñetas que no son la activa. */
 const OFF_PANEL_DIALOGUE_ALPHA = 0.5;
 /**
@@ -116,6 +149,9 @@ export class Stage {
       this.#bitmaps.set(frame.page, bitmap);
       this.#page = frame.page;
       this.#evict(frame.page);
+      // El fondo toma el tono del papel: cuando el encuadre se sale de la hoja, en vez de
+      // un corte contra el negro parece que la página siguiera.
+      this.#app.renderer.background.color = paperColor(bitmap);
     }
 
     const focused =

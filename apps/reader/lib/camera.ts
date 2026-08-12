@@ -50,25 +50,9 @@ export class Camera {
     };
   }
 
-  /**
-   * Corre el encuadre para no mostrar fuera de la hoja.
-   *
-   * Una viñeta pegada a un borde queda centrada por `fit`, y entonces del lado del borde no
-   * hay página que mostrar: aparece una franja de fondo que se ve como un margen arbitrario.
-   * Desplazarse hacia adentro conserva la viñeta completa y llena el cuadro con papel.
-   *
-   * Cuando la página no alcanza a cubrir el eje —al alejarse mucho— se centra, que es lo
-   * único razonable ahí.
-   */
-  static clampToPage(t: Transform, page: { w: number; h: number }, view: Viewport): Transform {
-    const width = page.w * t.scale;
-    const height = page.h * t.scale;
-    return {
-      scale: t.scale,
-      x: width <= view.w ? (view.w - width) / 2 : Math.min(0, Math.max(view.w - width, t.x)),
-      y: height <= view.h ? (view.h - height) / 2 : Math.min(0, Math.max(view.h - height, t.y)),
-    };
-  }
+  // Se probó limitar el encuadre a los bordes de la hoja, para no mostrar fuera de la
+  // página. No hace falta: el fondo toma el tono del papel, así que salirse se lee como si
+  // la página continuara, y limitar descentraba la viñeta sin necesidad.
 
   /** Salta sin animar. Para cortes y para el primer encuadre. */
   cut(t: Transform): void {
