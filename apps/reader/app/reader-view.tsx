@@ -16,50 +16,13 @@ const FIT_MARGIN = 0.94;
 /** Duración del viaje de la cámara entre viñetas de la misma página. */
 const TRAVEL_MS = 520;
 
-/** Tope acumulado de la deriva: pasado esto se planta, para no salirse del encuadre. */
-const DRIFT_LIMIT = { zoom: 0.035, pan: 0.05 };
-
-/** Número estable entre 0 y 1 a partir de un texto. */
-function hashOf(text: string): number {
-  let h = 2166136261;
-  for (let i = 0; i < text.length; i++) {
-    h ^= text.charCodeAt(i);
-    h = Math.imul(h, 16777619);
-  }
-  return ((h >>> 0) % 10000) / 10000;
-}
-
 /**
- * Deriva que queda corriendo una vez que la cámara llegó.
+ * La cámara se detiene al llegar a la viñeta.
  *
- * Una toma perfectamente quieta se lee como una imagen. Es deliberadamente lentísima —medio
- * punto de escala por segundo— y con tope, para que la viñeta respire sin salirse de su
- * propio encuadre si te quedás leyendo.
- *
- * La dirección sale del identificador de la viñeta: cada una deriva distinto, pero siempre
- * igual a sí misma. Que todas se movieran para el mismo lado delataba el mecanismo.
+ * Se probó dejarla derivando muy despacio, para que la toma no quedara del todo quieta.
+ * Visto en marcha distrae más de lo que aporta, así que se quitó: el movimiento lo dan la
+ * entrada y el viaje entre viñetas, y entre medio conviene poder leer tranquilo.
  */
-function driftFor(
-  frame: Frame,
-  view: Viewport,
-): [number, number, number, { x: number; y: number; zoom: number }] {
-  const stop = { x: view.w * DRIFT_LIMIT.pan, y: view.h * DRIFT_LIMIT.pan, zoom: DRIFT_LIMIT.zoom };
-  const seed = hashOf(frame.id);
-  const angle = seed * Math.PI * 2;
-  // Un tercio de las viñetas se aleja en vez de acercarse; el resto acerca.
-  const zoom = (seed > 0.66 ? -0.004 : 0.005) * (0.7 + seed * 0.6);
-  const speed = view.w * 0.004;
-
-  switch (frame.beats[0]?.cam?.kind) {
-    case "panH":
-      // Sigue el sentido de lectura, pero cada viñeta con su propia inclinación.
-      return [-speed, (seed - 0.5) * speed * 0.5, 0, stop];
-    case "tiltV":
-      return [(seed - 0.5) * speed * 0.5, -speed, 0, stop];
-    default:
-      return [Math.cos(angle) * speed * 0.45, Math.sin(angle) * speed * 0.45, zoom, stop];
-  }
-}
 /**
  * Cuánto se destaca la viñeta activa sobre el resto de la página. Se cicla con `o`.
  * El default es suave a propósito: lo justo para dar protagonismo sin que se note el truco.
@@ -218,12 +181,12 @@ export default function ReaderView() {
             for (const id of revealed) stage.revealDialogue(id, 1);
 
             const cam = fresh.beats[0]?.cam;
-            const { from, to } = framing(cam, fresh.rect, stage.viewport);
-
-            stage.camera.settle();
-            if (!director.reducedMotion) {
-              stage.camera.drift(...driftFor(fresh, stage.viewport));
-            }
+            const page = sizes[fresh.page];
+            // Sin esto, una viñeta pegada a un borde deja una franja de fondo del lado del
+            // borde, que se lee como un margen puesto porque sí.
+            const framed = framing(cam, fresh.rect, stage.viewport);
+            const from = Camera.clampToPage(framed.from, page, stage.viewport);
+            const to = Camera.clampToPage(framed.to, page, stage.viewport);
 
             if (immediate || director.reducedMotion) {
               stage.camera.cut(to);
@@ -290,8 +253,9 @@ export default function ReaderView() {
         });
 
         const onResize = () => {
-          const { to } = framing(director.frame.beats[0]?.cam, director.frame.rect, stage.viewport);
-          stage.camera.cut(to);
+          const frame = director.frame;
+          const { to } = framing(frame.beats[0]?.cam, frame.rect, stage.viewport);
+          stage.camera.cut(Camera.clampToPage(to, sizes[frame.page], stage.viewport));
           stage.render();
         };
         window.addEventListener("resize", onResize);

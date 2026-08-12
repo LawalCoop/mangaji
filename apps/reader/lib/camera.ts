@@ -21,14 +21,6 @@ export class Camera {
 
   /** Sacudida en curso: amplitud actual y cuánto le queda. */
   #shake = { amp: 0, left: 0, total: 1 };
-  /**
-   * Deriva continua, con presupuesto.
-   *
-   * `x`/`y`/`zoom` son la velocidad por segundo, y `leftX`/`leftY`/`leftZoom` cuánto queda
-   * por recorrer. El tope es lo que evita que una viñeta que se queda mucho tiempo en
-   * pantalla termine derivando fuera de su propio encuadre.
-   */
-  #drift = { x: 0, y: 0, zoom: 0, leftX: 0, leftY: 0, leftZoom: 0 };
 
   get transform(): Transform {
     if (this.#shake.left <= 0) return this.#current;
@@ -47,25 +39,6 @@ export class Camera {
     this.#shake = { amp, left: ms, total: Math.max(ms, 1) };
   }
 
-  /**
-   * Deja la cámara a la deriva. `x`/`y` en píxeles por segundo y `zoom` como fracción de
-   * escala por segundo; `max` es el tope acumulado de cada uno, tras el cual se detiene.
-   */
-  drift(
-    x: number,
-    y: number,
-    zoom: number,
-    max: { x: number; y: number; zoom: number },
-  ): void {
-    this.#drift = {
-      x,
-      y,
-      zoom,
-      leftX: Math.abs(max.x),
-      leftY: Math.abs(max.y),
-      leftZoom: Math.abs(max.zoom),
-    };
-  }
 
   /** Encuadre que contiene `rect` completo, centrado. `zoom` > 1 lo acerca. */
   static fit(rect: Rect, view: Viewport, zoom = 1): Transform {
@@ -77,6 +50,26 @@ export class Camera {
     };
   }
 
+  /**
+   * Corre el encuadre para no mostrar fuera de la hoja.
+   *
+   * Una viñeta pegada a un borde queda centrada por `fit`, y entonces del lado del borde no
+   * hay página que mostrar: aparece una franja de fondo que se ve como un margen arbitrario.
+   * Desplazarse hacia adentro conserva la viñeta completa y llena el cuadro con papel.
+   *
+   * Cuando la página no alcanza a cubrir el eje —al alejarse mucho— se centra, que es lo
+   * único razonable ahí.
+   */
+  static clampToPage(t: Transform, page: { w: number; h: number }, view: Viewport): Transform {
+    const width = page.w * t.scale;
+    const height = page.h * t.scale;
+    return {
+      scale: t.scale,
+      x: width <= view.w ? (view.w - width) / 2 : Math.min(0, Math.max(view.w - width, t.x)),
+      y: height <= view.h ? (view.h - height) / 2 : Math.min(0, Math.max(view.h - height, t.y)),
+    };
+  }
+
   /** Salta sin animar. Para cortes y para el primer encuadre. */
   cut(t: Transform): void {
     this.#current = { ...t };
@@ -84,10 +77,6 @@ export class Camera {
     this.#smoothing = 0;
   }
 
-  /** Corta la deriva. Se llama al cambiar de encuadre. */
-  settle(): void {
-    this.#drift = { x: 0, y: 0, zoom: 0, leftX: 0, leftY: 0, leftZoom: 0 };
-  }
 
   /**
    * Se mueve hacia `t`. `ms` es la duración nominal del movimiento; 0 equivale a un corte.
@@ -120,27 +109,7 @@ export class Camera {
   update(dtMs: number): boolean {
     if (this.#shake.left > 0) this.#shake.left -= dtMs;
 
-    const d = this.#drift;
-    const drifting = d.leftX > 0 || d.leftY > 0 || d.leftZoom > 0;
-    if (drifting) {
-      const s = dtMs / 1000;
-      // Cada componente avanza hasta agotar su presupuesto y ahí se planta.
-      const dx = Math.sign(d.x) * Math.min(Math.abs(d.x * s), d.leftX);
-      const dy = Math.sign(d.y) * Math.min(Math.abs(d.y * s), d.leftY);
-      const dz = Math.sign(d.zoom) * Math.min(Math.abs(d.zoom * s), d.leftZoom);
-      d.leftX -= Math.abs(dx);
-      d.leftY -= Math.abs(dy);
-      d.leftZoom -= Math.abs(dz);
-
-      // Se mueven current y target juntos: si no, la interpolación tiraría de vuelta.
-      for (const t of [this.#current, this.#target]) {
-        t.x += dx;
-        t.y += dy;
-        t.scale *= 1 + dz;
-      }
-    }
-
-    if (this.#smoothing <= 0) return this.#shake.left > 0 || Boolean(drifting);
+    if (this.#smoothing <= 0) return this.#shake.left > 0;
     // 5 constantes de tiempo ≈ 99 % del recorrido dentro de la duración nominal.
     const k = 1 - Math.exp((-5 * dtMs) / this.#smoothing);
     const c = this.#current;
