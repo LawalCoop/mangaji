@@ -64,6 +64,12 @@ export class Director {
     return this.#playing;
   }
 
+  /** Encuadre que viene `offset` posiciones más adelante, para precargar lo que usará. */
+  peek(offset: number): Frame | null {
+    const i = this.#index + offset;
+    return i >= 0 && i < this.#source.length ? this.#source.at(i) : null;
+  }
+
   on(fn: Listener): () => void {
     this.#listeners.add(fn);
     return () => this.#listeners.delete(fn);

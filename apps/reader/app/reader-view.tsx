@@ -110,38 +110,47 @@ export default function ReaderView() {
 
           source.prefetch(frame.page + 1);
           source.prefetch(frame.page + 2);
+          // También el diálogo que viene: si llega recién al cambiar de página, la
+          // transición se queda esperando a decodificarlo.
+          for (let ahead = 1; ahead <= 8; ahead++) {
+            for (const layer of director.peek(ahead)?.layers ?? []) {
+              if (layer.src) void source.bitmapOf(layer.src).catch(() => {});
+            }
+          }
 
           try {
-            const bitmap = await source.bitmap(frame.page);
+            // Todo lo que haga falta se pide ANTES de tocar la escena. Si la imagen se
+            // cambiara y después se esperara a los sprites, el ticker seguiría dibujando
+            // durante esa espera: se vería la página nueva con el encuadre de la anterior,
+            // que es un parpadeo en cada cambio de página.
+            const [bitmap, dialogue] = await Promise.all([
+              source.bitmap(frame.page),
+              Promise.all(
+                (frame.layers ?? [])
+                  .filter((l) => l.src)
+                  .map(async (layer) => ({
+                    id: layer.id,
+                    rect: layer.rect,
+                    bitmap: await source.bitmapOf(layer.src),
+                  })),
+              ),
+            ]);
             if (mine !== token) return;
 
             sizes[frame.page] = { w: bitmap.width, h: bitmap.height };
             const fresh = director.frame;
             const samePage = fresh.page === shownPage;
             shownPage = fresh.page;
+
+            // A partir de acá, sin esperas: imagen, diálogo y cámara en el mismo cuadro.
             stage.show(fresh, bitmap);
 
-            // El diálogo de esta viñeta, oculto hasta que su beat lo revele.
             revealing.clear();
             if (!samePage) revealed.clear();
-
-            const withSprite = (fresh.layers ?? []).filter((l) => l.src);
-            if (withSprite.length) {
-              const loaded = await Promise.all(
-                withSprite.map(async (layer) => ({
-                  id: layer.id,
-                  rect: layer.rect,
-                  bitmap: await source.bitmapOf(layer.src),
-                })),
-              );
-              if (mine !== token) return;
-              stage.setDialogue(loaded);
-              // Lo que ya se leyó en la viñeta anterior sigue puesto, sin volver a animarse.
-              for (const layer of loaded) {
-                if (revealed.has(layer.id)) stage.revealDialogue(layer.id, 1);
-              }
-            } else {
-              stage.setDialogue([]);
+            stage.setDialogue(dialogue);
+            // Lo que ya se leyó en la viñeta anterior sigue puesto, sin volver a animarse.
+            for (const layer of dialogue) {
+              if (revealed.has(layer.id)) stage.revealDialogue(layer.id, 1);
             }
 
             const { from, to } = framing(fresh.beats[0]?.cam, fresh.rect, stage.viewport);
