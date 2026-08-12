@@ -18,8 +18,14 @@ import type { Mood } from "./mood";
 const TICK_MS = 120;
 /** Cuánto por delante se agenda, en segundos. */
 const LOOKAHEAD = 0.45;
-/** Tope de notas simultáneas: de más solo ensucia y cuesta. */
-const MAX_VOICES = 14;
+/**
+ * Tope de notas agendadas por pasada.
+ *
+ * Es además la red que corta cualquier bucle desbocado: si por lo que fuera el reloj y la
+ * pieza se desincronizan, esto acota el daño a unas pocas voces en vez de dejar que se
+ * apilen sin freno.
+ */
+const MAX_NOTES_PER_PASS = 24;
 
 type Note = { time: number; duration: number; freq: number; velocity: number; drum: boolean };
 
@@ -74,6 +80,15 @@ export class Music {
     master.gain.value = 0;
     master.gain.linearRampToValueAtTime(this.#volume, ctx.currentTime + 2);
 
+    // Limitador al final de la cadena: por muchas voces que coincidan, la suma no distorsiona.
+    const limiter = ctx.createDynamicsCompressor();
+    limiter.threshold.value = -10;
+    limiter.knee.value = 6;
+    limiter.ratio.value = 12;
+    limiter.attack.value = 0.004;
+    limiter.release.value = 0.18;
+    limiter.connect(ctx.destination);
+
     // Un eco corto y realimentado da profundidad sin una respuesta de sala.
     const delay = ctx.createDelay(1.5);
     delay.delayTime.value = 0.38;
@@ -83,12 +98,14 @@ export class Music {
     damp.type = "lowpass";
     damp.frequency.value = 2000;
 
-    master.connect(ctx.destination);
+    master.connect(limiter);
     master.connect(delay);
     delay.connect(damp);
     damp.connect(feedback);
     feedback.connect(delay);
-    delay.connect(master);
+    // El eco vuelve al limitador y no al master: si volviera al master, el master lo
+    // reinyectaría en el propio eco y la señal se realimentaría a sí misma creciendo sola.
+    delay.connect(limiter);
 
     this.#ctx = ctx;
     this.#master = master;
@@ -181,23 +198,33 @@ export class Music {
     if (!ctx || this.#notes.length === 0) return;
 
     const horizon = ctx.currentTime + LOOKAHEAD;
-    let voices = 0;
+    let placed = 0;
 
-    while (this.#cursor < this.#notes.length) {
+    while (placed < MAX_NOTES_PER_PASS) {
       const note = this.#notes[this.#cursor];
       const at = this.#origin + note.time;
       if (at > horizon) break;
-      if (voices < MAX_VOICES && at >= ctx.currentTime - 0.05) {
-        note.drum ? this.#hit(at, note) : this.#voice(at, note);
-        voices++;
-      }
-      this.#cursor++;
-    }
 
-    // Fin de la pieza: vuelve a empezar sin corte.
-    if (this.#cursor >= this.#notes.length) {
-      this.#origin += this.#length;
+      // Solo suena lo que todavía no pasó; lo vencido se saltea sin agendar.
+      if (at >= ctx.currentTime) {
+        note.drum ? this.#hit(at, note) : this.#voice(at, note);
+        placed++;
+      }
+
+      this.#cursor++;
+      if (this.#cursor < this.#notes.length) continue;
+
+      // Fin de la vuelta: el origen se corre una pieza entera y arranca de nuevo.
+      //
+      // Si además quedó por detrás del reloj —porque la pestaña estuvo en segundo plano, o
+      // porque la pieza es más corta que la ventana— hay que resincronizar. Sin esto todas
+      // las notas de la vuelta nueva vuelven a caer dentro del horizonte y se reprograman
+      // en cada pasada, apilando voces hasta saturar.
       this.#cursor = 0;
+      this.#origin += this.#length;
+      if (this.#origin + this.#length <= ctx.currentTime) {
+        this.#origin = ctx.currentTime;
+      }
     }
 
     this.#heat = Math.max(0, this.#heat - 0.015);
