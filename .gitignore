@@ -36,3 +36,7 @@ tests/fixtures/out/
 *.swp
 .idea/
 .vscode/
+
+# modelos y runtime, pesados: se regeneran con `mangacut export-onnx`
+apps/reader/public/models/
+apps/reader/public/ort/
