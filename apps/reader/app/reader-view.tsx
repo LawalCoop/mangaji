@@ -10,7 +10,9 @@ import { DEFAULT_MOOD, MOOD_ORDER, MOODS, type MoodId } from "@/lib/mood";
 import { Music } from "@/lib/music";
 import { Stage } from "@/lib/stage";
 import type { Rect } from "@/lib/types";
+import type { Stage as ProcessStage } from "@/lib/process";
 import { Landing } from "./landing";
+import { Processing } from "./processing";
 import { Toolbar } from "./toolbar";
 
 /** Hasta que la página se decodifica no se sabe su tamaño; esto evita un encuadre en cero. */
@@ -48,7 +50,22 @@ function framing(cam: CameraMove | undefined, rect: Rect, view: Viewport) {
   }
 }
 
-type Status = { kind: "idle" } | { kind: "loading" } | { kind: "ready" } | { kind: "error"; message: string };
+type Status =
+  | { kind: "idle" }
+  | { kind: "loading" }
+  | { kind: "processing" }
+  | { kind: "ready" }
+  | { kind: "error"; message: string };
+
+/** Cuántas páginas mirar hacia atrás para estimar lo que falta. */
+const ETA_WINDOW = 5;
+
+function formatEta(seconds: number): string {
+  if (seconds < 60) return `${Math.max(1, Math.round(seconds))} s`;
+  const min = Math.floor(seconds / 60);
+  const rest = Math.round(seconds % 60);
+  return rest ? `${min} min ${rest} s` : `${min} min`;
+}
 
 export default function ReaderView() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -64,6 +81,11 @@ export default function ReaderView() {
 
   const [status, setStatus] = useState<Status>({ kind: "idle" });
   const [title, setTitle] = useState("");
+  /** Estado del procesamiento de un CBZ, cuando hay que convertirlo antes de leer. */
+  const [stage, setStage] = useState<ProcessStage | null>(null);
+  const [lines, setLines] = useState<string[]>([]);
+  const [progress, setProgress] = useState<number | null>(null);
+  const [eta, setEta] = useState<string | null>(null);
   const [panelMode, setPanelMode] = useState(false);
   const [mood, setMood] = useState<MoodId>(DEFAULT_MOOD);
   const [music, setMusic] = useState(false);
@@ -84,15 +106,74 @@ export default function ReaderView() {
 
   useEffect(() => teardown, [teardown]);
 
+  /**
+   * Convierte un CBZ en un `.cbza`.
+   *
+   * Se hace acá, en el navegador, y no en un servidor: con GPU es más rápido que el pipeline
+   * de escritorio, y el archivo no tiene que salir de la máquina.
+   */
+  const convert = useCallback(async (file: File): Promise<File> => {
+    setStatus({ kind: "processing" });
+    setStage(null);
+    setLines(["descomprimiendo el archivo"]);
+    setProgress(null);
+    setEta(null);
+
+    const source = await CbzSource.open(file);
+    const bitmaps: { name: string; bitmap: ImageBitmap }[] = [];
+    for (let i = 0; i < source.pageCount; i++) {
+      bitmaps.push({ name: source.entryName(i), bitmap: await source.bitmap(i) });
+    }
+    source.close();
+    setLines((l) => [...l, `${bitmaps.length} páginas`]);
+
+    const { processArchive } = await import("@/lib/process");
+    const marks: number[] = [];
+
+    const blob = await processArchive(bitmaps, (next) => {
+      setStage(next);
+      if (next.kind === "models") setLines((l) => [...l, next.detail]);
+      if (next.kind === "page") {
+        setProgress(next.index / next.total);
+        // La estimación se hace sobre las últimas páginas y no sobre el promedio: las
+        // primeras cargan modelos y salen más lentas, y arrastran la cuenta hacia arriba.
+        marks[next.index] = performance.now();
+        const from = Math.max(0, next.index - ETA_WINDOW);
+        if (next.index > from) {
+          const per = (marks[next.index] - marks[from]) / (next.index - from);
+          setEta(formatEta(((next.total - next.index) * per) / 1000));
+        }
+        setLines((l) => [...l, `página ${next.index + 1}: ${next.detail}`]);
+      }
+      if (next.kind === "packing") {
+        setProgress(1);
+        setEta(null);
+        setLines((l) => [...l, "armando el tomo"]);
+      }
+      if (next.kind === "done") {
+        setLines((l) => [
+          ...l,
+          `${next.panels} viñetas · ${next.balloons} globos · ${(next.ms / 1000).toFixed(1)} s`,
+        ]);
+      }
+    });
+
+    return new File([blob], file.name.replace(/\.[^.]+$/, "") + ".cbza");
+  }, []);
+
   const open = useCallback(
-    async (file: File) => {
+    async (input: File) => {
       teardown();
       setStatus({ kind: "loading" });
-      setTitle(file.name);
+      setTitle(input.name);
 
       try {
         const canvas = canvasRef.current;
         if (!canvas) throw new Error("Canvas no disponible");
+
+        // Un `.cbza` ya trae el manifest y abre directo; un CBZ hay que procesarlo antes.
+        const file = /\.cbza$/i.test(input.name) ? input : await convert(input);
+        setStatus({ kind: "loading" });
 
         const source = await CbzSource.open(file);
         const sizes = Array.from({ length: source.pageCount }, () => ({ ...ASSUMED_PAGE }));
@@ -319,7 +400,7 @@ export default function ReaderView() {
         setStatus({ kind: "error", message: (err as Error).message });
       }
     },
-    [teardown],
+    [convert, teardown],
   );
 
   /** Aplica el mood a lo que ya está andando. */
@@ -516,7 +597,13 @@ export default function ReaderView() {
         <canvas ref={canvasRef} className="block h-full w-full" />
       </div>
 
-      {status.kind !== "ready" && (
+      {status.kind === "processing" && (
+        <div className="absolute inset-0 z-20 overflow-y-auto">
+          <Processing title={title} stage={stage} lines={lines} progress={progress} eta={eta} />
+        </div>
+      )}
+
+      {status.kind !== "ready" && status.kind !== "processing" && (
         <div className="absolute inset-0 overflow-y-auto">
           <Landing
             status={status.kind === "error" ? "error" : status.kind === "loading" ? "loading" : "idle"}
