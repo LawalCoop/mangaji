@@ -40,3 +40,4 @@ tests/fixtures/out/
 # modelos y runtime, pesados: se regeneran con `mangacut export-onnx`
 apps/reader/public/models/
 apps/reader/public/ort/
+apps/reader/public/libarchive/

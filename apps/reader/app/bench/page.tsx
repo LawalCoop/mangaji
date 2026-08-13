@@ -167,7 +167,7 @@ export default function Bench() {
           Elegir CBZ o página
           <input
             type="file"
-            accept=".cbz,.cbza,.zip,image/*"
+            accept=".cbz,.cbza,.cbr,.zip,.rar,image/*"
             className="hidden"
             onChange={(e) => {
               const f = e.target.files?.[0];

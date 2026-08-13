@@ -23,6 +23,25 @@ export interface ArchiveSource {
 
 type Pending = { resolve: (v: unknown) => void; reject: (e: Error) => void };
 
+/**
+ * Reempaqueta un CBR como ZIP en memoria.
+ *
+ * Así el resto del lector no se entera del formato: descomprimir RAR pasa una sola vez, al
+ * abrir, y de ahí en más todo funciona igual. Se guarda sin comprimir porque las páginas ya
+ * son JPG o PNG y volver a comprimirlas no ahorra nada.
+ */
+async function rezip(file: File): Promise<Blob> {
+  const [{ readRar }, { zipSync }] = await Promise.all([import("./rar"), import("fflate")]);
+  const pages = await readRar(file);
+  if (!pages.length) throw new Error("El CBR no contiene imágenes");
+
+  const files: Record<string, Uint8Array> = {};
+  for (const page of pages) {
+    files[page.name] = new Uint8Array(await page.file.arrayBuffer());
+  }
+  return new Blob([zipSync(files, { level: 0 }) as unknown as BlobPart]);
+}
+
 /** Cuántas páginas decodificadas se mantienen vivas alrededor de la actual. */
 const CACHE_LIMIT = 5;
 
@@ -53,7 +72,11 @@ export class CbzSource implements ArchiveSource {
       type: "module",
     });
     const source = new CbzSource(worker);
-    const buffer = await file.arrayBuffer();
+
+    // Un CBR es un RAR y el worker solo entiende ZIP: se convierte antes, una sola vez.
+    const { isRar } = await import("./rar");
+    const input = (await isRar(file)) ? await rezip(file as File) : file;
+    const buffer = await input.arrayBuffer();
     const { entries, all } = (await source.#send({ kind: "open", buffer }, [buffer])) as {
       entries: string[];
       all: string[];

@@ -137,7 +137,7 @@ export function Landing({ status, message, onFile }: Props) {
                 className="font-[family-name:var(--font-display)] text-[13px] tracking-wide sm:text-[19px]"
                 style={{ color: "#3A3A42" }}
               >
-                LECTOR DE CBZ · TODO PASA EN TU NAVEGADOR
+                LECTOR DE CBZ Y CBR · TODO PASA EN TU NAVEGADOR
               </p>
             </div>
 
@@ -260,13 +260,13 @@ export function Landing({ status, message, onFile }: Props) {
             <input
               ref={input}
               type="file"
-              accept=".cbza,.cbz,.zip,application/zip"
+              accept=".cbza,.cbz,.cbr,.zip,.rar,application/zip"
               className="hidden"
               onChange={(e) => take(e.target.files?.[0])}
             />
 
             <p className="text-[16px] font-medium sm:text-[19px]" style={{ color: "#3A3A42" }}>
-              Abrí un .cbz. Si ya lo procesaste antes, el .cbza carga directo.
+              Abrí un .cbz o .cbr. Si ya lo procesaste antes, el .cbza carga directo.
             </p>
             <p className="max-w-lg text-[14px] font-medium leading-relaxed" style={{ color: "#5A5A62" }}>
               {status === "error" && message ? (
