@@ -3,14 +3,11 @@
 import { useRef, useState } from "react";
 
 /**
- * Portada del lector.
+ * Portada de Mangaji.
  *
- * La página está maquetada como una página de manga: viñetas de bordes de tinta separadas
- * por gutters, con una onomatopeya cruzándola como en un cuadro de impacto. Las viñetas
- * entran en orden de lectura —derecha primero— así que la primera cosa que hace la página
- * es demostrar de qué se trata.
- *
- * El color aparece solo donde actúa el producto: entra tinta, sale movimiento.
+ * La página está maquetada como una página de manga: paneles de tinta separados por gutters,
+ * la tira de capacidades numerada de derecha a izquierda, y el área de carga como el cuadro
+ * que espera el tomo. Implementa el diseño hecho en Pencil.
  */
 
 type Props = {
@@ -19,13 +16,20 @@ type Props = {
   onFile: (file: File) => void;
 };
 
-const INK = "#141419";
-const CYAN = "#00d9e8";
-const MAGENTA = "#ff2e63";
+const INK = "#0B0B0C";
+const PAPER = "#F4EFE3";
+const CYAN = "#00D9F5";
+const MAGENTA = "#FF2E88";
 
-/** Trama de puntos: el gris del manga. */
-const SCREENTONE =
-  "radial-gradient(circle at 1px 1px, rgba(20,20,26,.3) 1px, transparent 0) 0 0 / 6px 6px";
+/** Marco de tinta con sombra dura: el borde de un cuadro impreso. */
+const panel = {
+  background: PAPER,
+  border: `4px solid ${INK}`,
+  boxShadow: `12px 12px 0 #0A0A0C`,
+} as const;
+
+/** Trama de puntos, el gris del manga. */
+const TONE = `radial-gradient(circle at 1px 1px, ${INK}2e 1.6px, transparent 0) 0 0 / 9px 9px`;
 
 export function Landing({ status, message, onFile }: Props) {
   const [over, setOver] = useState(false);
@@ -36,162 +40,221 @@ export function Landing({ status, message, onFile }: Props) {
   };
 
   return (
-    <div className="landing relative min-h-dvh overflow-hidden bg-[#101014] text-[#141419]">
-      {/* Líneas de velocidad convergiendo: el fondo de un cuadro de impacto. */}
-      <div
-        aria-hidden
-        className="pointer-events-none absolute inset-0"
-        style={{
-          background:
-            "repeating-conic-gradient(from 0deg at 62% 38%, #ffffff 0deg 0.4deg, transparent 0.4deg 1.9deg)",
-          maskImage: "radial-gradient(circle at 62% 38%, transparent 18%, black 72%)",
-          WebkitMaskImage: "radial-gradient(circle at 62% 38%, transparent 18%, black 72%)",
-          opacity: 0.5,
-        }}
-      />
-
-      {/* Onomatopeya: la pieza que domina la página, como en una doble de batalla. */}
+    <div className="landing relative min-h-dvh w-full overflow-hidden bg-[#121214] px-4 py-5 sm:px-8 sm:py-9">
+      {/* Onomatopeya de fondo: apenas más clara que el papel del canvas. */}
       <span
         aria-hidden
-        className="onomatopoeia pointer-events-none absolute select-none font-[family-name:var(--font-display)] uppercase"
+        className="pointer-events-none absolute select-none font-[family-name:var(--font-kana)] font-black"
         style={{
-          top: "24%",
-          left: "-4%",
-          fontSize: "clamp(9rem, 26vw, 26rem)",
-          lineHeight: 0.8,
-          transform: "rotate(-11deg)",
-          color: "transparent",
-          WebkitTextStroke: `3px rgba(255,255,255,.16)`,
+          left: "-2%",
+          top: "34%",
+          fontSize: "clamp(11rem, 30vw, 26rem)",
+          letterSpacing: "0.05em",
+          color: "#1A1A20",
+          transform: "rotate(-12deg)",
+          transformOrigin: "top left",
+          whiteSpace: "nowrap",
         }}
       >
-        Dokaan
+        ドォン
       </span>
 
-      <main className="relative mx-auto flex min-h-dvh max-w-6xl flex-col gap-3 px-4 py-5 sm:gap-4 sm:px-6 sm:py-8">
-        <header className="grid grid-cols-1 gap-3 sm:gap-4 lg:grid-cols-[1fr_170px]">
-          {/* Entra segunda: en manga, la izquierda se lee después. */}
-          <Panel className="order-2 px-6 py-8 sm:px-10 sm:py-11 lg:order-1" tone="paper" beat={2}>
-            <div className="mb-6 flex flex-wrap items-baseline gap-3">
-              <span className="inline-block bg-[#141419] px-3 py-1.5 font-[family-name:var(--font-display)] text-xl uppercase tracking-[0.16em] text-white">
-                Mangaji
-              </span>
-              <span className="text-[10px] font-bold uppercase tracking-[0.34em] text-[#6f6b62]">
-                Lector de manga
-              </span>
-            </div>
-            <h1 className="font-[family-name:var(--font-display)] text-[clamp(3.2rem,10.5vw,7.5rem)] leading-[0.82] uppercase">
-              <span className="block" style={chromatic}>
-                Tu manga
-              </span>
-              <span className="relative block">
-                <span style={chromatic}>dirigido</span>
-                {/* Subrayado a mano alzada, como el énfasis de un globo. */}
-                <svg
-                  aria-hidden
-                  viewBox="0 0 300 12"
-                  preserveAspectRatio="none"
-                  className="absolute -bottom-1 left-0 h-3 w-[62%]"
-                >
-                  <path
-                    d="M2 8 C 60 2, 120 11, 180 5 S 280 3, 298 7"
-                    fill="none"
-                    stroke={MAGENTA}
-                    strokeWidth="4"
-                    strokeLinecap="round"
-                  />
-                </svg>
-              </span>
-            </h1>
-            <p className="mt-7 max-w-lg text-[15px] leading-relaxed text-[#3a3833] sm:text-base">
-              Se lee viñeta por viñeta, con la cámara viajando por la página y el diálogo
-              apareciendo cuando le toca. Como ver el capítulo, pero seguís siendo vos quien
-              marca el ritmo.
-            </p>
-          </Panel>
-
-          {/* Entra primera: es la de la derecha. */}
-          <Panel
-            className="order-1 flex items-center justify-center gap-4 px-6 py-4 lg:order-2 lg:flex-col lg:py-10"
-            tone="ink"
-            beat={1}
-          >
+      <div className="relative mx-auto flex w-full max-w-[1440px] flex-col gap-[18px]">
+        {/* Encabezado */}
+        <header
+          className="panel flex flex-wrap items-center justify-between gap-4 px-5 py-3 sm:px-7"
+          style={panel}
+        >
+          <div className="flex flex-wrap items-baseline gap-3 sm:gap-4">
             <span
-              className="font-[family-name:var(--font-display)] text-4xl leading-none"
-              style={{ color: CYAN }}
+              className="font-[family-name:var(--font-display)] leading-none"
+              style={{ fontSize: "clamp(2rem,5vw,3.5rem)", color: INK }}
+            >
+              MANGAJI
+            </span>
+            <span className="h-6 w-1" style={{ background: MAGENTA }} aria-hidden />
+            <span className="text-[15px] font-medium sm:text-[19px]" style={{ color: INK }}>
+              Lector de manga
+            </span>
+          </div>
+          <span
+            className="font-[family-name:var(--font-kana)] text-[22px] font-bold"
+            style={{ color: "#4A4A50" }}
+          >
+            漫画児
+          </span>
+        </header>
+
+        {/* Hero: sentido de lectura + titular */}
+        <div className="flex flex-col gap-[18px] lg:flex-row">
+          <aside
+            className="panel flex shrink-0 flex-col gap-5 px-6 py-6 lg:w-[228px]"
+            style={{ ...panel, backgroundImage: TONE }}
+          >
+            <p
+              className="font-[family-name:var(--font-display)] text-[17px] leading-tight"
+              style={{ color: INK }}
+            >
+              SENTIDO DE LECTURA
+            </p>
+            <span
+              className="font-[family-name:var(--font-display)] leading-none"
+              style={{ fontSize: "clamp(3rem,9vw,5rem)", color: INK }}
+              aria-hidden
             >
               ←
             </span>
-            <span className="text-center text-[10px] font-bold uppercase leading-[1.5] tracking-[0.22em] text-[#a5a19a]">
-              se lee de
-              <br />
-              derecha a
-              <br />
-              izquierda
-            </span>
-          </Panel>
-        </header>
+            <p className="text-[17px] font-medium leading-snug" style={{ color: INK }}>
+              De derecha a izquierda y de arriba abajo, como el original en papel.
+            </p>
+          </aside>
 
-        {/* La viñeta vacía: acá entra el tomo. */}
-        <Panel tone="paper" beat={3} className="grow">
-          <div
-            onDragOver={(e) => {
-              e.preventDefault();
-              setOver(true);
-            }}
-            onDragLeave={() => setOver(false)}
-            onDrop={(e) => {
-              e.preventDefault();
-              setOver(false);
-              take(e.dataTransfer.files?.[0]);
-            }}
-            className="relative flex h-full min-h-[260px] flex-col items-center justify-center gap-7 overflow-hidden p-8 text-center"
+          <section
+            className="panel relative flex-1 overflow-hidden px-6 py-7 sm:px-9 sm:py-9"
+            style={panel}
           >
-            {/* Al arrastrar encima, la viñeta se enciende: el producto en acto. */}
-            <div
+            {/* La onomatopeya del cuadro, contorneada sobre el papel. */}
+            <span
               aria-hidden
-              className="pointer-events-none absolute inset-0 transition-opacity duration-200"
+              className="pointer-events-none absolute select-none font-[family-name:var(--font-kana)] font-black"
               style={{
-                opacity: over ? 1 : 0,
-                background:
-                  "repeating-conic-gradient(from 0deg at 50% 50%, rgba(0,217,232,.5) 0deg 0.5deg, transparent 0.5deg 2.4deg)",
+                right: "-3%",
+                top: "12%",
+                fontSize: "clamp(5rem,13vw,10.75rem)",
+                letterSpacing: "0.04em",
+                color: PAPER,
+                WebkitTextStroke: `3px ${INK}`,
+                transform: "rotate(4deg)",
+                whiteSpace: "nowrap",
+              }}
+            >
+              ドォン
+            </span>
+
+            <div className="relative flex items-center gap-3">
+              <span className="h-5 w-2" style={{ background: INK }} aria-hidden />
+              <p
+                className="font-[family-name:var(--font-display)] text-[13px] tracking-wide sm:text-[19px]"
+                style={{ color: "#3A3A42" }}
+              >
+                LECTOR DE CBZ · TODO PASA EN TU NAVEGADOR
+              </p>
+            </div>
+
+            {/* Titular en tres capas desplazadas: el desdoblamiento del cuadro de impacto. */}
+            <h1 className="relative mt-5" style={{ lineHeight: 0.92 }}>
+              <span className="sr-only">Tu manga, animeizado</span>
+              {[
+                { color: MAGENTA, x: 20, y: 17 },
+                { color: CYAN, x: 10, y: 8 },
+                { color: INK, x: 0, y: 0 },
+              ].map((layer, i) => (
+                <span
+                  key={layer.color}
+                  aria-hidden
+                  className="font-[family-name:var(--font-display)] whitespace-nowrap"
+                  style={{
+                    display: "block",
+                    position: i === 2 ? "relative" : "absolute",
+                    left: layer.x,
+                    top: layer.y,
+                    fontSize: "clamp(2.6rem,9.5vw,9.5rem)",
+                    letterSpacing: "-0.01em",
+                    color: layer.color,
+                  }}
+                >
+                  TU MANGA,
+                  <br />
+                  ANIMEIZADO
+                </span>
+              ))}
+            </h1>
+
+            <p
+              className="relative mt-7 max-w-[620px] text-[17px] font-medium leading-[1.6] sm:text-[21px]"
+              style={{ color: "#24242A" }}
+            >
+              Mangaji abre tus archivos CBZ y, en vez de dejarte la página entera enfrente, la
+              recorre: encuadra cada viñeta, viaja hasta la siguiente y muestra el diálogo cuando
+              le toca. Como ver el capítulo, salvo que el ritmo lo marcás vos.
+            </p>
+          </section>
+        </div>
+
+        {/* El cuadro que espera el tomo. */}
+        <section
+          className="panel relative"
+          style={{ ...panel, background: over ? CYAN : PAPER, transition: "background 160ms" }}
+          onDragOver={(e) => {
+            e.preventDefault();
+            setOver(true);
+          }}
+          onDragLeave={() => setOver(false)}
+          onDrop={(e) => {
+            e.preventDefault();
+            setOver(false);
+            take(e.dataTransfer.files?.[0]);
+          }}
+        >
+          {/* Marcas de esquina, como las de registro de imprenta. */}
+          {[
+            { top: 14, left: 14 },
+            { top: 14, right: 14 },
+            { bottom: 14, left: 14 },
+            { bottom: 14, right: 14 },
+          ].map((pos, i) => (
+            <span
+              key={i}
+              aria-hidden
+              className="pointer-events-none absolute h-4 w-4"
+              style={{
+                ...pos,
+                borderTop: pos.top !== undefined ? `3px solid ${INK}` : undefined,
+                borderBottom: pos.bottom !== undefined ? `3px solid ${INK}` : undefined,
+                borderLeft: pos.left !== undefined ? `3px solid ${INK}` : undefined,
+                borderRight: pos.right !== undefined ? `3px solid ${INK}` : undefined,
               }}
             />
+          ))}
 
+          <div className="flex flex-col items-center gap-5 px-6 py-9 text-center sm:py-12">
+            {/* Globo de diálogo: la instrucción, dicha por la página. */}
             <div className="relative">
               <div
-                className="relative border-[3px] px-9 py-7 transition-all duration-200 sm:px-14 sm:py-9"
+                className="border-[4px] bg-white px-8 py-5 sm:px-12 sm:py-6"
                 style={{
                   borderColor: INK,
-                  background: over ? CYAN : "#fff",
-                  borderRadius: "48% 52% 50% 50% / 60% 44% 56% 40%",
-                  transform: over ? "scale(1.04) rotate(-1deg)" : "none",
+                  borderRadius: "48% 52% 50% 50% / 58% 45% 55% 42%",
                 }}
               >
-                <p className="font-[family-name:var(--font-display)] text-[clamp(1.5rem,4vw,2.6rem)] uppercase leading-none">
-                  {status === "loading" ? "Abriendo…" : "Soltá tu tomo acá"}
-                </p>
-                <p className="mt-2 text-xs font-medium text-[#3a3833]">
-                  CBZ, o el .cbza ya procesado
+                <p
+                  className="font-[family-name:var(--font-display)] leading-none"
+                  style={{ fontSize: "clamp(1.5rem,4.5vw,2.875rem)", color: INK }}
+                >
+                  {status === "loading" ? "ABRIENDO…" : "SUBÍ TU TOMO ACÁ"}
                 </p>
               </div>
-              <div
+              <span
                 aria-hidden
-                className="absolute left-1/2 h-7 w-7 -translate-x-8 rotate-45 border-b-[3px] border-r-[3px] transition-colors"
-                style={{ bottom: -15, borderColor: INK, background: over ? CYAN : "#fff" }}
+                className="absolute left-1/2 h-6 w-6 -translate-x-9 rotate-45 border-b-[4px] border-r-[4px] bg-white"
+                style={{ bottom: -14, borderColor: INK }}
               />
             </div>
 
             <button
               type="button"
               onClick={() => input.current?.click()}
-              className="group relative inline-flex items-center gap-3 border-[3px] bg-[#141419] px-8 py-3.5 text-white transition-all hover:-translate-x-0.5 hover:-translate-y-0.5 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-4"
-              style={{ borderColor: INK, boxShadow: `5px 5px 0 ${MAGENTA}`, outlineColor: MAGENTA }}
+              className="inline-flex items-center gap-3 border-[4px] px-7 py-3 transition-transform hover:-translate-y-0.5 focus-visible:outline focus-visible:outline-4 focus-visible:outline-offset-4"
+              style={{ borderColor: INK, background: INK, outlineColor: MAGENTA }}
             >
-              <span className="font-[family-name:var(--font-display)] text-xl uppercase tracking-wide">
-                Elegir archivo
+              <span aria-hidden style={{ color: CYAN }}>
+                ▶
               </span>
-              <span className="transition-transform group-hover:translate-x-1" style={{ color: CYAN }}>
-                ▸
+              <span
+                className="font-[family-name:var(--font-display)] leading-none"
+                style={{ fontSize: "clamp(1.15rem,3vw,1.875rem)", color: PAPER }}
+              >
+                ELEGIR ARCHIVO
               </span>
             </button>
             <input
@@ -202,106 +265,85 @@ export function Landing({ status, message, onFile }: Props) {
               onChange={(e) => take(e.target.files?.[0])}
             />
 
-            <p className="relative max-w-sm text-xs font-medium leading-relaxed text-[#6f6b62]">
+            <p className="text-[16px] font-medium sm:text-[19px]" style={{ color: "#3A3A42" }}>
+              Abrí un .cbz. Si ya lo procesaste antes, el .cbza carga directo.
+            </p>
+            <p className="max-w-lg text-[14px] font-medium leading-relaxed" style={{ color: "#5A5A62" }}>
               {status === "error" && message ? (
-                <span className="font-bold text-[#c31d45]">{message}</span>
+                <span style={{ color: "#C31D45", fontWeight: 700 }}>{message}</span>
               ) : (
-                "Nada se sube a ningún servidor: el archivo se abre en tu navegador y se queda en tu máquina."
+                "El archivo no sale de tu máquina: se abre y se procesa en tu navegador, sin pasar por ningún servidor."
               )}
             </p>
           </div>
-        </Panel>
-
-        {/* Tira de tres: se lee de derecha a izquierda, como el resto. */}
-        <section className="grid gap-3 sm:gap-4 md:grid-cols-3" dir="rtl">
-          <Step n="１" title="Encuentra las viñetas" tone="tone" beat={4}>
-            Reconoce cada cuadro y en qué orden se leen, incluso con los cortes diagonales de
-            una página de batalla.
-          </Step>
-          <Step n="２" title="Mueve la cámara" tone="paper" beat={5}>
-            Encuadra viñeta por viñeta y viaja entre ellas. Las de acción entran secas; las
-            tranquilas, con calma.
-          </Step>
-          <Step n="３" title="Suelta el diálogo" tone="tone" beat={6}>
-            Saca el texto de los globos y lo devuelve a su tiempo, con la pausa que pide cada
-            parlamento.
-          </Step>
         </section>
 
-        <footer className="flex flex-wrap items-center justify-between gap-3 pt-1 text-[11px] font-medium uppercase tracking-[0.22em] text-[#7d796f]">
-          <span>
-            Desarrollado por{" "}
-            <span className="font-bold" style={{ color: CYAN }}>
-              lawal
-            </span>
+        {/* Capacidades: numeradas al revés, porque se leen de derecha a izquierda. */}
+        <div className="grid gap-[18px] md:grid-cols-3">
+          {[
+            {
+              n: "03",
+              title: "MUESTRA EL DIÁLOGO",
+              text: "Detecta los globos y muestra cada parlamento cuando le toca, con la pausa que pide la escena.",
+              icon: "▭",
+            },
+            {
+              n: "02",
+              title: "MUEVE LA CÁMARA",
+              text: "Encuadra una viñeta a la vez y se desplaza hasta la siguiente. En las escenas de acción corta seco; en las pausadas, viaja lento.",
+              icon: "◱",
+            },
+            {
+              n: "01",
+              title: "ENCUENTRA LAS VIÑETAS",
+              text: "Analiza la página y la separa cuadro por cuadro. Deduce en qué orden se leen, aun cuando la composición se parte en diagonales.",
+              icon: "▦",
+            },
+          ].map((cap) => (
+            <section
+              key={cap.n}
+              className="panel flex flex-col gap-3 px-6 py-6"
+              style={{ ...panel, backgroundImage: TONE }}
+            >
+              <div className="flex items-start justify-between gap-4">
+                <span className="text-[26px] leading-none" style={{ color: INK }} aria-hidden>
+                  {cap.icon}
+                </span>
+                <span
+                  className="font-[family-name:var(--font-display)] leading-none"
+                  style={{ fontSize: "clamp(2.6rem,5vw,4.75rem)", color: INK }}
+                >
+                  {cap.n}
+                </span>
+              </div>
+              <h2
+                className="font-[family-name:var(--font-display)] leading-tight"
+                style={{ fontSize: "clamp(1.4rem,2.6vw,2.25rem)", color: INK }}
+              >
+                {cap.title}
+              </h2>
+              <p className="text-[16px] font-medium leading-relaxed sm:text-[18px]" style={{ color: "#2E2E36" }}>
+                {cap.text}
+              </p>
+            </section>
+          ))}
+        </div>
+
+        <footer
+          className="panel flex items-center justify-between gap-4 px-6 py-3"
+          style={{ ...panel, background: "#0F0F12", border: `4px solid ${INK}` }}
+        >
+          <span className="text-[15px] font-medium sm:text-[17px]" style={{ color: "#8A8A94" }}>
+            Desarrollado por <span style={{ color: PAPER, fontWeight: 700 }}>lawal</span>
           </span>
-          <span className="text-[#5a5750]">Corre entero en tu navegador</span>
+          <span
+            className="font-[family-name:var(--font-kana)] text-[18px] font-bold"
+            style={{ color: "#5A5A62" }}
+          >
+            終
+          </span>
         </footer>
-      </main>
-
-    </div>
-  );
-}
-
-/** Aberración cromática: el desdoblamiento de color del cuadro de impacto. */
-const chromatic: React.CSSProperties = {
-  textShadow: `0.05em 0 0 ${CYAN}, -0.05em 0 0 ${MAGENTA}`,
-};
-
-/**
- * Viñeta: borde de tinta, esquina recortada y sombra dura.
- *
- * `beat` es su lugar en el orden de lectura, y de ahí sale el retraso con que entra: la
- * página se arma de derecha a izquierda, que es una demostración de lo que hace el producto.
- */
-function Panel({
-  children,
-  className = "",
-  tone = "paper",
-  beat = 1,
-}: {
-  children: React.ReactNode;
-  className?: string;
-  tone?: "paper" | "ink" | "tone";
-  beat?: number;
-}) {
-  const background = tone === "ink" ? "#1c1c22" : tone === "tone" ? "#eeebe3" : "#f7f5f0";
-  return (
-    <div
-      className={`panel border-[3px] ${className}`}
-      style={{
-        borderColor: INK,
-        background: tone === "tone" ? `${SCREENTONE}, #eeebe3` : background,
-        boxShadow: "7px 7px 0 rgba(0,0,0,.55)",
-        clipPath: "polygon(0 0, 100% 0, 100% calc(100% - 20px), calc(100% - 20px) 100%, 0 100%)",
-        animationDelay: `${beat * 90}ms`,
-      }}
-    >
-      {children}
-    </div>
-  );
-}
-
-function Step({
-  n,
-  title,
-  children,
-  tone,
-  beat,
-}: {
-  n: string;
-  title: string;
-  children: React.ReactNode;
-  tone: "paper" | "tone";
-  beat: number;
-}) {
-  return (
-    <Panel tone={tone} beat={beat} className="px-5 py-5 text-right">
-      <div className="mb-2 flex items-baseline justify-between gap-3">
-        <span className="font-[family-name:var(--font-display)] text-xl uppercase">{title}</span>
-        <span className="font-[family-name:var(--font-display)] text-3xl text-[#c9c4b8]">{n}</span>
       </div>
-      <p className="text-[13px] font-medium leading-relaxed text-[#3a3833]">{children}</p>
-    </Panel>
+    </div>
   );
 }

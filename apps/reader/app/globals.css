@@ -5,6 +5,11 @@
   --font-display: var(--font-display);
 }
 
+/* Los glifos japoneses vienen de una hoja aparte con subset mínimo. */
+:root {
+  --font-kana: "Zen Kaku Gothic New", var(--font-body), system-ui, sans-serif;
+}
+
 body {
   background: #101014;
   color: #ededed;
