@@ -108,6 +108,7 @@ export default function Bench() {
           const session = await ort.InferenceSession.create(model.url, {
             executionProviders: [backend],
             graphOptimizationLevel: "all",
+            logSeverityLevel: 3,
           });
           const load = performance.now() - t0;
 

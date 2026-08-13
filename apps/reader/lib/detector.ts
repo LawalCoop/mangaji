@@ -74,6 +74,10 @@ export class Detector {
     const options: Ort.InferenceSession.SessionOptions = {
       executionProviders: [Detector.backend],
       graphOptimizationLevel: "all",
+      // El runtime avisa que las operaciones de forma van a CPU en vez de a la GPU. Es
+      // deliberado —ahí son más rápidas— y el aviso sale del lado nativo, así que no lo
+      // alcanza `env.logLevel`.
+      logSeverityLevel: 3,
     };
 
     onProgress?.("modelo", "cargando el detector de viñetas");
