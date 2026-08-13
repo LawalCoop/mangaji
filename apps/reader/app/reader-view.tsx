@@ -120,17 +120,19 @@ export default function ReaderView() {
     setEta(null);
 
     const source = await CbzSource.open(file);
-    const bitmaps: { name: string; bitmap: ImageBitmap }[] = [];
-    for (let i = 0; i < source.pageCount; i++) {
-      bitmaps.push({ name: source.entryName(i), bitmap: await source.bitmap(i) });
-    }
-    source.close();
-    setLines((l) => [...l, `${bitmaps.length} páginas`]);
+    setLines((l) => [...l, `${source.pageCount} páginas`]);
 
     const { processArchive } = await import("@/lib/process");
     const marks: number[] = [];
 
-    const blob = await processArchive(bitmaps, (next) => {
+    // Las páginas se piden de a una: el archivo libera los bitmaps que desaloja de su
+    // caché, así que guardarlos todos deja referencias muertas, y un tomo entero en memoria
+    // son doscientas imágenes de cuatro megapíxeles.
+    const blob = await processArchive({
+      count: source.pageCount,
+      get: (i) => source.bitmap(i),
+      release: (i) => source.release(i),
+    }, (next) => {
       setStage(next);
       if (next.kind === "models") setLines((l) => [...l, next.detail]);
       if (next.kind === "page") {
@@ -158,6 +160,7 @@ export default function ReaderView() {
       }
     });
 
+    source.close();
     return new File([blob], file.name.replace(/\.[^.]+$/, "") + ".cbza");
   }, []);
 

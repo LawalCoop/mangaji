@@ -99,10 +99,20 @@ function effect(look: Look) {
   return null;
 }
 
-export async function processArchive(
-  pages: { name: string; bitmap: ImageBitmap }[],
-  report: Reporter,
-): Promise<Blob> {
+/**
+ * De dónde salen las páginas.
+ *
+ * Se piden de a una y se liberan enseguida, en vez de cargarlas todas antes de empezar: un
+ * tomo son doscientas páginas de cuatro megapíxeles, y el archivo además libera los bitmaps
+ * que va desalojando de su caché, así que guardarlos deja referencias muertas.
+ */
+export type PageSource = {
+  count: number;
+  get: (index: number) => Promise<ImageBitmap>;
+  release: (index: number) => void;
+};
+
+export async function processArchive(pages: PageSource, report: Reporter): Promise<Blob> {
   const started = performance.now();
   report({ kind: "models", detail: "preparando los detectores" });
 
@@ -116,8 +126,8 @@ export async function processArchive(
   let totalBalloons = 0;
 
   try {
-    for (let index = 0; index < pages.length; index++) {
-      const { bitmap } = pages[index];
+    for (let index = 0; index < pages.count; index++) {
+      const bitmap = await pages.get(index);
       const pageId = `p${String(index + 1).padStart(3, "0")}`;
       const width = bitmap.width;
       const height = bitmap.height;
@@ -129,7 +139,7 @@ export async function processArchive(
       const ctx = canvas.getContext("2d", { willReadFrequently: true })!;
       ctx.drawImage(bitmap, 0, 0);
 
-      report({ kind: "page", index, total: pages.length, detail: "buscando viñetas" });
+      report({ kind: "page", index, total: pages.count, detail: "buscando viñetas" });
       const dets = await detector.detect(ctx.getImageData(0, 0, width, height));
 
       let panels = dedupe(
@@ -158,7 +168,7 @@ export async function processArchive(
       report({
         kind: "page",
         index,
-        total: pages.length,
+        total: pages.count,
         detail: `${panels.length} viñetas · levantando el diálogo`,
       });
 
@@ -285,7 +295,7 @@ export async function processArchive(
       files[entry] = new Uint8Array(await blob.arrayBuffer());
 
       manifestPages.push({ id: pageId, image: entry, size: [width, height], panels: outPanels });
-      bitmap.close();
+      pages.release(index);
     }
   } finally {
     await detector.release();
