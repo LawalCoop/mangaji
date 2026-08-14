@@ -43,6 +43,23 @@ const CONVEX_RATIO = 0.93;
 
 export type Progress = (stage: string, detail?: string) => void;
 
+/**
+ * El entorno de onnxruntime se configura una sola vez por sesión.
+ *
+ * Estos ajustes solo se pueden tocar antes de que el runtime arranque: al segundo intento
+ * ORT responde "Session already started" y falla la carga. Como el detector se crea de nuevo
+ * en cada procesamiento, la configuración tiene que quedar afuera.
+ */
+let configured = false;
+
+function configure(ort: typeof Ort): void {
+  if (configured) return;
+  ort.env.wasm.wasmPaths = "/ort/";
+  ort.env.wasm.numThreads = navigator.hardwareConcurrency ?? 4;
+  ort.env.logLevel = "error";
+  configured = true;
+}
+
 export class Detector {
   #panels: Ort.InferenceSession;
   #text: Ort.InferenceSession;
@@ -59,9 +76,7 @@ export class Detector {
 
   static async load(onProgress?: Progress): Promise<Detector> {
     const ort = await import("onnxruntime-web");
-    ort.env.wasm.wasmPaths = "/ort/";
-    ort.env.wasm.numThreads = navigator.hardwareConcurrency ?? 4;
-    ort.env.logLevel = "error";
+    configure(ort);
 
     const hasGpu =
       "gpu" in navigator && Boolean(await (navigator as unknown as { gpu?: GPU }).gpu?.requestAdapter());
