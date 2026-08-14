@@ -55,7 +55,9 @@ let configured = false;
 function configure(ort: typeof Ort): void {
   if (configured) return;
   ort.env.wasm.wasmPaths = "/ort/";
-  ort.env.wasm.numThreads = navigator.hardwareConcurrency ?? 4;
+  // Los hilos de WebAssembly necesitan memoria compartida, y el navegador solo la habilita
+  // en páginas aisladas. Pedir doce sin eso no los da y encima avisa por consola.
+  ort.env.wasm.numThreads = crossOriginIsolated ? (navigator.hardwareConcurrency ?? 4) : 1;
   ort.env.logLevel = "error";
   configured = true;
 }
