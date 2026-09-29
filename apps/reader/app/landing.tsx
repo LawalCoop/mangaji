@@ -16,6 +16,9 @@ type Props = {
   onFile: (file: File) => void;
 };
 
+/** Lo que se puede abrir. */
+const ACCEPT = ".cbza,.cbz,.cbr,.zip,.rar,application/zip";
+
 const INK = "#0B0B0C";
 const PAPER = "#F4EFE3";
 const CYAN = "#00D9F5";
@@ -78,17 +81,19 @@ export function Landing({ status, message, onFile }: Props) {
             </span>
           </div>
           <span
-            className="font-[family-name:var(--font-kana)] text-[22px] font-bold"
+            className="font-[family-name:var(--font-kana)] text-[22px] font-bold max-sm:hidden"
             style={{ color: "#4A4A50" }}
           >
             漫画児
           </span>
         </header>
 
-        {/* Hero: sentido de lectura + titular */}
-        <div className="flex flex-col gap-[18px] lg:flex-row">
+        {/* Hero: sentido de lectura + titular. En el celular el contenedor se disuelve y el
+            orden cambia: titular y carga primero, que es a lo que se viene; la explicación del
+            sentido de lectura queda después. */}
+        <div className="flex gap-[18px] max-lg:contents lg:flex-row">
           <aside
-            className="panel flex shrink-0 flex-col gap-5 px-6 py-6 lg:w-[228px]"
+            className="panel flex shrink-0 flex-col gap-5 px-6 py-6 max-lg:order-3 lg:w-[228px]"
             style={{ ...panel, backgroundImage: TONE }}
           >
             <p
@@ -110,13 +115,14 @@ export function Landing({ status, message, onFile }: Props) {
           </aside>
 
           <section
-            className="panel relative flex-1 overflow-hidden px-6 py-7 sm:px-9 sm:py-9"
+            className="panel relative flex-1 overflow-hidden px-6 py-7 max-lg:order-1 sm:px-9 sm:py-9"
             style={panel}
           >
-            {/* La onomatopeya del cuadro, contorneada sobre el papel. */}
+            {/* La onomatopeya del cuadro, contorneada sobre el papel. En pantalla angosta no
+                hay dónde ponerla sin pisar el titular. */}
             <span
               aria-hidden
-              className="pointer-events-none absolute select-none font-[family-name:var(--font-kana)] font-black"
+              className="pointer-events-none absolute select-none font-[family-name:var(--font-kana)] font-black max-sm:hidden"
               style={{
                 right: "-3%",
                 top: "12%",
@@ -144,9 +150,11 @@ export function Landing({ status, message, onFile }: Props) {
             {/* Titular en tres capas desplazadas: el desdoblamiento del cuadro de impacto. */}
             <h1 className="relative mt-5" style={{ lineHeight: 0.92 }}>
               <span className="sr-only">Tu manga, animeizado</span>
+              {/* Desplazamientos en `em`, proporcionales a la letra: en píxeles fijos, con el
+                  titular chico del celular las capas se despegaban y se leían como texto aparte. */}
               {[
-                { color: MAGENTA, x: 20, y: 17 },
-                { color: CYAN, x: 10, y: 8 },
+                { color: MAGENTA, x: "0.13em", y: "0.11em" },
+                { color: CYAN, x: "0.065em", y: "0.055em" },
                 { color: INK, x: 0, y: 0 },
               ].map((layer, i) => (
                 <span
@@ -158,7 +166,7 @@ export function Landing({ status, message, onFile }: Props) {
                     position: i === 2 ? "relative" : "absolute",
                     left: layer.x,
                     top: layer.y,
-                    fontSize: "clamp(2.6rem,9.5vw,9.5rem)",
+                    fontSize: "clamp(2.6rem,min(14vw,9.5vw + 2rem),9.5rem)",
                     letterSpacing: "-0.01em",
                     color: layer.color,
                   }}
@@ -183,7 +191,7 @@ export function Landing({ status, message, onFile }: Props) {
 
         {/* El cuadro que espera el tomo. */}
         <section
-          className="panel relative"
+          className="panel relative max-lg:order-2"
           style={{ ...panel, background: over ? CYAN : PAPER, transition: "background 160ms" }}
           onDragOver={(e) => {
             e.preventDefault();
@@ -247,7 +255,14 @@ export function Landing({ status, message, onFile }: Props) {
 
             <button
               type="button"
-              onClick={() => input.current?.click()}
+              onClick={() => {
+                const el = input.current;
+                if (!el) return;
+                // En el celular, sin filtro: iOS no conoce .cbz ni .cbr y los deja en gris, sin
+                // poder elegirlos. Lo que no se pueda abrir lo avisa el lector después.
+                el.accept = matchMedia("(pointer: coarse)").matches ? "" : ACCEPT;
+                el.click();
+              }}
               className="inline-flex items-center gap-3 border-[4px] px-7 py-3 transition-transform hover:-translate-y-0.5 focus-visible:outline focus-visible:outline-4 focus-visible:outline-offset-4"
               style={{ borderColor: INK, background: INK, outlineColor: MAGENTA }}
             >
@@ -264,7 +279,7 @@ export function Landing({ status, message, onFile }: Props) {
             <input
               ref={input}
               type="file"
-              accept=".cbza,.cbz,.cbr,.zip,.rar,application/zip"
+              accept={ACCEPT}
               className="hidden"
               onChange={(e) => take(e.target.files?.[0])}
             />
@@ -283,7 +298,7 @@ export function Landing({ status, message, onFile }: Props) {
         </section>
 
         {/* Capacidades: numeradas al revés, porque se leen de derecha a izquierda. */}
-        <div className="grid gap-[18px] md:grid-cols-3">
+        <div className="grid gap-[18px] max-lg:order-4 md:grid-cols-3">
           {[
             {
               n: "03",
@@ -334,7 +349,7 @@ export function Landing({ status, message, onFile }: Props) {
         </div>
 
         <footer
-          className="panel flex items-center justify-between gap-4 px-6 py-3"
+          className="panel flex items-center justify-between gap-4 px-6 py-3 max-lg:order-5"
           style={{ ...panel, background: "#0F0F12", border: `4px solid ${INK}` }}
         >
           <span className="text-[15px] font-medium sm:text-[17px]" style={{ color: "#8A8A94" }}>

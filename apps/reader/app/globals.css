@@ -61,3 +61,17 @@ body {
     transform: none;
   }
 }
+
+/* Ayuda de gestos del lector: entra, se queda lo justo para leerla y se va. */
+@keyframes fade {
+  0% {
+    opacity: 0;
+  }
+  8%,
+  80% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+  }
+}

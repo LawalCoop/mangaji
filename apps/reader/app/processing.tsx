@@ -120,6 +120,14 @@ export function Processing({ title, stage, lines, progress, eta }: ProcessingPro
               queda {eta}
             </p>
           )}
+
+          {/* Desde el celular pesa: mejor saberlo antes que descubrirlo en la factura. */}
+          {stage?.kind === "models" && (
+            <p className="mt-3 text-[13px] font-medium leading-snug" style={{ color: "#5A5A62" }}>
+              La primera vez se bajan los detectores, unos 80 MB. Después el navegador los
+              reutiliza. Si estás con datos, conviene wifi.
+            </p>
+          )}
         </section>
 
         {/* El registro: qué fue encontrando, línea por línea. */}

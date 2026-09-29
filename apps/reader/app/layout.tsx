@@ -1,4 +1,4 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import { Anton, Zen_Kaku_Gothic_New } from "next/font/google";
 import "./globals.css";
 import { asset } from "@/lib/base";
@@ -24,6 +24,18 @@ export const metadata: Metadata = {
 };
 
 /**
+ * Pantalla completa en el celular, notch incluido: el lector dibuja hasta el borde y la barra
+ * de controles se corre sola para no quedar bajo la zona del gesto de inicio.
+ */
+export const viewport: Viewport = {
+  width: "device-width",
+  initialScale: 1,
+  viewportFit: "cover",
+  themeColor: "#121214",
+  colorScheme: "dark",
+};
+
+/**
  * Los pocos glifos japoneses de la portada, pedidos uno por uno.
  *
  * El subset japonés completo son varios MB de kanji; con `text=` Google devuelve solo estos
@@ -40,15 +52,18 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
     >
       <head>
         {/* Sin servidor que mande las cabeceras de aislamiento —GitHub Pages no deja—, las
-            pone un service worker. Donde el servidor ya las manda no hace nada. */}
+            pone un service worker. Donde el servidor ya las manda no hace nada.
+            `require-corp` y no `credentialless`: Safari no conoce el segundo, y ahí el iPhone
+            se quedaba sin hilos. Por eso la hoja de Google va con `crossOrigin`, que es lo
+            que `require-corp` le pide a un recurso de otro origen. */}
         <script
           dangerouslySetInnerHTML={{
-            __html: "window.coi={coepCredentialless:()=>true,quiet:true}",
+            __html: "window.coi={coepCredentialless:()=>false,quiet:true}",
           }}
         />
         <script src={asset("/coi-serviceworker.min.js")} />
         <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="anonymous" />
-        <link rel="stylesheet" href={KANA_URL} />
+        <link rel="stylesheet" href={KANA_URL} crossOrigin="anonymous" />
       </head>
       <body className="min-h-full flex flex-col overscroll-none font-[family-name:var(--font-body)]">
         {children}

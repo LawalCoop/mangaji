@@ -31,6 +31,19 @@ const TRAVEL_MS = 520;
  */
 const OPENING = { ms: 2600, zoom: 2.3, curtain: 1100 };
 
+/** Lo que se puede abrir, por extensión. */
+const OPENABLE = new Set(["cbza", "cbz", "cbr", "zip", "rar"]);
+/** Cuánto puede moverse un dedo y seguir contando como toque. Un pulgar nunca queda quieto. */
+const TAP_SLOP = 10;
+/** Ancho de cada zona lateral de toque; el centro que queda muestra los controles. */
+const TAP_ZONE = 0.35;
+/** Un deslizamiento tiene que ser rápido y largo, para no confundirse con mover la cámara. */
+const SWIPE = { ms: 350, px: 60 };
+/** Cuánto quedan los controles a la vista después del último toque. */
+const CHROME_MS = 3500;
+/** Marca de que ya se mostró la ayuda de gestos, para no repetirla en cada tomo. */
+const HINT_KEY = "mangaji:gestures-seen";
+
 // La cámara se detiene al llegar a la viñeta. Se probó dejarla derivando muy despacio para
 // que la toma no quedara del todo quieta, y en marcha distrae más de lo que aporta: el
 // movimiento lo dan la entrada y el viaje entre viñetas, y entre medio conviene leer tranquilo.
@@ -108,6 +121,69 @@ export default function ReaderView() {
   const musicRef = useRef<Music | null>(null);
   /** El volumen elegido sobrevive a apagar y volver a encender la música. */
   const volumeRef = useRef(0.42);
+
+  /**
+   * Controles a la vista. En el celular la barra tapa buena parte de la viñeta, así que se
+   * esconde sola mientras se lee y vuelve con un toque en el centro.
+   */
+  const [chrome, setChrome] = useState(true);
+  const chromeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  /** Hay un panel de la barra abierto: no se esconde mientras se lo usa. */
+  const chromeHeld = useRef(false);
+  /** Ayuda de gestos, la primera vez que se lee con el dedo. */
+  const [hint, setHint] = useState(false);
+
+  const scheduleHide = useCallback(() => {
+    if (chromeTimer.current) clearTimeout(chromeTimer.current);
+    chromeTimer.current = setTimeout(() => {
+      if (!chromeHeld.current) setChrome(false);
+    }, CHROME_MS);
+  }, []);
+
+  /** Muestra los controles y reinicia la cuenta para esconderlos. */
+  const poke = useCallback(() => {
+    setChrome(true);
+    scheduleHide();
+  }, [scheduleHide]);
+
+  const toggleChrome = useCallback(() => {
+    setHint(false);
+    setChrome((on) => {
+      if (!on) scheduleHide();
+      return !on;
+    });
+  }, [scheduleHide]);
+
+  const holdChrome = useCallback(
+    (held: boolean) => {
+      chromeHeld.current = held;
+      if (held) setChrome(true);
+      else scheduleHide();
+    },
+    [scheduleHide],
+  );
+
+  useEffect(() => {
+    if (status.kind !== "ready") return;
+    poke();
+    if (!matchMedia("(pointer: coarse)").matches) return;
+    try {
+      if (localStorage.getItem(HINT_KEY)) return;
+      localStorage.setItem(HINT_KEY, "1");
+    } catch {
+      // Sin almacenamiento (navegación privada): se muestra igual, no pasa nada por repetirla.
+    }
+    setHint(true);
+    const t = setTimeout(() => setHint(false), 5200);
+    return () => clearTimeout(t);
+  }, [status.kind, poke]);
+
+  useEffect(
+    () => () => {
+      if (chromeTimer.current) clearTimeout(chromeTimer.current);
+    },
+    [],
+  );
 
   const teardown = useCallback(() => {
     engine.current?.dispose();
@@ -484,6 +560,13 @@ export default function ReaderView() {
         const canvas = canvasRef.current;
         if (!canvas) throw new Error("Canvas no disponible");
 
+        // En el celular el selector no filtra (iOS no reconoce las extensiones de cómic), así
+        // que puede llegar cualquier cosa. Sin extensión se intenta igual: el contenido manda.
+        const ext = /\.([^./]+)$/.exec(input.name)?.[1]?.toLowerCase();
+        if (ext && !OPENABLE.has(ext)) {
+          throw new Error(`Eso es un .${ext}, no un tomo. Elegí un archivo .cbz, .cbr o .cbza.`);
+        }
+
         // Un CBZ hay que procesarlo, y eso se hace leyendo; un `.cbza` ya viene listo.
         if (!/\.cbza$/i.test(input.name)) {
           await build(canvas, input);
@@ -671,35 +754,119 @@ export default function ReaderView() {
     [open],
   );
 
-  // Paneo con arrastre; un click limpio avanza o retrocede según la mitad de pantalla.
-  const drag = useRef<{ x: number; y: number; moved: boolean } | null>(null);
+  /**
+   * Gestos sobre la página, pensados primero para el celular.
+   *
+   * - Tocar: el tercio izquierdo avanza y el derecho retrocede —el manga se lee hacia la
+   *   izquierda—; el centro muestra u oculta los controles.
+   * - Deslizar rápido de lado: pasa de viñeta, como dar vuelta la hoja. Hacia la derecha
+   *   avanza, porque lo que sigue está a la izquierda.
+   * - Arrastrar: mueve la cámara. Pellizcar: zoom, anclado entre los dos dedos.
+   */
+  const pointers = useRef(new Map<number, { x: number; y: number }>());
+  const gesture = useRef<{
+    x0: number;
+    y0: number;
+    t0: number;
+    moved: boolean;
+    /** Hubo dos dedos en algún momento: ya no es un toque ni un deslizamiento. */
+    multi: boolean;
+    pinch: { dist: number; cx: number; cy: number } | null;
+  } | null>(null);
+
+  const pinchOf = (rect: DOMRect) => {
+    const [a, b] = [...pointers.current.values()];
+    return {
+      dist: Math.hypot(b.x - a.x, b.y - a.y),
+      cx: (a.x + b.x) / 2 - rect.left,
+      cy: (a.y + b.y) / 2 - rect.top,
+    };
+  };
 
   const onPointerDown = (e: React.PointerEvent) => {
     if (!engine.current) return;
-    (e.target as Element).setPointerCapture?.(e.pointerId);
-    drag.current = { x: e.clientX, y: e.clientY, moved: false };
+    try {
+      (e.target as Element).setPointerCapture?.(e.pointerId);
+    } catch {
+      // El dedo ya se levantó cuando llegó el evento: sin captura el gesto sigue igual.
+    }
+    pointers.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
+
+    if (pointers.current.size === 1) {
+      gesture.current = {
+        x0: e.clientX,
+        y0: e.clientY,
+        t0: performance.now(),
+        moved: false,
+        multi: false,
+        pinch: null,
+      };
+    } else if (pointers.current.size === 2 && gesture.current) {
+      gesture.current.multi = true;
+      gesture.current.pinch = pinchOf((e.currentTarget as HTMLElement).getBoundingClientRect());
+    }
   };
 
   const onPointerMove = (e: React.PointerEvent) => {
-    const d = drag.current;
+    // Con el mouse, moverlo sobre la página alcanza para traer los controles.
+    if (e.pointerType === "mouse" && e.buttons === 0) poke();
+
     const eng = engine.current;
-    if (!d || !eng) return;
-    const dx = e.clientX - d.x;
-    const dy = e.clientY - d.y;
-    if (Math.abs(dx) + Math.abs(dy) > 4) d.moved = true;
-    eng.stage.camera.nudge(dx, dy);
-    d.x = e.clientX;
-    d.y = e.clientY;
+    const prev = pointers.current.get(e.pointerId);
+    const g = gesture.current;
+    if (!eng || !prev || !g) return;
+    pointers.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
+
+    if (g.pinch && pointers.current.size >= 2) {
+      const next = pinchOf((e.currentTarget as HTMLElement).getBoundingClientRect());
+      if (g.pinch.dist > 0) eng.stage.camera.zoomAt(next.dist / g.pinch.dist, next.cx, next.cy);
+      eng.stage.camera.nudge(next.cx - g.pinch.cx, next.cy - g.pinch.cy);
+      g.pinch = next;
+      return;
+    }
+    if (g.multi) return;
+
+    if (Math.hypot(e.clientX - g.x0, e.clientY - g.y0) > TAP_SLOP) g.moved = true;
+    eng.stage.camera.nudge(e.clientX - prev.x, e.clientY - prev.y);
   };
 
   const onPointerUp = (e: React.PointerEvent) => {
-    const d = drag.current;
+    pointers.current.delete(e.pointerId);
+    const g = gesture.current;
     const eng = engine.current;
-    drag.current = null;
-    if (!d || !eng || d.moved) return;
+    if (!g || !eng) return;
+
+    // Al levantar uno de los dos dedos el pellizco termina, pero el gesto sigue hasta que
+    // se levanten todos: si no, el dedo que queda se tomaría como un toque.
+    if (g.multi) {
+      if (pointers.current.size === 1) g.pinch = null;
+      if (pointers.current.size === 0) gesture.current = null;
+      return;
+    }
+    gesture.current = null;
+
+    const dx = e.clientX - g.x0;
+    const dy = e.clientY - g.y0;
+    if (g.moved) {
+      const swipe =
+        e.pointerType !== "mouse" &&
+        performance.now() - g.t0 < SWIPE.ms &&
+        Math.abs(dx) > SWIPE.px &&
+        Math.abs(dx) > Math.abs(dy) * 1.5;
+      if (swipe) (dx > 0 ? eng.director.next() : eng.director.prev());
+      return;
+    }
+
     const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
-    // Mitad izquierda = siguiente, por la dirección de lectura del manga.
-    e.clientX - rect.left < rect.width / 2 ? eng.director.next() : eng.director.prev();
+    const at = (e.clientX - rect.left) / rect.width;
+    if (at < TAP_ZONE) eng.director.next();
+    else if (at > 1 - TAP_ZONE) eng.director.prev();
+    else toggleChrome();
+  };
+
+  const onPointerCancel = (e: React.PointerEvent) => {
+    pointers.current.delete(e.pointerId);
+    if (pointers.current.size === 0) gesture.current = null;
   };
 
   const onWheel = (e: React.WheelEvent) => {
@@ -719,12 +886,14 @@ export default function ReaderView() {
       onDrop={onDrop}
       onDragOver={(e) => e.preventDefault()}
     >
+      {/* `touch-none` le saca al navegador el pellizco y el arrastre, que acá son de la
+          cámara; sin el callout, mantener apretado no abre el menú de la imagen. */}
       <div
-        className="absolute inset-0 touch-none"
+        className="absolute inset-0 touch-none select-none [-webkit-touch-callout:none]"
         onPointerDown={onPointerDown}
         onPointerMove={onPointerMove}
         onPointerUp={onPointerUp}
-        onPointerCancel={() => (drag.current = null)}
+        onPointerCancel={onPointerCancel}
         onWheel={onWheel}
       >
         <canvas ref={canvasRef} className="block h-full w-full" />
@@ -733,11 +902,35 @@ export default function ReaderView() {
       {/* Solo aparece si la lectura alcanzó al procesamiento, que es raro: procesar una
           página lleva menos que leerla. */}
       {waiting && (
-        <div className="pointer-events-none absolute inset-x-0 top-6 z-20 flex justify-center">
+        <div className="pointer-events-none absolute inset-x-0 top-[max(1.5rem,env(safe-area-inset-top))] z-20 flex justify-center px-4">
           <span className="flex items-center gap-2 rounded-full border border-neutral-700/80 bg-neutral-900/85 px-4 py-2 text-xs text-neutral-300 backdrop-blur">
             <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-[#00D9F5]" />
             preparando la página que sigue…
           </span>
+        </div>
+      )}
+
+      {/* La primera vez con el dedo: dónde tocar. Se va sola o con el primer toque al centro. */}
+      {hint && status.kind === "ready" && (
+        <div
+          className="pointer-events-none absolute inset-0 z-20 grid grid-cols-[35fr_30fr_35fr] text-center text-[13px] font-medium text-neutral-100 animate-[fade_5.2s_ease-in-out_forwards]"
+          aria-hidden
+        >
+          <div className="flex items-center justify-center bg-[#00D9F5]/15 px-3">
+            tocá acá
+            <br />
+            para avanzar
+          </div>
+          <div className="flex items-center justify-center px-2">
+            centro:
+            <br />
+            controles
+          </div>
+          <div className="flex items-center justify-center bg-[#FF2E88]/15 px-3">
+            acá para
+            <br />
+            volver
+          </div>
         </div>
       )}
 
@@ -759,6 +952,9 @@ export default function ReaderView() {
 
       {status.kind === "ready" && (
         <Toolbar
+          visible={chrome}
+          onActivity={poke}
+          onHold={holdChrome}
           title={title}
           page={at.page}
           pages={at.pages}

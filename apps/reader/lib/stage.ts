@@ -136,7 +136,9 @@ export class Stage {
       background: "#0a0a0a",
       antialias: true,
       autoDensity: true,
-      resolution: window.devicePixelRatio || 1,
+      // Tope en 2: los celulares vienen con 3, que son más del doble de píxeles por cuadro
+      // —con el desenfoque del foco encima— sin diferencia que se vea a esa distancia.
+      resolution: Math.min(window.devicePixelRatio || 1, 2),
       preference: "webgl",
     });
     return new Stage(app);
