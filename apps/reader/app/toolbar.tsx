@@ -21,6 +21,13 @@ export type ToolbarProps = {
   onVolume: (value: number) => void;
   panelMode: boolean;
   hasPanels: boolean;
+  /** Páginas ya procesadas mientras se lee, o null si no hay nada en curso. */
+  built: { done: number; total: number } | null;
+  /** Cuánto falta para tener el tomo entero. */
+  eta: string | null;
+  /** El tomo está entero: se puede guardar para no volver a procesarlo. */
+  canSave: boolean;
+  onSave: () => void;
   onPage: (page: number) => void;
   onStep: (delta: number) => void;
   onZoom: (factor: number) => void;
@@ -125,6 +132,29 @@ export function Toolbar(props: ToolbarProps) {
             </label>
           )}
         </Group>
+
+        {/* El tomo se sigue procesando detrás mientras se lee: conviene que se vea, sobre
+            todo para entender por qué el final todavía no está. */}
+        {props.built && (
+          <span
+            className="flex items-center gap-2 rounded-md border border-neutral-700/80 bg-neutral-900/70 px-2.5 py-1.5 text-[11px] text-neutral-400 backdrop-blur"
+            title="Las páginas que faltan se están procesando mientras leés"
+          >
+            <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-[#00D9F5]" />
+            <span className="tabular-nums">
+              procesando {props.built.done} / {props.built.total}
+              {props.eta && <span className="ml-1 text-neutral-500">· queda {props.eta}</span>}
+            </span>
+          </span>
+        )}
+
+        {props.canSave && (
+          <Group>
+            <Button onClick={props.onSave} title="Guardar el tomo ya procesado para abrirlo al instante">
+              guardar .cbza
+            </Button>
+          </Group>
+        )}
 
         <span className="ml-auto truncate text-[11px] text-neutral-500">
           {props.title}

@@ -1,15 +1,19 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import type { Stage } from "@/lib/process";
 
 /**
  * Pantalla de procesamiento.
  *
- * Un CBZ tarda entre doce segundos y varios minutos según la máquina, así que la espera
- * tiene que contar qué está pasando en vez de mostrar una barra muda: qué página va, qué
- * encontró en ella, y cuánto falta. El registro corre como los avisos de una consola.
+ * Solo se ve hasta que la primera página está lista —unos segundos—: de ahí en adelante la
+ * lectura empieza y el resto del tomo se procesa detrás. Aun así cuenta qué está pasando en
+ * vez de mostrar una barra muda, porque es el rato en que se cargan los modelos.
  */
+
+export type Stage =
+  | { kind: "opening" }
+  | { kind: "models"; detail: string }
+  | { kind: "page"; index: number; total: number; detail: string };
 
 const INK = "#0B0B0C";
 const PAPER = "#F4EFE3";
@@ -147,10 +151,6 @@ function headline(stage: Stage | null): string {
       return "Cargando";
     case "page":
       return "Leyendo la página";
-    case "packing":
-      return "Armando el tomo";
-    case "done":
-      return "Listo";
     default:
       return "Abriendo";
   }
@@ -162,10 +162,6 @@ function detail(stage: Stage | null): string {
       return stage.detail;
     case "page":
       return `Página ${stage.index + 1} de ${stage.total} · ${stage.detail}`;
-    case "packing":
-      return "Guardando el arte y el diálogo";
-    case "done":
-      return `${stage.panels} viñetas y ${stage.balloons} globos en ${(stage.ms / 1000).toFixed(1)} s`;
     default:
       return "Descomprimiendo";
   }

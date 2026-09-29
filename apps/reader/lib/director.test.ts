@@ -25,7 +25,7 @@ function collect(director: Director) {
   director.on((ev) => {
     if (ev.type === "beat") events.push(`beat:${ev.beat.t}`);
     else if (ev.type === "frame") events.push(`frame:${ev.index}`);
-    else events.push("end");
+    else events.push(ev.type);
   });
   return events;
 }
@@ -49,6 +49,54 @@ describe("Director", () => {
     d.next();
     expect(d.index).toBe(1);
     expect(events).toContain("end");
+  });
+
+  it("espera en vez de terminar cuando el archivo todavía se está procesando", () => {
+    const frames: Partial<Frame>[] = [{}, {}];
+    const source = makeSource(frames);
+    // Una fuente que todavía crece: es el caso de leer mientras el CBZ se procesa.
+    const growing: FrameSource = { ...source, complete: false, at: (i) => source.at(i) };
+
+    const d = new Director(growing);
+    const events = collect(d);
+
+    d.next();
+    d.next();
+    expect(d.index).toBe(1);
+    expect(events).toContain("waiting");
+    expect(events).not.toContain("end");
+    expect(d.waiting).toBe(true);
+  });
+
+  it("sigue solo cuando la página que faltaba está lista", () => {
+    const built: Partial<Frame>[] = [{}, {}];
+    const growing: FrameSource = {
+      get length() {
+        return built.length;
+      },
+      at: (i) => ({
+        id: `f${i}`,
+        page: i,
+        rect: { x: 0, y: 0, w: 100, h: 100 },
+        beats: [],
+      }),
+      label: (i) => `${i + 1}`,
+      complete: false,
+    };
+
+    const d = new Director(growing);
+    d.next();
+    d.next();
+    expect(d.waiting).toBe(true);
+
+    // Sin material nuevo no se mueve: avisar de más no puede saltear nada.
+    d.grew();
+    expect(d.index).toBe(1);
+
+    built.push({});
+    d.grew();
+    expect(d.index).toBe(2);
+    expect(d.waiting).toBe(false);
   });
 
   it("dispara los beats en orden a medida que corre el reloj", () => {

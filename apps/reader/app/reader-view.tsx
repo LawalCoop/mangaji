@@ -1,18 +1,19 @@
 "use client";
 
-import { MANIFEST_FILENAME, safeParseManifest, type CameraMove } from "@mangaji/format";
+import { MANIFEST_FILENAME, Page, safeParseManifest, type CameraMove } from "@mangaji/format";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { CbzSource } from "@/lib/archive";
+import { CbzSource, type ArchiveSource } from "@/lib/archive";
 import { Camera, type Viewport } from "@/lib/camera";
 import { Director } from "@/lib/director";
 import { PageFrameSource, PanelFrameSource } from "@/lib/frame-sources";
+import { LiveSource } from "@/lib/live-archive";
 import { DEFAULT_MOOD, MOOD_ORDER, MOODS, type MoodId } from "@/lib/mood";
 import { Music } from "@/lib/music";
 import { Stage } from "@/lib/stage";
 import type { Rect } from "@/lib/types";
-import type { Stage as ProcessStage } from "@/lib/process";
+import type { ProcessRequest, ProcessResponse } from "@/lib/process.worker";
 import { Landing } from "./landing";
-import { Processing } from "./processing";
+import { Processing, type Stage as ProcessStage } from "./processing";
 import { Toolbar } from "./toolbar";
 
 /** Hasta que la página se decodifica no se sabe su tamaño; esto evita un encuadre en cero. */
@@ -70,7 +71,7 @@ function formatEta(seconds: number): string {
 export default function ReaderView() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const engine = useRef<{
-    source: CbzSource;
+    source: ArchiveSource;
     stage: Stage;
     director: Director;
     sizes: { w: number; h: number }[];
@@ -78,14 +79,23 @@ export default function ReaderView() {
     panelFrames: PanelFrameSource | null;
     dispose: () => void;
   } | null>(null);
+  /** El archivo que se está escribiendo, para poder guardarlo cuando esté completo. */
+  const liveRef = useRef<LiveSource | null>(null);
+  const workerRef = useRef<Worker | null>(null);
 
   const [status, setStatus] = useState<Status>({ kind: "idle" });
   const [title, setTitle] = useState("");
-  /** Estado del procesamiento de un CBZ, cuando hay que convertirlo antes de leer. */
+  /** Lo que se muestra mientras se espera la primera página de un CBZ. */
   const [stage, setStage] = useState<ProcessStage | null>(null);
   const [lines, setLines] = useState<string[]>([]);
   const [progress, setProgress] = useState<number | null>(null);
   const [eta, setEta] = useState<string | null>(null);
+  /** Cuánto del tomo lleva procesado mientras se lee, o null si no hay nada en curso. */
+  const [built, setBuilt] = useState<{ done: number; total: number } | null>(null);
+  /** El tomo terminó de procesarse y se puede guardar. */
+  const [archived, setArchived] = useState(false);
+  /** Se leyó más rápido de lo que se procesa y hay que esperar a la página siguiente. */
+  const [waiting, setWaiting] = useState(false);
   const [panelMode, setPanelMode] = useState(false);
   const [mood, setMood] = useState<MoodId>(DEFAULT_MOOD);
   const [music, setMusic] = useState(false);
@@ -102,99 +112,28 @@ export default function ReaderView() {
   const teardown = useCallback(() => {
     engine.current?.dispose();
     engine.current = null;
+    // Si había un tomo a medio procesar, su worker sigue vivo con los modelos cargados.
+    workerRef.current?.terminate();
+    workerRef.current = null;
   }, []);
 
   useEffect(() => teardown, [teardown]);
 
   /**
-   * Convierte un CBZ en un `.cbza`.
+   * Monta el motor de lectura sobre una fuente.
    *
-   * Se hace acá, en el navegador, y no en un servidor: con GPU es más rápido que el pipeline
-   * de escritorio, y el archivo no tiene que salir de la máquina.
+   * No le importa si el archivo está completo o todavía se está procesando: `ArchiveSource`
+   * existe justamente para eso, y `PanelFrameSource` puede seguir creciendo debajo.
    */
-  const convert = useCallback(async (file: File): Promise<File> => {
-    setStatus({ kind: "processing" });
-    setStage(null);
-    setLines(["descomprimiendo el archivo"]);
-    setProgress(null);
-    setEta(null);
-
-    const source = await CbzSource.open(file);
-    setLines((l) => [...l, `${source.pageCount} páginas`]);
-
-    const { processArchive } = await import("@/lib/process");
-    const marks: number[] = [];
-
-    // Las páginas se piden de a una: el archivo libera los bitmaps que desaloja de su
-    // caché, así que guardarlos todos deja referencias muertas, y un tomo entero en memoria
-    // son doscientas imágenes de cuatro megapíxeles.
-    const blob = await processArchive({
-      count: source.pageCount,
-      get: (i) => source.bitmap(i),
-      release: (i) => source.release(i),
-    }, (next) => {
-      setStage(next);
-      if (next.kind === "models") setLines((l) => [...l, next.detail]);
-      if (next.kind === "page") {
-        setProgress(next.index / next.total);
-        // La estimación se hace sobre las últimas páginas y no sobre el promedio: las
-        // primeras cargan modelos y salen más lentas, y arrastran la cuenta hacia arriba.
-        marks[next.index] = performance.now();
-        const from = Math.max(0, next.index - ETA_WINDOW);
-        if (next.index > from) {
-          const per = (marks[next.index] - marks[from]) / (next.index - from);
-          setEta(formatEta(((next.total - next.index) * per) / 1000));
-        }
-        setLines((l) => [...l, `página ${next.index + 1}: ${next.detail}`]);
-      }
-      if (next.kind === "packing") {
-        setProgress(1);
-        setEta(null);
-        setLines((l) => [...l, "armando el tomo"]);
-      }
-      if (next.kind === "done") {
-        setLines((l) => [
-          ...l,
-          `${next.panels} viñetas · ${next.balloons} globos · ${(next.ms / 1000).toFixed(1)} s`,
-        ]);
-      }
-    });
-
-    source.close();
-    return new File([blob], file.name.replace(/\.[^.]+$/, "") + ".cbza");
-  }, []);
-
-  const open = useCallback(
-    async (input: File) => {
-      teardown();
-      setStatus({ kind: "loading" });
-      setTitle(input.name);
-
+  const mount = useCallback(
+    async (
+      canvas: HTMLCanvasElement,
+      source: ArchiveSource,
+      sizes: { w: number; h: number }[],
+      pageFrames: PageFrameSource,
+      panelFrames: PanelFrameSource | null,
+    ) => {
       try {
-        const canvas = canvasRef.current;
-        if (!canvas) throw new Error("Canvas no disponible");
-
-        // Un `.cbza` ya trae el manifest y abre directo; un CBZ hay que procesarlo antes.
-        const file = /\.cbza$/i.test(input.name) ? input : await convert(input);
-        setStatus({ kind: "loading" });
-
-        const source = await CbzSource.open(file);
-        const sizes = Array.from({ length: source.pageCount }, () => ({ ...ASSUMED_PAGE }));
-        const pageFrames = new PageFrameSource(sizes);
-
-        // Un `.cbza` trae manifest y se lee viñeta por viñeta; un CBZ común, página a página.
-        let panelFrames: PanelFrameSource | null = null;
-        if (source.has(MANIFEST_FILENAME)) {
-          const parsed = safeParseManifest(JSON.parse(await source.text(MANIFEST_FILENAME)));
-          if (parsed.success) {
-            panelFrames = new PanelFrameSource(parsed.data);
-            parsed.data.pages.forEach((page, i) => {
-              sizes[i] = { w: page.size[0], h: page.size[1] };
-            });
-          } else {
-            console.warn("manifest inválido, se lee como CBZ común", parsed.error.issues);
-          }
-        }
         setPanelMode(panelFrames !== null);
 
         const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
@@ -221,7 +160,7 @@ export default function ReaderView() {
           const pos = director.positionInPage;
           setAt({
             page: frame.page + 1,
-            pages: source.pageCount,
+            pages: sizes.length,
             panel: pos.index,
             panels: pos.total,
             progress: director.length > 1 ? director.index / (director.length - 1) : 1,
@@ -323,7 +262,14 @@ export default function ReaderView() {
         // se ocupan del diálogo, y en v5 de los efectos.
         const offDirector = director.on((ev) => {
           if (ev.type === "frame") {
+            setWaiting(false);
             void draw(ev.immediate);
+            return;
+          }
+          // Se llegó al borde de lo procesado: se avisa y se sigue solo cuando aparezca la
+          // página siguiente. Pasa únicamente si se lee más rápido de lo que se procesa.
+          if (ev.type === "waiting") {
+            setWaiting(true);
             return;
           }
           if (ev.type !== "beat") return;
@@ -403,7 +349,171 @@ export default function ReaderView() {
         setStatus({ kind: "error", message: (err as Error).message });
       }
     },
-    [convert, teardown],
+    [],
+  );
+
+  /**
+   * Procesa un CBZ dejando leer mientras tanto.
+   *
+   * La lectura arranca con la primera página y el resto se procesa detrás, en un worker.
+   * Se puede porque leer una viñeta dirigida lleva más tiempo que procesar la página que
+   * viene, así que el lector no alcanza al procesador salvo que pase todo de largo.
+   */
+  const build = useCallback(
+    async (canvas: HTMLCanvasElement, file: File) => {
+      setStatus({ kind: "processing" });
+      setStage(null);
+      setLines(["descomprimiendo el archivo"]);
+      setProgress(null);
+      setEta(null);
+
+      const cbz = await CbzSource.open(file);
+      const total = cbz.pageCount;
+      setLines((l) => [...l, `${total} páginas`]);
+
+      const live = new LiveSource();
+      liveRef.current = live;
+      // Dos medidas de la misma cosa: `sizes` es el tomo entero, que se conoce de entrada y
+      // da el "página 3 de 12"; `ready` solo lo procesado, que es hasta dónde se puede leer.
+      const sizes = Array.from({ length: total }, () => ({ ...ASSUMED_PAGE }));
+      const ready: { w: number; h: number }[] = [];
+      const pageFrames = new PageFrameSource(ready);
+      const panelFrames = new PanelFrameSource(undefined, total);
+
+      const worker = new Worker(new URL("../lib/process.worker.ts", import.meta.url), {
+        type: "module",
+      });
+      workerRef.current = worker;
+
+      const marks: number[] = [];
+      const settle = new Map<number, () => void>();
+      let mounted = false;
+      let failed: string | null = null;
+
+      worker.onmessage = async (ev: MessageEvent<ProcessResponse>) => {
+        const msg = ev.data;
+
+        if (msg.kind === "models") {
+          setStage({ kind: "models", detail: msg.detail });
+          setLines((l) => [...l, msg.detail]);
+          return;
+        }
+
+        if (msg.kind === "progress") {
+          setStage({ kind: "page", index: msg.index, total, detail: msg.detail });
+          setLines((l) => [...l, `página ${msg.index + 1}: ${msg.detail}`]);
+          return;
+        }
+
+        if (msg.kind === "error") {
+          failed = msg.message;
+          settle.get(msg.index)?.();
+          return;
+        }
+
+        const done = msg.page;
+        live.add(done);
+        sizes[done.index] = { w: done.size[0], h: done.size[1] };
+        ready[done.index] = sizes[done.index];
+
+        // El manifest se valida página por página: el streaming no afloja las garantías que
+        // daba leerlo entero de un archivo terminado.
+        const parsed = Page.safeParse(done.page);
+        if (parsed.success) panelFrames.append(parsed.data, done.index);
+        else console.warn(`página ${done.index + 1} inválida`, parsed.error.issues);
+
+        setProgress((done.index + 1) / total);
+        // La estimación se hace sobre las últimas páginas y no sobre el promedio: las
+        // primeras cargan modelos y salen más lentas, y arrastran la cuenta hacia arriba.
+        marks[done.index] = performance.now();
+        const from = Math.max(0, done.index - ETA_WINDOW);
+        if (done.index > from) {
+          const per = (marks[done.index] - marks[from]) / (done.index - from);
+          setEta(formatEta(((total - done.index - 1) * per) / 1000));
+        }
+        setBuilt({ done: done.index + 1, total });
+
+        // Con la primera página ya hay con qué leer: se abre el lector y el resto entra
+        // debajo, sin que la lectura se corte.
+        if (!mounted) {
+          mounted = true;
+          await mount(canvas, live, sizes, pageFrames, panelFrames);
+        } else {
+          engine.current?.director.grew();
+        }
+
+        settle.get(done.index)?.();
+      };
+
+      try {
+        for (let index = 0; index < total; index++) {
+          const bitmap = await cbz.bitmap(index);
+          const settled = new Promise<void>((resolve) => settle.set(index, resolve));
+          // El bitmap se transfiere, no se copia; por eso se saca de la caché del archivo,
+          // que si no queda apuntando a una imagen que ya no es suya.
+          worker.postMessage({ kind: "page", index, bitmap } satisfies ProcessRequest, [bitmap]);
+          cbz.release(index);
+          await settled;
+          settle.delete(index);
+          if (failed) throw new Error(failed);
+        }
+      } finally {
+        cbz.close();
+        worker.postMessage({ kind: "close" } satisfies ProcessRequest);
+        workerRef.current = null;
+      }
+
+      panelFrames.finish();
+      setBuilt(null);
+      setEta(null);
+      setArchived(true);
+    },
+    [mount],
+  );
+
+  const open = useCallback(
+    async (input: File) => {
+      teardown();
+      setStatus({ kind: "loading" });
+      setTitle(input.name);
+      setArchived(false);
+      setBuilt(null);
+      liveRef.current = null;
+
+      try {
+        const canvas = canvasRef.current;
+        if (!canvas) throw new Error("Canvas no disponible");
+
+        // Un CBZ hay que procesarlo, y eso se hace leyendo; un `.cbza` ya viene listo.
+        if (!/\.cbza$/i.test(input.name)) {
+          await build(canvas, input);
+          return;
+        }
+
+        const source = await CbzSource.open(input);
+        const sizes = Array.from({ length: source.pageCount }, () => ({ ...ASSUMED_PAGE }));
+        const pageFrames = new PageFrameSource(sizes);
+
+        // Un `.cbza` trae manifest y se lee viñeta por viñeta; un CBZ común, página a página.
+        let panelFrames: PanelFrameSource | null = null;
+        if (source.has(MANIFEST_FILENAME)) {
+          const parsed = safeParseManifest(JSON.parse(await source.text(MANIFEST_FILENAME)));
+          if (parsed.success) {
+            panelFrames = new PanelFrameSource(parsed.data);
+            parsed.data.pages.forEach((page, i) => {
+              sizes[i] = { w: page.size[0], h: page.size[1] };
+            });
+          } else {
+            console.warn("manifest inválido, se lee como CBZ común", parsed.error.issues);
+          }
+        }
+
+        await mount(canvas, source, sizes, pageFrames, panelFrames);
+      } catch (err) {
+        setStatus({ kind: "error", message: (err as Error).message });
+      }
+    },
+    [build, mount, teardown],
   );
 
   /** Aplica el mood a lo que ya está andando. */
@@ -464,6 +574,26 @@ export default function ReaderView() {
     );
     eng.stage.render();
   }, []);
+
+  /**
+   * Guarda el tomo ya procesado.
+   *
+   * El zip se arma recién acá, cuando alguien lo pide: mantenerlo listo por las dudas sería
+   * tener el tomo entero duplicado en memoria durante toda la lectura.
+   */
+  const save = useCallback(async () => {
+    const live = liveRef.current;
+    if (!live) return;
+
+    const { packArchive } = await import("@/lib/process");
+    const url = URL.createObjectURL(packArchive(live.pages));
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = title.replace(/\.[^.]+$/, "") + ".cbza";
+    link.click();
+    // Recién cuando la descarga arrancó: revocarlo en el acto la cancela.
+    window.setTimeout(() => URL.revokeObjectURL(url), 10_000);
+  }, [title]);
 
   const toggleMode = useCallback(() => {
     const eng = engine.current;
@@ -600,6 +730,17 @@ export default function ReaderView() {
         <canvas ref={canvasRef} className="block h-full w-full" />
       </div>
 
+      {/* Solo aparece si la lectura alcanzó al procesamiento, que es raro: procesar una
+          página lleva menos que leerla. */}
+      {waiting && (
+        <div className="pointer-events-none absolute inset-x-0 top-6 z-20 flex justify-center">
+          <span className="flex items-center gap-2 rounded-full border border-neutral-700/80 bg-neutral-900/85 px-4 py-2 text-xs text-neutral-300 backdrop-blur">
+            <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-[#00D9F5]" />
+            preparando la página que sigue…
+          </span>
+        </div>
+      )}
+
       {status.kind === "processing" && (
         <div className="absolute inset-0 z-20 overflow-y-auto">
           <Processing title={title} stage={stage} lines={lines} progress={progress} eta={eta} />
@@ -630,6 +771,10 @@ export default function ReaderView() {
           onVolume={changeVolume}
           panelMode={panelMode}
           hasPanels={Boolean(engine.current?.panelFrames)}
+          built={built}
+          eta={eta}
+          canSave={archived}
+          onSave={save}
           onPage={(page) => engine.current?.director.seekToPage(page - 1)}
           onStep={(delta) =>
             delta > 0 ? engine.current?.director.next() : engine.current?.director.prev()

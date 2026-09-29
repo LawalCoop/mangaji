@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { components, convexHull, largestComponent, open, simplify, traceContour } from "./vision";
+import { boxBlur, components, convexHull, largestComponent, open, simplify, traceContour } from "./vision";
 
 /** Dibuja una máscara a partir de un plano en texto: `#` es figura, `.` es fondo. */
 function mask(rows: string[]) {
@@ -120,5 +120,23 @@ describe("envolvente convexa", () => {
     const hull = convexHull(pts);
     expect(hull).toHaveLength(4);
     expect(hull).not.toContainEqual([5, 5]);
+  });
+});
+
+describe("desenfoque de caja", () => {
+  it("no altera una superficie pareja", () => {
+    const flat = new Float32Array(64).fill(7);
+    boxBlur(flat, 8, 8, 3);
+    for (const v of flat) expect(v).toBeCloseTo(7, 5);
+  });
+
+  it("reparte un punto aislado entre sus vecinos sin perder tinta", () => {
+    const spot = new Float32Array(81);
+    spot[40] = 81; // el centro de 9x9
+    boxBlur(spot, 9, 9, 1);
+    expect(spot[40]).toBeLessThan(81);
+    expect(spot[40]).toBeGreaterThan(0);
+    // El borde replica, así que la suma se conserva salvo por lo que se acumula afuera.
+    expect(spot.reduce((a, b) => a + b, 0)).toBeCloseTo(81, 3);
   });
 });

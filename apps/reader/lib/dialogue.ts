@@ -1,5 +1,6 @@
 import type { Detection } from "./detector";
-import { components, type Point } from "./vision";
+import type { Rect } from "./types";
+import { boxBlur, components, erode, type Point } from "./vision";
 
 /**
  * Separación del diálogo: el texto sale del arte y queda como sprite aparte.
@@ -10,8 +11,8 @@ import { components, type Point } from "./vision";
  * reconstruir nada, y funciona igual sobre fondo blanco que sobre una página de batalla.
  */
 
-/** Margen alrededor del texto que también se limpia, para no dejar restos de antialiasing. */
-const DILATE = 3;
+/** Aire alrededor de la caja del detector, para poder seguir las letras que la cruzan. */
+const MARGIN = 14;
 /** A partir de qué nivel un píxel cuenta como papel. */
 const PAPER_LEVEL = 195;
 /** Piso de papel visible dentro del bloque. */
@@ -73,23 +74,198 @@ function looksLikeText(alpha: Uint8Array, w: number, h: number): boolean {
   return Math.max(...areas) / total <= MAX_BLOB_SHARE;
 }
 
+/** Cuánto se estira lo que rodea a un trazo para taparlo. */
+const FEATHER = 10;
+/** A partir de qué alfa un píxel cuenta como trazo. */
+const INK_LEVEL = 40;
+/** Cuánto se agranda la máscara de un trazo, para alcanzar su halo. */
+const SPREAD = 2;
+/** Qué parte del contorno del bloque puede rozar una mancha sin dejar de ser una letra. */
+const EDGE_SHARE = 0.25;
+/**
+ * Cuánto se satura el alfa al borrar dentro de un globo.
+ *
+ * El texto de un escaneo no termina en el trazo sino en un halo de grises; en proporción al
+ * alfa ese halo queda a medio borrar y dibuja el contorno de cada letra. Adentro del globo no
+ * hay nada que cuidar, así que todo lo que tenga algo de tinta se va entero.
+ */
+const ERASE_GAIN = 8;
+/** Cuánto se mete la máscara del globo hacia adentro, para no comerse su contorno. */
+const INSET = 3;
+
+/**
+ * Borra la tinta reemplazándola por lo que la rodea, difuminado.
+ *
+ * Antes se rellenaba de blanco el rectángulo entero de la detección. Era simple y quedaba
+ * perfecto mientras la caja cayera dentro del globo, pero la caja se pasa seguido —no sigue
+ * el contorno del globo— y entonces aparecía un bloque blanco de bordes rectos comiéndose el
+ * dibujo, que es lo que se veía como un recorte grosero.
+ *
+ * El borrado va por manchas de tinta, no por rectángulo: lo que entra en la caja del detector
+ * se borra entero, siga hasta donde siga. La caja recorta —típicamente por abajo— y borrar
+ * solo lo que cae adentro deja las patas de las letras a la vista, que se leen como guiones
+ * sueltos dentro del globo.
+ *
+ * Dentro de un globo eso alcanza, porque ahí solo hay diálogo sobre papel. Sin globo que lo
+ * respalde —una onomatopeya suelta sobre el arte— además se exige que la mancha no cruce el
+ * borde de la región, que es como se cuela el dibujo de al lado.
+ */
+export function erase(
+  px: Uint8ClampedArray,
+  alpha: Uint8Array,
+  w: number,
+  h: number,
+  paper: number,
+  inside?: Uint8Array,
+  seed?: Rect,
+): Float32Array {
+  const count = w * h;
+  const radius = Math.max(2, Math.min(FEATHER, Math.floor(Math.min(w, h) / 2)));
+  const cover = new Float32Array(count);
+
+  const ink = new Uint8Array(count);
+  for (let p = 0; p < count; p++) ink[p] = alpha[p] > INK_LEVEL ? 1 : 0;
+  const { labels, stats } = components(ink, w, h);
+
+  // Qué manchas nacen dentro de la caja que marcó el detector. Se borran enteras, aunque
+  // sigan fuera: la caja suele quedar corta —de ahí que se vieran las patas de las letras,
+  // cortadas por abajo—, y una letra a medio borrar es peor que no haberla tocado.
+  const touched = new Uint8Array(stats.length + 1);
+  if (seed) {
+    const sx1 = Math.min(w, seed.x + seed.w);
+    const sy1 = Math.min(h, seed.y + seed.h);
+    for (let y = Math.max(0, seed.y); y < sy1; y++) {
+      for (let x = Math.max(0, seed.x); x < sx1; x++) touched[labels[y * w + x]] = 1;
+    }
+  } else {
+    touched.fill(1);
+  }
+
+  if (inside) {
+    // Estar dentro del globo no alcanza para borrar: hay que ser una de las manchas que el
+    // detector marcó. Borrar todo lo entintado del globo parece seguro y no lo es —el globo
+    // detectado se pasa sobre el dibujo más seguido de lo que uno querría—, y ahí se blanquea
+    // una franja entera y vuelve el corte cuadrado.
+    for (let p = 0; p < count; p++) {
+      cover[p] =
+        labels[p] && touched[labels[p]] ? Math.min(1, (alpha[p] / 255) * ERASE_GAIN) : 0;
+    }
+  } else {
+    // Sin globo que respalde el borrado hay que adivinar qué es letra. Lo que se mide es
+    // cuánto del contorno de la región roza cada mancha: la letra queda holgada adentro,
+    // mientras que el dibujo entra de afuera y lo cruza a lo largo.
+    const contacts = new Int32Array(stats.length + 1);
+    for (let x = 0; x < w; x++) {
+      contacts[labels[x]]++;
+      contacts[labels[(h - 1) * w + x]]++;
+    }
+    for (let y = 0; y < h; y++) {
+      contacts[labels[y * w]]++;
+      contacts[labels[y * w + w - 1]]++;
+    }
+
+    const border = 2 * (w + h);
+    const isLetter = new Uint8Array(stats.length + 1);
+    for (const stat of stats) {
+      const label = stat.label;
+      isLetter[label] = touched[label] && contacts[label] / border <= EDGE_SHARE ? 1 : 0;
+    }
+
+    for (let p = 0; p < count; p++) cover[p] = labels[p] && isLetter[labels[p]] ? 1 : 0;
+  }
+
+  // El trazo se agranda un poco antes de taparlo, para alcanzar su halo.
+  boxBlur(cover, w, h, SPREAD);
+  for (let p = 0; p < count; p++) cover[p] = Math.min(1, cover[p] * 3);
+
+  // Un bloque cuyo fondo es papel es el interior de un globo, y ahí el hueco se tapa con
+  // papel liso. Tomar el promedio de alrededor parece más fino pero es justo lo que ensucia:
+  // un trazo pegado al dibujo arrastra su oscuridad y deja un velo gris dentro del globo.
+  if (paper >= PAPER_LEVEL) {
+    for (let p = 0, i = 0; p < count; p++, i += 4) {
+      const a = cover[p];
+      if (a <= 0) continue;
+      px[i] = px[i] * (1 - a) + paper * a;
+      px[i + 1] = px[i + 1] * (1 - a) + paper * a;
+      px[i + 2] = px[i + 2] * (1 - a) + paper * a;
+    }
+    return cover;
+  }
+
+  // Sobre arte no hay papel con qué tapar, así que se usa lo que rodea a cada trazo. Lo que
+  // se va a borrar no puede servir de muestra: si el halo de una letra contara como limpio,
+  // el contorno reaparecería por la ventana de al lado.
+  const weight = new Float32Array(count);
+  const channels = [new Float32Array(count), new Float32Array(count), new Float32Array(count)];
+  for (let p = 0, i = 0; p < count; p++, i += 4) {
+    const clean = 1 - cover[p];
+    weight[p] = clean;
+    channels[0][p] = px[i] * clean;
+    channels[1][p] = px[i + 1] * clean;
+    channels[2][p] = px[i + 2] * clean;
+  }
+
+  boxBlur(weight, w, h, radius);
+  for (const channel of channels) boxBlur(channel, w, h, radius);
+
+  for (let p = 0, i = 0; p < count; p++, i += 4) {
+    const a = cover[p];
+    if (a <= 0) continue;
+
+    const total = weight[p];
+    for (let c = 0; c < 3; c++) {
+      const around = total > 0.002 ? channels[c][p] / total : paper;
+      px[i + c] = px[i + c] * (1 - a) + around * a;
+    }
+  }
+
+  return cover;
+}
+
+/**
+ * Rasteriza el globo que contiene al texto, recortado al bloque.
+ *
+ * Es lo que le dice al borrado hasta dónde puede llegar. Se mete unos píxeles hacia adentro
+ * para no llevarse por delante la línea del propio globo.
+ */
+function balloonMask(
+  balloon: Point[],
+  x0: number,
+  y0: number,
+  w: number,
+  h: number,
+): Uint8Array {
+  const mask = new Uint8Array(w * h);
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      mask[y * w + x] = contains(balloon, x0 + x + 0.5, y0 + y + 0.5) ? 1 : 0;
+    }
+  }
+  return erode(mask, w, h, INSET);
+}
+
 /**
  * Levanta el texto de la página y devuelve su sprite.
  *
  * `ctx` es la página completa y se modifica: donde estaba el texto queda el tono del papel.
+ * `balloons` son las siluetas de los globos, que marcan dónde se puede borrar tranquilo.
  */
 export async function lift(
-  ctx: CanvasRenderingContext2D,
+  ctx: OffscreenCanvasRenderingContext2D,
   text: Detection,
   pageArea: number,
+  balloons: Point[][] = [],
 ): Promise<Sprite | null> {
   const { x, y, w, h } = text.bbox;
   if (w * h > MAX_TEXT_AREA_RATIO * pageArea) return null; // es dibujo, no diálogo
 
-  const x0 = Math.max(0, Math.floor(x) - DILATE);
-  const y0 = Math.max(0, Math.floor(y) - DILATE);
-  const cw = Math.min(ctx.canvas.width - x0, Math.ceil(w) + DILATE * 2);
-  const ch = Math.min(ctx.canvas.height - y0, Math.ceil(h) + DILATE * 2);
+  // Se trabaja con bastante aire alrededor de la caja, no porque haya que borrar tanto sino
+  // para ver las letras enteras: la caja del detector recorta, y una letra que la cruza tiene
+  // que poder seguirse hasta donde termina.
+  const x0 = Math.max(0, Math.floor(x) - MARGIN);
+  const y0 = Math.max(0, Math.floor(y) - MARGIN);
+  const cw = Math.min(ctx.canvas.width - x0, Math.ceil(w) + (Math.floor(x) - x0) + MARGIN);
+  const ch = Math.min(ctx.canvas.height - y0, Math.ceil(h) + (Math.floor(y) - y0) + MARGIN);
   if (cw < 3 || ch < 3) return null;
 
   const region = ctx.getImageData(x0, y0, cw, ch);
@@ -100,37 +276,88 @@ export async function lift(
   for (let i = 0, p = 0; i < px.length; i += 4, p++) {
     levels[p] = Math.max(px[i], px[i + 1], px[i + 2]);
   }
-  if (!isSafeToLift(levels)) return null;
+
+  // Los filtros miran solo lo que el detector marcó. El aire de alrededor está para seguir
+  // los trazos, no para opinar sobre si esto es diálogo.
+  const seed = {
+    x: Math.floor(x) - x0,
+    y: Math.floor(y) - y0,
+    w: Math.min(Math.ceil(w), cw),
+    h: Math.min(Math.ceil(h), ch),
+  };
+  const core = crop(levels, cw, seed);
+  if (!isSafeToLift(core)) return null;
 
   // El papel del bloque: percentil alto, no la media, que estaría ensuciada por las letras.
-  const sorted = Uint8Array.from(levels).sort();
-  const paper = sorted[Math.floor(count * 0.85)];
+  const sorted = Uint8Array.from(core).sort();
+  const paper = sorted[Math.floor(core.length * 0.85)];
 
   // El alfa sale de la tinta, así el sprite son las letras y no un recuadro blanco.
   const alpha = new Uint8Array(count);
-  let ink = 0;
   for (let p = 0; p < count; p++) {
-    const a = Math.max(0, Math.min(255, ((paper - levels[p]) * 255) / Math.max(paper, 1)));
-    alpha[p] = a;
-    if (a > 40) ink++;
+    alpha[p] = Math.max(0, Math.min(255, ((paper - levels[p]) * 255) / Math.max(paper, 1)));
   }
-  if (ink / count < 0.005) return null;
-  if (!looksLikeText(alpha, cw, ch)) return null;
+  const inked = crop(alpha, cw, seed);
+  let ink = 0;
+  for (const a of inked) if (a > 40) ink++;
+  if (ink / inked.length < 0.005) return null;
+  if (!looksLikeText(inked, seed.w, seed.h)) return null;
 
-  // El sprite conserva el color original con el alfa de la tinta.
-  const out = new ImageData(cw, ch);
-  for (let p = 0, i = 0; p < count; p++, i += 4) {
-    out.data[i] = px[i];
-    out.data[i + 1] = px[i + 1];
-    out.data[i + 2] = px[i + 2];
-    out.data[i + 3] = alpha[p];
+  // Los colores de antes de borrar, que son los que se lleva el sprite: `erase` los pisa con
+  // el papel, y leerlos después dejaba el diálogo escrito en blanco sobre el globo blanco.
+  const before = new Uint8ClampedArray(px);
+
+  // El globo que aloja a este texto, si hay alguno: adentro se borra sin reparos.
+  const host = balloons.find((polygon) => insidePolygon(polygon, text.bbox) >= 0.5);
+  const cover = erase(px, alpha, cw, ch, paper, host && balloonMask(host, x0, y0, cw, ch), seed);
+  ctx.putImageData(region, x0, y0);
+
+  const { data, taken } = spriteOf(before, alpha, cover, cw, ch);
+  if (!taken) return null;
+
+  const image = new ImageData(cw, ch);
+  image.data.set(data);
+
+  return { image, rect: { x: x0, y: y0, w: cw, h: ch }, ink: taken / count };
+}
+
+/**
+ * Arma el sprite con exactamente lo que se borró, en su color de antes.
+ *
+ * `before` tiene que ser el arte previo al borrado. Leer los píxeles ya borrados da un sprite
+ * del color del papel: el diálogo aparece igual, pero escrito en blanco sobre el globo blanco
+ * y no se ve nada. Que lo que desaparece del arte sea lo mismo que vuelve al revelarse es lo
+ * que mantiene honesta a las dos mitades.
+ */
+export function spriteOf(
+  before: Uint8ClampedArray,
+  alpha: Uint8Array,
+  cover: Float32Array,
+  w: number,
+  h: number,
+): { data: Uint8ClampedArray; taken: number } {
+  const data = new Uint8ClampedArray(w * h * 4);
+  let taken = 0;
+  for (let p = 0, i = 0; p < w * h; p++, i += 4) {
+    const a = Math.round(alpha[p] * cover[p]);
+    data[i] = before[i];
+    data[i + 1] = before[i + 1];
+    data[i + 2] = before[i + 2];
+    data[i + 3] = a;
+    if (a > 40) taken++;
   }
+  return { data, taken };
+}
 
-  // Y el hueco se tapa con el tono del papel.
-  ctx.fillStyle = `rgb(${paper},${paper},${paper})`;
-  ctx.fillRect(x0, y0, cw, ch);
-
-  return { image: out, rect: { x: x0, y: y0, w: cw, h: ch }, ink: ink / count };
+/** Recorta un plano de la región, para mirar solo lo que el detector marcó. */
+function crop(src: Uint8Array, w: number, rect: Rect): Uint8Array {
+  const out = new Uint8Array(rect.w * rect.h);
+  for (let y = 0; y < rect.h; y++) {
+    for (let x = 0; x < rect.w; x++) {
+      out[y * rect.w + x] = src[(rect.y + y) * w + rect.x + x];
+    }
+  }
+  return out;
 }
 
 /** Fracción de `inner` que cae dentro del polígono. */

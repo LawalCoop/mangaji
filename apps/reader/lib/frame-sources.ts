@@ -41,33 +41,55 @@ export class PageFrameSource implements FrameSource {
  * Stage son los mismos de v1. El modo página completa sigue disponible cambiando de fuente.
  */
 export class PanelFrameSource implements FrameSource {
-  #frames: Frame[];
-  #pages: number;
+  #frames: Frame[] = [];
+  #pages = 0;
+  /** Cuántas páginas va a tener el tomo, que se sabe antes de procesarlas. */
+  #expected: number;
+  #complete: boolean;
 
-  constructor(manifest: Manifest) {
-    this.#pages = manifest.pages.length;
-    this.#frames = manifest.pages.flatMap((page, pageIndex) =>
-      page.panels.map((panel) => {
-        const [x, y, w, h] = panel.bbox;
-        return {
-          id: panel.id,
-          page: pageIndex,
-          rect: { x, y, w, h },
-          polygon: panel.polygon as [number, number][],
-          beats: panel.beats,
-          layers: panel.balloons.map((balloon) => {
-            const [bx, by, bw, bh] = balloon.bbox;
-            return {
-              id: balloon.id,
-              src: balloon.sprite,
-              rect: { x: bx, y: by, w: bw, h: bh },
-              hidden: Boolean(balloon.sprite), // sin sprite (v2) el globo ya está en el arte
-              reveal: balloon.reveal,
-            };
-          }),
-        } satisfies Frame;
-      }),
-    );
+  /**
+   * Con un manifest queda lista de una. Sin él nace vacía y se va llenando con `append`
+   * mientras el archivo se procesa, que es lo que permite empezar a leer sin esperar.
+   */
+  constructor(manifest?: Manifest, expected = 0) {
+    this.#expected = manifest ? manifest.pages.length : expected;
+    this.#complete = manifest !== undefined;
+    manifest?.pages.forEach((page, i) => this.append(page, i));
+  }
+
+  /** Suma los encuadres de una página recién procesada. Llegan en orden. */
+  append(page: Manifest["pages"][number], pageIndex: number): void {
+    this.#pages = Math.max(this.#pages, pageIndex + 1);
+    for (const panel of page.panels) {
+      const [x, y, w, h] = panel.bbox;
+      this.#frames.push({
+        id: panel.id,
+        page: pageIndex,
+        rect: { x, y, w, h },
+        polygon: panel.polygon as [number, number][],
+        beats: panel.beats,
+        layers: panel.balloons.map((balloon) => {
+          const [bx, by, bw, bh] = balloon.bbox;
+          return {
+            id: balloon.id,
+            src: balloon.sprite,
+            rect: { x: bx, y: by, w: bw, h: bh },
+            hidden: Boolean(balloon.sprite), // sin sprite (v2) el globo ya está en el arte
+            reveal: balloon.reveal,
+          };
+        }),
+      } satisfies Frame);
+    }
+  }
+
+  /** No llegan más páginas: de acá en más el final de la fuente es el final del tomo. */
+  finish(): void {
+    this.#complete = true;
+    this.#expected = this.#pages;
+  }
+
+  get complete(): boolean {
+    return this.#complete;
   }
 
   get length(): number {
@@ -80,6 +102,7 @@ export class PanelFrameSource implements FrameSource {
 
   label(i: number): string {
     const frame = this.#frames[i];
-    return `${frame.page + 1}/${this.#pages} · viñeta ${i + 1}/${this.length}`;
+    const total = Math.max(this.#expected, this.#pages);
+    return `${frame.page + 1}/${total} · viñeta ${i + 1}/${this.length}`;
   }
 }

@@ -44,22 +44,23 @@ const CONVEX_RATIO = 0.93;
 export type Progress = (stage: string, detail?: string) => void;
 
 /**
- * El entorno de onnxruntime se configura una sola vez por sesión.
+ * El entorno de onnxruntime se configura una sola vez por página, porque estos ajustes solo
+ * tienen efecto antes de que el runtime arranque.
  *
- * Estos ajustes solo se pueden tocar antes de que el runtime arranque: al segundo intento
- * ORT responde "Session already started" y falla la carga. Como el detector se crea de nuevo
- * en cada procesamiento, la configuración tiene que quedar afuera.
+ * La marca va en el objeto global y no en el módulo: el recambio en caliente reinicia el
+ * módulo mientras el runtime sigue vivo, y una marca de módulo se perdería justo ahí.
  */
-let configured = false;
+const FLAG = "__mangaji_ort_ready__";
 
 function configure(ort: typeof Ort): void {
-  if (configured) return;
+  const global = globalThis as Record<string, unknown>;
+  if (global[FLAG]) return;
   ort.env.wasm.wasmPaths = "/ort/";
   // Los hilos de WebAssembly necesitan memoria compartida, y el navegador solo la habilita
   // en páginas aisladas. Pedir doce sin eso no los da y encima avisa por consola.
   ort.env.wasm.numThreads = crossOriginIsolated ? (navigator.hardwareConcurrency ?? 4) : 1;
   ort.env.logLevel = "error";
-  configured = true;
+  global[FLAG] = true;
 }
 
 export class Detector {
@@ -118,10 +119,11 @@ export class Detector {
   async detect(image: ImageData): Promise<Detection[]> {
     const { tensor, scale, validW, validH } = this.#prepare(image);
 
-    const [panelOut, textOut] = await Promise.all([
-      this.#panels.run({ [this.#panels.inputNames[0]]: tensor }),
-      this.#text.run({ [this.#text.inputNames[0]]: tensor }),
-    ]);
+    // Uno después del otro, no en paralelo: el runtime admite una sola inferencia por vez y
+    // rechaza la segunda con "Session already started". Tampoco habría nada que ganar, porque
+    // las dos sesiones comparten los mismos hilos.
+    const panelOut = await this.#panels.run({ [this.#panels.inputNames[0]]: tensor });
+    const textOut = await this.#text.run({ [this.#text.inputNames[0]]: tensor });
 
     const fromPanels = this.#decodeSegmentation(panelOut, image, scale, validW, validH);
     const fromText = this.#decodeBoxes(textOut, scale, image.width, image.height);
@@ -131,9 +133,7 @@ export class Detector {
 
   /** Escala a 1280 manteniendo proporción y rellena; la imagen se ancla arriba a la izquierda. */
   #prepare(image: ImageData) {
-    const canvas = document.createElement("canvas");
-    canvas.width = SIZE;
-    canvas.height = SIZE;
+    const canvas = new OffscreenCanvas(SIZE, SIZE);
     const ctx = canvas.getContext("2d", { willReadFrequently: true })!;
     ctx.fillStyle = "#727272";
     ctx.fillRect(0, 0, SIZE, SIZE);

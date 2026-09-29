@@ -50,8 +50,15 @@ function paperColor(bitmap: ImageBitmap): number {
   const [r, g, b] = edge.map(paper);
   return (r << 16) | (g << 8) | b;
 }
-/** Cuánto se atenúa el diálogo de las viñetas que no son la activa. */
-const OFF_PANEL_DIALOGUE_ALPHA = 0.5;
+/**
+ * Cuánto se atenúa el diálogo de las viñetas que no son la activa.
+ *
+ * Va entero. A media opacidad el texto ya leído quedaba flotando dentro de su globo como una
+ * mancha gris con forma de letras, que es exactamente el aspecto de un borrado a medio hacer
+ * —y se confunde con eso—. De la atenuación ya se encarga el foco, que difumina y ensombrece
+ * la página alrededor de la viñeta: el diálogo tiene que acompañar a la hoja, no ir aparte.
+ */
+const OFF_PANEL_DIALOGUE_ALPHA = 1;
 /**
  * Desenfoque con el que entra un bloque de diálogo, en píxeles de la página.
  *
@@ -192,11 +199,12 @@ export class Stage {
   }
 
   /**
-   * Coloca el diálogo de la página, desenfocado.
+   * Coloca el diálogo de la página, oculto.
    *
-   * El arte base ya no lo tiene —el pipeline lo levantó y dejó el globo vacío—, así que el
-   * sprite ocupa ese hueco desde el principio: se ve que hay texto pero no se lee, y
-   * revelarlo es enfocarlo. El globo nunca queda en blanco.
+   * El arte base ya no lo tiene —el pipeline lo levantó y dejó el globo vacío—, así que hasta
+   * que le toca no se dibuja nada y el globo se ve en blanco. Se probó dejarlo puesto y
+   * desenfocado, para que se viera que hay texto sin poder leerlo, y el globo vacío quedó
+   * mejor: el desenfoque se lee como suciedad, no como algo que falta.
    */
   setDialogue(entries: { id: string; bitmap: ImageBitmap; rect: Rect }[]): void {
     this.#dialogue.removeChildren().forEach((child) => child.destroy());

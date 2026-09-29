@@ -12,6 +12,8 @@ import type { Frame, FrameSource } from "./types";
 export type DirectorEvent =
   | { type: "frame"; frame: Frame; index: number; immediate: boolean }
   | { type: "beat"; beat: Beat; frame: Frame }
+  /** Se acabó lo que hay procesado, pero el tomo sigue. */
+  | { type: "waiting" }
   | { type: "end" };
 
 type Listener = (ev: DirectorEvent) => void;
@@ -37,6 +39,8 @@ export class Director {
   #elapsed = 0;
   #fired = 0;
   #playing: boolean;
+  /** Se llegó al borde de lo procesado y se espera a que aparezca lo que sigue. */
+  #waiting = false;
 
   readonly reducedMotion: boolean;
   readonly defaultHold: number;
@@ -136,6 +140,7 @@ export class Director {
     this.#index = clamped;
     this.#elapsed = 0;
     this.#fired = 0;
+    this.#waiting = false;
     this.#emit({ type: "frame", frame: this.frame, index: clamped, immediate });
   }
 
@@ -161,11 +166,31 @@ export class Director {
     this.#fireUpTo(Number.POSITIVE_INFINITY);
 
     if (this.#index >= this.#source.length - 1) {
+      // Con el archivo todavía en proceso, esto no es el final del tomo sino el borde de lo
+      // que hay listo: se espera ahí y se sigue solo cuando aparezca la página siguiente.
+      if (this.#source.complete === false) {
+        if (!this.#waiting) {
+          this.#waiting = true;
+          this.#emit({ type: "waiting" });
+        }
+        return;
+      }
       this.#playing = false;
       this.#emit({ type: "end" });
       return;
     }
     this.seek(this.#index + 1);
+  }
+
+  /** La fuente incorporó encuadres nuevos: si se estaba esperando por ellos, se sigue. */
+  grew(): void {
+    if (!this.#waiting || this.#index >= this.#source.length - 1) return;
+    this.#waiting = false;
+    this.seek(this.#index + 1);
+  }
+
+  get waiting(): boolean {
+    return this.#waiting;
   }
 
   prev(): void {

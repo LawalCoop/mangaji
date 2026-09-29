@@ -22,7 +22,42 @@ export function open(mask: Uint8Array, w: number, h: number, r: number): Uint8Ar
   return dilate(erode(mask, w, h, r), w, h, r);
 }
 
-function erode(mask: Uint8Array, w: number, h: number, r: number): Uint8Array {
+/**
+ * Desenfoque de caja, en el sitio.
+ *
+ * Separable y con ventana deslizante, así que cuesta lo mismo con radio 2 que con radio 20.
+ * Dos pasadas se parecen bastante a una gaussiana, que es todo lo que hace falta acá.
+ */
+export function boxBlur(data: Float32Array, w: number, h: number, r: number): void {
+  if (r <= 0 || w <= 0 || h <= 0) return;
+  const span = 2 * r + 1;
+  const tmp = new Float32Array(data.length);
+  const cx = (x: number) => Math.min(Math.max(x, 0), w - 1);
+  const cy = (y: number) => Math.min(Math.max(y, 0), h - 1);
+
+  for (let y = 0; y < h; y++) {
+    const row = y * w;
+    let sum = 0;
+    for (let x = -r; x <= r; x++) sum += data[row + cx(x)];
+    for (let x = 0; x < w; x++) {
+      tmp[row + x] = sum / span;
+      sum -= data[row + cx(x - r)];
+      sum += data[row + cx(x + r + 1)];
+    }
+  }
+
+  for (let x = 0; x < w; x++) {
+    let sum = 0;
+    for (let y = -r; y <= r; y++) sum += tmp[cy(y) * w + x];
+    for (let y = 0; y < h; y++) {
+      data[y * w + x] = sum / span;
+      sum -= tmp[cy(y - r) * w + x];
+      sum += tmp[cy(y + r + 1) * w + x];
+    }
+  }
+}
+
+export function erode(mask: Uint8Array, w: number, h: number, r: number): Uint8Array {
   return morph(mask, w, h, r, true);
 }
 

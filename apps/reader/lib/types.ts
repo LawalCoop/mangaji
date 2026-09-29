@@ -49,4 +49,9 @@ export interface FrameSource {
   at(i: number): Frame;
   /** nombre legible del punto actual, para la UI (ej. "12 / 180") */
   label(i: number): string;
+  /**
+   * ¿Están todos los encuadres? Una fuente que se alimenta de un archivo en curso todavía
+   * no los tiene, y el final de lo que hay no es el final del tomo. Sin declarar = completa.
+   */
+  readonly complete?: boolean;
 }

@@ -1,5 +1,6 @@
 import { zipSync } from "fflate";
-import { Detector, type Detection } from "./detector";
+// Solo el tipo: así quien únicamente empaqueta no se trae los modelos ni el runtime.
+import type { Detector, Detection } from "./detector";
 import { insidePolygon, lift, type Sprite } from "./dialogue";
 import { readingOrder, type Box } from "./reading-order";
 import { polygonArea, type Point } from "./vision";
@@ -26,14 +27,26 @@ const TAIL_MS = 600;
 const READ_MS = { min: 650, max: 2800 };
 const READ_SCALE = 240_000;
 
-export type Stage =
-  | { kind: "opening"; total?: number }
-  | { kind: "models"; detail: string }
-  | { kind: "page"; index: number; total: number; detail: string }
-  | { kind: "packing" }
-  | { kind: "done"; panels: number; balloons: number; ms: number };
+/**
+ * Una página ya procesada, lista para leerse.
+ *
+ * Se emite apenas termina en vez de esperar al tomo entero: el arte y los sprites van
+ * derecho al lector, y las mismas piezas se guardan para armar el `.cbza` al final.
+ */
+export type ProcessedPage = {
+  index: number;
+  id: string;
+  size: [number, number];
+  /** La entrada de esta página en el manifest. */
+  page: Record<string, unknown>;
+  /** El arte sin el diálogo, en WebP. */
+  image: Uint8Array;
+  sprites: Record<string, Uint8Array>;
+  panels: number;
+  balloons: number;
+};
 
-export type Reporter = (stage: Stage) => void;
+export type PageReporter = (detail: string) => void;
 
 const iou = (a: Detection["bbox"], b: Detection["bbox"]) => {
   const ix = Math.max(0, Math.min(a.x + a.w, b.x + b.w) - Math.max(a.x, b.x));
@@ -56,7 +69,7 @@ const readMs = (ink: number) =>
   Math.round(Math.min(Math.max(READ_MS.min + ink * READ_SCALE, READ_MS.min), READ_MS.max));
 
 /** Cuánta tinta y qué tan alineados están los trazos: de ahí salen la cámara y el efecto. */
-function measure(ctx: CanvasRenderingContext2D, polygon: Point[], pageArea: number) {
+function measure(ctx: OffscreenCanvasRenderingContext2D, polygon: Point[], pageArea: number) {
   const b = polygon.reduce(
     (acc, [x, y]) => ({
       x0: Math.min(acc.x0, x),
@@ -100,225 +113,208 @@ function effect(look: Look) {
 }
 
 /**
- * De dónde salen las páginas.
+ * Procesa una página y devuelve todo lo que hace falta para leerla.
  *
- * Se piden de a una y se liberan enseguida, en vez de cargarlas todas antes de empezar: un
- * tomo son doscientas páginas de cuatro megapíxeles, y el archivo además libera los bitmaps
- * que va desalojando de su caché, así que guardarlos deja referencias muertas.
+ * Trabaja sobre lienzos fuera de pantalla y no toca el DOM a propósito: así corre en un
+ * worker, que es lo que permite leer las páginas ya listas mientras el resto se procesa
+ * sin que la lectura vaya a tirones.
  */
-export type PageSource = {
-  count: number;
-  get: (index: number) => Promise<ImageBitmap>;
-  release: (index: number) => void;
-};
-
-export async function processArchive(pages: PageSource, report: Reporter): Promise<Blob> {
-  const started = performance.now();
-  report({ kind: "models", detail: "preparando los detectores" });
-
-  const detector = await Detector.load((_, detail) =>
-    report({ kind: "models", detail: detail ?? "" }),
-  );
-
-  const files: Record<string, Uint8Array> = {};
-  const manifestPages: unknown[] = [];
-  let totalPanels = 0;
+export async function processPage(
+  detector: Detector,
+  bitmap: ImageBitmap,
+  index: number,
+  report?: PageReporter,
+): Promise<ProcessedPage> {
+  const sprites: Record<string, Uint8Array> = {};
   let totalBalloons = 0;
 
-  try {
-    for (let index = 0; index < pages.count; index++) {
-      const bitmap = await pages.get(index);
-      const pageId = `p${String(index + 1).padStart(3, "0")}`;
-      const width = bitmap.width;
-      const height = bitmap.height;
-      const pageArea = width * height;
+  const pageId = `p${String(index + 1).padStart(3, "0")}`;
+  const width = bitmap.width;
+  const height = bitmap.height;
+  const pageArea = width * height;
 
-      const canvas = document.createElement("canvas");
-      canvas.width = width;
-      canvas.height = height;
-      const ctx = canvas.getContext("2d", { willReadFrequently: true })!;
-      ctx.drawImage(bitmap, 0, 0);
+  const canvas = new OffscreenCanvas(width, height);
+  const ctx = canvas.getContext("2d", { willReadFrequently: true })!;
+  ctx.drawImage(bitmap, 0, 0);
 
-      report({ kind: "page", index, total: pages.count, detail: "buscando viñetas" });
-      const dets = await detector.detect(ctx.getImageData(0, 0, width, height));
+  report?.("buscando viñetas");
+  const dets = await detector.detect(ctx.getImageData(0, 0, width, height));
 
-      let panels = dedupe(
-        dets.filter((d) => d.cls === "frame" && polygonArea(d.polygon) / pageArea >= MIN_PANEL_AREA),
-      );
-      const balloons = dedupe(dets.filter((d) => d.cls === "balloon"));
-      const texts = dets.filter((d) => d.cls === "text");
+  let panels = dedupe(
+    dets.filter((d) => d.cls === "frame" && polygonArea(d.polygon) / pageArea >= MIN_PANEL_AREA),
+  );
+  const balloons = dedupe(dets.filter((d) => d.cls === "balloon"));
+  const texts = dets.filter((d) => d.cls === "text");
 
-      // Una página a sangre sin marco dibujado no produce detecciones: la hoja es la viñeta.
-      if (!panels.length) {
-        panels = [
-          {
-            cls: "frame",
-            conf: 1,
-            bbox: { x: 0, y: 0, w: width, h: height },
-            polygon: [
-              [0, 0],
-              [width, 0],
-              [width, height],
-              [0, height],
-            ],
-          },
-        ];
-      }
-
-      report({
-        kind: "page",
-        index,
-        total: pages.count,
-        detail: `${panels.length} viñetas · levantando el diálogo`,
-      });
-
-      // Se levanta todo el texto de la página antes de repartirlo: hacerlo por viñeta deja
-      // sin levantar los globos que quedan a caballo de un borde diagonal.
-      const lifted: { det: Detection; sprite: Sprite }[] = [];
-      for (const text of texts) {
-        const sprite = await lift(ctx, text, pageArea);
-        if (sprite) lifted.push({ det: text, sprite });
-      }
-
-      // Los bloques se agrupan por globo: el modelo parte un diálogo largo en varios.
-      const taken = new Set<number>();
-      const groups: { box: Detection["bbox"]; parts: Sprite[] }[] = [];
-      for (const balloon of balloons) {
-        const mine = lifted
-          .map((l, i) => ({ ...l, i }))
-          .filter(({ i, det }) => !taken.has(i) && insideBox(balloon.bbox, det.bbox) >= 0.5);
-        if (mine.length) {
-          mine.forEach(({ i }) => taken.add(i));
-          groups.push({ box: balloon.bbox, parts: mine.map((m) => m.sprite) });
-        }
-      }
-      lifted.forEach((l, i) => {
-        if (!taken.has(i)) groups.push({ box: l.det.bbox, parts: [l.sprite] });
-      });
-      for (const balloon of balloons) {
-        if (!groups.some((g) => insideBox(balloon.bbox, g.box) > 0.5)) {
-          groups.push({ box: balloon.bbox, parts: [] });
-        }
-      }
-
-      // Cada grupo va a la viñeta con la que más se solapa, medido contra la silueta: con
-      // bordes diagonales las cajas de dos vecinas se pisan y el globo cae en la de al lado.
-      const perPanel = new Map<number, { id: string; box: Detection["bbox"]; parts: Sprite[] }[]>();
-      groups.forEach((group, gi) => {
-        const id = `${pageId}.b${gi}`;
-        const shares = panels.map((p) => insidePolygon(p.polygon, group.box));
-        const best = shares.indexOf(Math.max(...shares));
-        const owners = shares
-          .map((s, i) => (s >= SHARED_BALLOON ? i : -1))
-          .filter((i) => i >= 0);
-        if (!owners.includes(best)) owners.push(best);
-        for (const owner of owners.length ? owners : [0]) {
-          perPanel.set(owner, [...(perPanel.get(owner) ?? []), { id, ...group }]);
-        }
-      });
-
-      // Los sprites se componen acá porque el armado del manifest es síncrono. Un globo
-      // compartido por dos viñetas se compone una sola vez y las dos apuntan al mismo PNG.
-      const pending = new Map<string, { bytes: Uint8Array; rect: Sprite["rect"]; ink: number }>();
-      for (const list of perPanel.values()) {
-        for (const group of list) {
-          if (!group.parts.length || pending.has(group.id)) continue;
-          const merged = await mergeSprites(group.parts);
-          if (merged) pending.set(group.id, merged);
-        }
-      }
-
-      const order = readingOrder(
-        panels.map((p) => p.bbox as Box),
-        { polygons: panels.map((p) => p.polygon) },
-      );
-
-      const outPanels = order.map((panelIndex, position) => {
-        const panel = panels[panelIndex];
-        const mine = perPanel.get(panelIndex) ?? [];
-        const inner = readingOrder(mine.map((m) => m.box as Box));
-
-        const outBalloons = inner.map((bi, bpos) => {
-          const group = mine[bi];
-          const merged = pending.get(group.id) ?? null;
-          const sprite = merged ? `sprites/${group.id}.png` : "";
-          if (merged) {
-            files[sprite] = merged.bytes;
-            totalBalloons++;
-          }
-          return {
-            id: group.id,
-            order: bpos,
-            mode: "text-only",
-            sprite,
-            bbox: merged
-              ? [merged.rect.x, merged.rect.y, merged.rect.w, merged.rect.h]
-              : [group.box.x, group.box.y, group.box.w, group.box.h],
-            inkArea: merged ? merged.ink : 0,
-            reveal: "fade",
-          };
-        });
-
-        const look = measure(ctx, panel.polygon, pageArea);
-        const withSprite = outBalloons.filter((b) => b.sprite);
-        const beats: Record<string, unknown>[] = [
-          { t: 0, ms: ENTER_MS, cam: camera(look) },
-        ];
-        const fx = effect(look);
-        if (fx) beats.push({ t: Math.max(ENTER_MS - 80, 0), ms: 420, fx });
-
-        let t = ENTER_MS;
-        for (const balloon of withSprite) {
-          beats.push({ t, ms: REVEAL_MS, reveal: balloon.id });
-          t += REVEAL_MS + readMs(balloon.inkArea);
-        }
-        beats.push({ t, ms: 0, hold: TAIL_MS });
-
-        return {
-          id: `${pageId}.k${position}`,
-          order: position,
-          polygon: panel.polygon.map(([x, y]) => [Math.round(x), Math.round(y)]),
-          bbox: [panel.bbox.x, panel.bbox.y, panel.bbox.w, panel.bbox.h].map((v) => Math.round(v)),
-          confidence: Number(panel.conf.toFixed(3)),
-          balloons: outBalloons,
-          beats,
-        };
-      });
-
-      totalPanels += outPanels.length;
-
-      // El arte se guarda ya sin el diálogo, así que hay que recodificarlo.
-      const blob = await new Promise<Blob>((resolve) =>
-        canvas.toBlob((b) => resolve(b!), "image/webp", 0.88),
-      );
-      const entry = `pages/${pageId}.webp`;
-      files[entry] = new Uint8Array(await blob.arrayBuffer());
-
-      manifestPages.push({ id: pageId, image: entry, size: [width, height], panels: outPanels });
-      pages.release(index);
-    }
-  } finally {
-    await detector.release();
+  // Una página a sangre sin marco dibujado no produce detecciones: la hoja es la viñeta.
+  if (!panels.length) {
+    panels = [
+      {
+        cls: "frame",
+        conf: 1,
+        bbox: { x: 0, y: 0, w: width, h: height },
+        polygon: [
+          [0, 0],
+          [width, 0],
+          [width, height],
+          [0, height],
+        ],
+      },
+    ];
   }
 
-  report({ kind: "packing" });
+  report?.(`${panels.length} viñetas · levantando el diálogo`);
+
+  // Se levanta todo el texto de la página antes de repartirlo: hacerlo por viñeta deja
+  // sin levantar los globos que quedan a caballo de un borde diagonal.
+  const lifted: { det: Detection; sprite: Sprite }[] = [];
+  const shapes = balloons.map((b) => b.polygon);
+  for (const text of texts) {
+    const sprite = await lift(ctx, text, pageArea, shapes);
+    if (sprite) lifted.push({ det: text, sprite });
+  }
+
+  // Los bloques se agrupan por globo: el modelo parte un diálogo largo en varios.
+  const taken = new Set<number>();
+  const groups: { box: Detection["bbox"]; parts: Sprite[] }[] = [];
+  for (const balloon of balloons) {
+    const mine = lifted
+      .map((l, i) => ({ ...l, i }))
+      .filter(({ i, det }) => !taken.has(i) && insideBox(balloon.bbox, det.bbox) >= 0.5);
+    if (mine.length) {
+      mine.forEach(({ i }) => taken.add(i));
+      groups.push({ box: balloon.bbox, parts: mine.map((m) => m.sprite) });
+    }
+  }
+  lifted.forEach((l, i) => {
+    if (!taken.has(i)) groups.push({ box: l.det.bbox, parts: [l.sprite] });
+  });
+  for (const balloon of balloons) {
+    if (!groups.some((g) => insideBox(balloon.bbox, g.box) > 0.5)) {
+      groups.push({ box: balloon.bbox, parts: [] });
+    }
+  }
+
+  // Cada grupo va a la viñeta con la que más se solapa, medido contra la silueta: con
+  // bordes diagonales las cajas de dos vecinas se pisan y el globo cae en la de al lado.
+  const perPanel = new Map<number, { id: string; box: Detection["bbox"]; parts: Sprite[] }[]>();
+  groups.forEach((group, gi) => {
+    const id = `${pageId}.b${gi}`;
+    const shares = panels.map((p) => insidePolygon(p.polygon, group.box));
+    const best = shares.indexOf(Math.max(...shares));
+    const owners = shares.map((s, i) => (s >= SHARED_BALLOON ? i : -1)).filter((i) => i >= 0);
+    if (!owners.includes(best)) owners.push(best);
+    for (const owner of owners.length ? owners : [0]) {
+      perPanel.set(owner, [...(perPanel.get(owner) ?? []), { id, ...group }]);
+    }
+  });
+
+  // Los sprites se componen acá porque el armado del manifest es síncrono. Un globo
+  // compartido por dos viñetas se compone una sola vez y las dos apuntan al mismo PNG.
+  const pending = new Map<string, { bytes: Uint8Array; rect: Sprite["rect"]; ink: number }>();
+  for (const list of perPanel.values()) {
+    for (const group of list) {
+      if (!group.parts.length || pending.has(group.id)) continue;
+      const merged = await mergeSprites(group.parts);
+      if (merged) pending.set(group.id, merged);
+    }
+  }
+
+  const order = readingOrder(
+    panels.map((p) => p.bbox as Box),
+    { polygons: panels.map((p) => p.polygon) },
+  );
+
+  const outPanels = order.map((panelIndex, position) => {
+    const panel = panels[panelIndex];
+    const mine = perPanel.get(panelIndex) ?? [];
+    const inner = readingOrder(mine.map((m) => m.box as Box));
+
+    const outBalloons = inner.map((bi, bpos) => {
+      const group = mine[bi];
+      const merged = pending.get(group.id) ?? null;
+      const sprite = merged ? `sprites/${group.id}.png` : "";
+      if (merged) {
+        sprites[sprite] = merged.bytes;
+        totalBalloons++;
+      }
+      return {
+        id: group.id,
+        order: bpos,
+        mode: "text-only",
+        sprite,
+        bbox: merged
+          ? [merged.rect.x, merged.rect.y, merged.rect.w, merged.rect.h]
+          : [group.box.x, group.box.y, group.box.w, group.box.h],
+        inkArea: merged ? merged.ink : 0,
+        reveal: "fade",
+      };
+    });
+
+    const look = measure(ctx, panel.polygon, pageArea);
+    const withSprite = outBalloons.filter((b) => b.sprite);
+    const beats: Record<string, unknown>[] = [{ t: 0, ms: ENTER_MS, cam: camera(look) }];
+    const fx = effect(look);
+    if (fx) beats.push({ t: Math.max(ENTER_MS - 80, 0), ms: 420, fx });
+
+    let t = ENTER_MS;
+    for (const balloon of withSprite) {
+      beats.push({ t, ms: REVEAL_MS, reveal: balloon.id });
+      t += REVEAL_MS + readMs(balloon.inkArea);
+    }
+    beats.push({ t, ms: 0, hold: TAIL_MS });
+
+    return {
+      id: `${pageId}.k${position}`,
+      order: position,
+      polygon: panel.polygon.map(([x, y]) => [Math.round(x), Math.round(y)]),
+      bbox: [panel.bbox.x, panel.bbox.y, panel.bbox.w, panel.bbox.h].map((v) => Math.round(v)),
+      confidence: Number(panel.conf.toFixed(3)),
+      balloons: outBalloons,
+      beats,
+    };
+  });
+
+  // El arte se guarda ya sin el diálogo, así que hay que recodificarlo.
+  const blob = await canvas.convertToBlob({ type: "image/webp", quality: 0.88 });
+  const entry = `pages/${pageId}.webp`;
+
+  return {
+    index,
+    id: pageId,
+    size: [width, height],
+    page: { id: pageId, image: entry, size: [width, height], panels: outPanels },
+    image: new Uint8Array(await blob.arrayBuffer()),
+    sprites,
+    panels: outPanels.length,
+    balloons: totalBalloons,
+  };
+}
+
+/**
+ * Arma el `.cbza` con las páginas ya procesadas.
+ *
+ * Se hace al final, cuando ya no interrumpe a nadie: para ese momento la lectura viene
+ * corriendo desde hace rato sobre estas mismas piezas.
+ */
+export function packArchive(pages: ProcessedPage[]): Blob {
+  const files: Record<string, Uint8Array> = {};
+  for (const page of pages) {
+    files[`pages/${page.id}.webp`] = page.image;
+    Object.assign(files, page.sprites);
+  }
+
   files["manifest.json"] = new TextEncoder().encode(
     JSON.stringify({
       version: 1,
       readingDirection: "rtl",
       generator: "mangaji-web/0.1",
-      pages: manifestPages,
+      pages: pages.map((p) => p.page),
     }),
   );
 
   // Sin comprimir: el arte ya es WebP y los sprites PNG, comprimir de nuevo no gana nada.
   const zipped = zipSync(files, { level: 0 });
-  report({
-    kind: "done",
-    panels: totalPanels,
-    balloons: totalBalloons,
-    ms: performance.now() - started,
-  });
   return new Blob([zipped as unknown as BlobPart], { type: "application/zip" });
 }
 
