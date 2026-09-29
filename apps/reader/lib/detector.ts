@@ -1,5 +1,6 @@
 import type * as Ort from "onnxruntime-web";
 import { boundsOf, convexHull, largestComponent, open, polygonArea, simplify, traceContour, type Point } from "./vision";
+import { asset } from "./base";
 
 /**
  * Detección de viñetas, globos y texto en el navegador.
@@ -55,7 +56,7 @@ const FLAG = "__mangaji_ort_ready__";
 function configure(ort: typeof Ort): void {
   const global = globalThis as Record<string, unknown>;
   if (global[FLAG]) return;
-  ort.env.wasm.wasmPaths = "/ort/";
+  ort.env.wasm.wasmPaths = asset("/ort/");
   // Los hilos de WebAssembly necesitan memoria compartida, y el navegador solo la habilita
   // en páginas aisladas. Pedir doce sin eso no los da y encima avisa por consola.
   ort.env.wasm.numThreads = crossOriginIsolated ? (navigator.hardwareConcurrency ?? 4) : 1;
@@ -99,9 +100,9 @@ export class Detector {
     };
 
     onProgress?.("modelo", "cargando el detector de viñetas");
-    const panels = await ort.InferenceSession.create("/models/panels.onnx", options);
+    const panels = await ort.InferenceSession.create(asset("/models/panels.onnx"), options);
     onProgress?.("modelo", "cargando el detector de diálogo");
-    const text = await ort.InferenceSession.create("/models/text.onnx", options);
+    const text = await ort.InferenceSession.create(asset("/models/text.onnx"), options);
 
     return new Detector(ort, panels, text);
   }

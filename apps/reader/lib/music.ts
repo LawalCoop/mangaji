@@ -1,5 +1,6 @@
 import { Midi } from "@tonejs/midi";
 import type { Mood } from "./mood";
+import { asset } from "./base";
 
 /**
  * Acompañamiento del lector: una pieza MIDI por mood, en bucle.
@@ -159,7 +160,7 @@ export class Music {
     if (this.#loading === id) return;
     this.#loading = id;
     try {
-      const res = await fetch(`/music/${id}.mid`);
+      const res = await fetch(asset(`/music/${id}.mid`));
       if (!res.ok) throw new Error(`sin pieza para ${id}`);
       const midi = new Midi(await res.arrayBuffer());
 

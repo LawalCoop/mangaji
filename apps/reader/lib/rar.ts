@@ -1,4 +1,5 @@
 import { isPage, sortPages } from "./entries";
+import { asset } from "./base";
 
 /**
  * Lectura de CBR, que es un RAR.
@@ -35,7 +36,7 @@ let ready: Promise<typeof import("libarchive.js").Archive> | null = null;
 
 function archiveLib() {
   ready ??= import("libarchive.js").then(({ Archive }) => {
-    Archive.init({ workerUrl: "/libarchive/worker-bundle.js" });
+    Archive.init({ workerUrl: asset("/libarchive/worker-bundle.js") });
     return Archive;
   });
   return ready;

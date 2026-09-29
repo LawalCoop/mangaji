@@ -37,7 +37,9 @@ tests/fixtures/out/
 .idea/
 .vscode/
 
-# modelos y runtime, pesados: se regeneran con `mangacut export-onnx`
+# modelos y runtime, pesados: los modelos se regeneran con `mangacut export-onnx` y los
+# runtimes se copian de node_modules con `pnpm vendor`
 apps/reader/public/models/
 apps/reader/public/ort/
 apps/reader/public/libarchive/
+apps/reader/public/coi-serviceworker.min.js

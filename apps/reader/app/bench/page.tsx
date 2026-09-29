@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useRef, useState } from "react";
+import { asset } from "@/lib/base";
 
 /**
  * Banco de pruebas del pipeline en el navegador.
@@ -12,8 +13,8 @@ import { useCallback, useRef, useState } from "react";
  */
 
 const MODELS = {
-  panels: { url: "/models/panels.onnx", label: "Viñetas (segmentación)", mb: 42 },
-  text: { url: "/models/text.onnx", label: "Diálogo (detección)", mb: 10 },
+  panels: { url: asset("/models/panels.onnx"), label: "Viñetas (segmentación)", mb: 42 },
+  text: { url: asset("/models/text.onnx"), label: "Diálogo (detección)", mb: 10 },
 } as const;
 
 const SIZE = 1280;
@@ -78,7 +79,7 @@ export default function Bench() {
     setLog([]);
 
     const ort = await import("onnxruntime-web");
-    ort.env.wasm.wasmPaths = "/ort/";
+    ort.env.wasm.wasmPaths = asset("/ort/");
     ort.env.wasm.numThreads = navigator.hardwareConcurrency ?? 4;
     // Avisa que las operaciones de forma van a CPU en vez de a la GPU. Es deliberado —ahí
     // son más rápidas—, pero el overlay de desarrollo lo muestra como si fuera un error.

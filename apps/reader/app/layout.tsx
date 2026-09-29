@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { Anton, Zen_Kaku_Gothic_New } from "next/font/google";
 import "./globals.css";
+import { asset } from "@/lib/base";
 
 /** Condensada y pesada: el peso de una onomatopeya. Se usa solo en titulares. */
 const display = Anton({
@@ -38,6 +39,14 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
       className={`${display.variable} ${body.variable} h-full antialiased`}
     >
       <head>
+        {/* Sin servidor que mande las cabeceras de aislamiento —GitHub Pages no deja—, las
+            pone un service worker. Donde el servidor ya las manda no hace nada. */}
+        <script
+          dangerouslySetInnerHTML={{
+            __html: "window.coi={coepCredentialless:()=>true,quiet:true}",
+          }}
+        />
+        <script src={asset("/coi-serviceworker.min.js")} />
         <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="anonymous" />
         <link rel="stylesheet" href={KANA_URL} />
       </head>
