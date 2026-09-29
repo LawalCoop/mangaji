@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { boxBlur, components, convexHull, largestComponent, open, simplify, traceContour } from "./vision";
+import { boxBlur, components, convexHull, largestComponent, open, resizeToPlanes, simplify, traceContour } from "./vision";
 
 /** Dibuja una máscara a partir de un plano en texto: `#` es figura, `.` es fondo. */
 function mask(rows: string[]) {
@@ -138,5 +138,24 @@ describe("desenfoque de caja", () => {
     expect(spot[40]).toBeGreaterThan(0);
     // El borde replica, así que la suma se conserva salvo por lo que se acumula afuera.
     expect(spot.reduce((a, b) => a + b, 0)).toBeCloseTo(81, 3);
+  });
+});
+
+describe("reescalado bilineal", () => {
+  /** Imagen RGBA de un canal repetido, a partir de sus valores en filas. */
+  const gray = (values: number[]) => new Uint8ClampedArray(values.flatMap((v) => [v, v, v, 255]));
+
+  it("a la mitad promedia cada bloque de 2×2, como OpenCV", () => {
+    const src = gray([0, 100, 200, 40, 0, 100, 200, 40]);
+    const out = resizeToPlanes(src, 4, 2, 2, 1, 2, 114);
+    expect(Math.round(out[0] * 255)).toBe(50);
+    expect(Math.round(out[1] * 255)).toBe(120);
+  });
+
+  it("rellena fuera de la imagen y separa los canales", () => {
+    const src = new Uint8ClampedArray([10, 20, 30, 255]);
+    const out = resizeToPlanes(src, 1, 1, 1, 1, 2, 114);
+    expect([0, 4, 8].map((i) => Math.round(out[i] * 255))).toEqual([10, 20, 30]);
+    expect(Math.round(out[3] * 255)).toBe(114);
   });
 });

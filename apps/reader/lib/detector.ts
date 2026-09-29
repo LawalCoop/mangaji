@@ -1,5 +1,5 @@
 import type * as Ort from "onnxruntime-web";
-import { boundsOf, convexHull, largestComponent, open, polygonArea, simplify, traceContour, type Point } from "./vision";
+import { boundsOf, convexHull, largestComponent, open, polygonArea, resizeToPlanes, simplify, traceContour, type Point } from "./vision";
 import { asset } from "./base";
 
 /**
@@ -41,6 +41,8 @@ const TEXT_MERGE_IOU = 0.4;
 const SIMPLIFY_EPS = 2;
 /** Por encima de esta relación área/casco la viñeta se considera convexa y se usa el casco. */
 const CONVEX_RATIO = 0.93;
+/** Gris del relleno alrededor de la página, el mismo que usa Ultralytics. */
+const PAD = 114;
 
 export type Progress = (stage: string, detail?: string) => void;
 
@@ -134,30 +136,16 @@ export class Detector {
 
   /** Escala a 1280 manteniendo proporción y rellena; la imagen se ancla arriba a la izquierda. */
   #prepare(image: ImageData) {
-    const canvas = new OffscreenCanvas(SIZE, SIZE);
-    const ctx = canvas.getContext("2d", { willReadFrequently: true })!;
-    ctx.fillStyle = "#727272";
-    ctx.fillRect(0, 0, SIZE, SIZE);
-
     const scale = Math.min(SIZE / image.width, SIZE / image.height);
-    const bitmap = new OffscreenCanvas(image.width, image.height);
-    bitmap.getContext("2d")!.putImageData(image, 0, 0);
-    ctx.drawImage(bitmap, 0, 0, image.width * scale, image.height * scale);
-
-    const { data } = ctx.getImageData(0, 0, SIZE, SIZE);
-    const plane = SIZE * SIZE;
-    const chw = new Float32Array(3 * plane);
-    for (let i = 0, p = 0; i < data.length; i += 4, p++) {
-      chw[p] = data[i] / 255;
-      chw[plane + p] = data[i + 1] / 255;
-      chw[2 * plane + p] = data[i + 2] / 255;
-    }
+    const validW = Math.round(image.width * scale);
+    const validH = Math.round(image.height * scale);
+    const chw = resizeToPlanes(image.data, image.width, image.height, validW, validH, SIZE, PAD);
 
     return {
       tensor: new this.#ort.Tensor("float32", chw, [1, 3, SIZE, SIZE]),
       scale,
-      validW: Math.round(image.width * scale),
-      validH: Math.round(image.height * scale),
+      validW,
+      validH,
     };
   }
 

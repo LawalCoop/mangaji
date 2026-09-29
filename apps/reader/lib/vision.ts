@@ -334,3 +334,55 @@ export function boundsOf(points: Point[]) {
   }
   return { x: minX, y: minY, w: maxX - minX, h: maxY - minY };
 }
+
+/**
+ * Reescala una imagen RGBA con interpolación bilineal, igual que `cv2.INTER_LINEAR`.
+ *
+ * Los modelos se entrenaron con imágenes preparadas por OpenCV. `drawImage` no sirve: cada
+ * navegador reescala a su manera —y Chrome distinto que Firefox—, y en una viñeta límite esa
+ * diferencia pasa la confianza de 0.58 a 0.09 y la viñeta desaparece. Así el navegador ve
+ * lo mismo que el pipeline de Python.
+ *
+ * Devuelve los tres canales en planos separados (CHW), normalizados a 0–1, dentro de un
+ * lienzo de `size`×`size` relleno con `pad`, con la imagen anclada arriba a la izquierda.
+ */
+export function resizeToPlanes(
+  src: Uint8ClampedArray,
+  sw: number,
+  sh: number,
+  dw: number,
+  dh: number,
+  size: number,
+  pad: number,
+): Float32Array {
+  const plane = size * size;
+  const out = new Float32Array(3 * plane).fill(pad / 255);
+
+  // Centros de píxel alineados, como OpenCV: `(d + 0.5) * escala - 0.5`, recortado al borde.
+  const axis = (d: number, from: number, to: number) => {
+    const s = Math.min(Math.max((d + 0.5) * (from / to) - 0.5, 0), from - 1);
+    const i0 = Math.floor(s);
+    return { i0, i1: Math.min(i0 + 1, from - 1), f: s - i0 };
+  };
+  const xs = Array.from({ length: dw }, (_, x) => axis(x, sw, dw));
+
+  for (let y = 0; y < dh; y++) {
+    const { i0: y0, i1: y1, f: fy } = axis(y, sh, dh);
+    const r0 = y0 * sw;
+    const r1 = y1 * sw;
+    for (let x = 0; x < dw; x++) {
+      const { i0: x0, i1: x1, f: fx } = xs[x];
+      const a = (r0 + x0) * 4;
+      const b = (r0 + x1) * 4;
+      const c = (r1 + x0) * 4;
+      const d = (r1 + x1) * 4;
+      const p = y * size + x;
+      for (let ch = 0; ch < 3; ch++) {
+        const top = src[a + ch] + (src[b + ch] - src[a + ch]) * fx;
+        const bottom = src[c + ch] + (src[d + ch] - src[c + ch]) * fx;
+        out[ch * plane + p] = Math.round(top + (bottom - top) * fy) / 255;
+      }
+    }
+  }
+  return out;
+}
