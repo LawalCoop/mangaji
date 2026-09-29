@@ -219,26 +219,30 @@ export function Landing({ status, message, onFile }: Props) {
 
           <div className="flex flex-col items-center gap-5 px-6 py-9 text-center sm:py-12">
             {/* Globo de diálogo: la instrucción, dicha por la página. */}
-            <div className="relative">
-              <div
-                className="border-[4px] bg-white px-8 py-5 sm:px-12 sm:py-6"
-                style={{
-                  borderColor: INK,
-                  borderRadius: "48% 52% 50% 50% / 58% 45% 55% 42%",
-                }}
-              >
-                <p
-                  className="font-[family-name:var(--font-display)] leading-none"
-                  style={{ fontSize: "clamp(1.5rem,4.5vw,2.875rem)", color: INK }}
-                >
-                  {status === "loading" ? "ABRIENDO…" : "SUBÍ TU TOMO ACÁ"}
-                </p>
-              </div>
-              <span
+            <div className="relative mb-3 px-10 py-6 sm:px-14 sm:py-7">
+              {/* Globo y cola son un solo trazo: dibujados por separado, la cola tapaba un
+                  tramo del contorno y la unión se veía cortada. */}
+              <svg
                 aria-hidden
-                className="absolute left-1/2 h-6 w-6 -translate-x-9 rotate-45 border-b-[4px] border-r-[4px] bg-white"
-                style={{ bottom: -14, borderColor: INK }}
-              />
+                className="absolute inset-0 h-full w-full overflow-visible"
+                viewBox="0 0 400 110"
+                preserveAspectRatio="none"
+              >
+                <path
+                  d="M 165 105.2 A 196 51 0 1 1 205 105.9 L 158 130 Z"
+                  fill="white"
+                  stroke={INK}
+                  strokeWidth={4}
+                  strokeLinejoin="round"
+                  vectorEffect="non-scaling-stroke"
+                />
+              </svg>
+              <p
+                className="relative font-[family-name:var(--font-display)] leading-none"
+                style={{ fontSize: "clamp(1.5rem,4.5vw,2.875rem)", color: INK }}
+              >
+                {status === "loading" ? "ABRIENDO…" : "SUBÍ TU TOMO ACÁ"}
+              </p>
             </div>
 
             <button
