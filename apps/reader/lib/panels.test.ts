@@ -121,4 +121,17 @@ describe("a qué viñeta va cada texto", () => {
     const panels = [frame(0.95, 600, 0, 400, 1400), frame(0.8, 0, 0, 300, 300)];
     expect(ownersOf({ x: 320, y: 100, w: 40, h: 40 }, panels)).toEqual([1]);
   });
+
+  it("no comparte un texto entre una viñeta y un relleno encimado", () => {
+    // La viñeta grande de una doble página, rellenada como rectángulo, se pasa sobre la de
+    // al lado. El texto está entero en las dos: antes aparecía al leer la grande.
+    const small = frame(0.95, 0, 900, 700, 700);
+    const filler = frame(0, 480, 0, 1500, 1600);
+    expect(ownersOf({ x: 500, y: 1000, w: 80, h: 90 }, [small, filler])).toEqual([0]);
+  });
+
+  it("comparte el globo que de verdad queda partido entre dos viñetas", () => {
+    const panels = [frame(0.9, 0, 0, 500, 700), frame(0.9, 500, 0, 500, 700)];
+    expect(ownersOf({ x: 440, y: 100, w: 120, h: 60 }, panels)).toEqual([0, 1]);
+  });
 });

@@ -240,6 +240,8 @@ export function fillOrphans(panels: Detection[], frames: Detection[], grid: InkG
 
 /** Con esta fracción dentro de una viñeta, el globo también le pertenece. */
 const SHARED_BALLOON = 0.25;
+/** Con esto dentro de una viñeta, el globo es entero suyo y no se comparte. */
+const WHOLE_SHARE = 0.75;
 /** Con menos que esto dentro de toda silueta, la silueta no alcanza para decidir. */
 const CLEAR_SHARE = 0.5;
 
@@ -257,9 +259,17 @@ export function ownersOf(box: Box, panels: Detection[]): number[] {
   if (!panels.length) return [];
   const shares = panels.map((p) => insidePolygon(p.polygon, box));
   const top = Math.max(...shares);
+  // Si una viñeta lo contiene casi entero, es de esa sola. Que otra también lo contenga no es
+  // un globo partido sino dos viñetas encimadas —típicamente una rellenada a mano, que es un
+  // rectángulo y se pasa sobre las vecinas—, y gana la más chica, que es la más precisa.
+  // Compartirlo lo mostraba al leer la otra, que en una doble página se lee primero.
+  const whole = shares.map((s, i) => (s >= WHOLE_SHARE ? i : -1)).filter((i) => i >= 0);
+  if (whole.length) {
+    const area = (i: number) => panels[i].bbox.w * panels[i].bbox.h;
+    return [whole.reduce((a, b) => (area(b) < area(a) ? b : a))];
+  }
   if (top >= CLEAR_SHARE) {
-    const owners = shares.map((s, i) => (s >= SHARED_BALLOON ? i : -1)).filter((i) => i >= 0);
-    return owners;
+    return shares.map((s, i) => (s >= SHARED_BALLOON ? i : -1)).filter((i) => i >= 0);
   }
 
   const area = Math.max(box.w * box.h, 1);
