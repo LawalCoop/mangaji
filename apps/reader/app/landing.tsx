@@ -86,6 +86,17 @@ export function Landing({ status, message, onFile, onUrl, download }: Props) {
             className="panel @container relative flex flex-col justify-center px-6 py-8 max-lg:order-1 sm:px-10 sm:py-12"
             style={panel}
           >
+            {/* Guiño: la trama de puntos del manga impreso, degradándose desde la esquina. */}
+            <span
+              aria-hidden
+              className="pointer-events-none absolute top-0 left-0 h-3/5 w-3/5"
+              style={{
+                background: TONE,
+                maskImage: "linear-gradient(135deg, black 0%, transparent 70%)",
+                WebkitMaskImage: "linear-gradient(135deg, black 0%, transparent 70%)",
+              }}
+            />
+
             {/* Guiño: el encabezado de capítulo, en vertical como en el tomo impreso. */}
             <span
               aria-hidden
@@ -108,7 +119,7 @@ export function Landing({ status, message, onFile, onUrl, download }: Props) {
               ))}
             </span>
 
-            <p className="text-[15px] font-medium sm:text-[18px]" style={{ color: "#3A3A42" }}>
+            <p className="relative text-[15px] font-medium sm:text-[18px]" style={{ color: "#3A3A42" }}>
               {L.tagline}
             </p>
 

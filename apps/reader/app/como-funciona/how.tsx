@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { I18nProvider, useI18n, type Messages } from "@/lib/i18n";
-import { CYAN, INK, MAGENTA, PAPER, SiteFooter, SiteHeader, panel, screenPanel } from "../site";
+import { CYAN, INK, MAGENTA, PAPER, SiteFooter, SiteHeader, TONE, panel, screenPanel } from "../site";
 import {
   DetectScene,
   DirectScene,
@@ -75,10 +75,37 @@ function How() {
           {/* Titular y texto lado a lado cuando el cuadro es ancho, como una página de revista;
               apilados cuando no. Así el titular es más chico que el de la portada sin dejar
               medio cuadro vacío. */}
-          <div className="panel @container flex flex-col justify-center px-6 py-10 sm:px-10 sm:py-12" style={panel}>
+          <div className="panel @container relative flex flex-col justify-center overflow-hidden px-6 py-10 sm:px-10 sm:py-12" style={panel}>
+            {/* Guiños para el aire que deja el índice de al lado, solo con el cuadro ancho. */}
+            {/* La trama de puntos del manga impreso, degradándose desde la esquina. */}
+            <span
+              aria-hidden
+              className="pointer-events-none absolute top-0 left-0 hidden h-3/5 w-3/5 @3xl:block"
+              style={{
+                background: TONE,
+                maskImage: "linear-gradient(135deg, black 0%, transparent 70%)",
+                WebkitMaskImage: "linear-gradient(135deg, black 0%, transparent 70%)",
+              }}
+            />
+            {/* El capítulo siguiente al 第一話 de la portada. */}
+            <span
+              aria-hidden
+              className="absolute top-0 right-10 hidden px-2 py-3 font-[family-name:var(--font-kana)] text-[15px] font-black tracking-[0.3em] @3xl:block"
+              style={{ writingMode: "vertical-rl", background: INK, color: PAPER }}
+            >
+              第二話
+            </span>
+            {/* El clic de un mecanismo que encaja: esta es la página del mecanismo. */}
+            <span
+              aria-hidden
+              className="pointer-events-none absolute right-10 bottom-6 hidden select-none font-[family-name:var(--font-kana)] font-black leading-none @3xl:block"
+              style={{ fontSize: "clamp(2.2rem, 4.5cqi, 3.6rem)", color: PAPER, WebkitTextStroke: `2.5px ${CYAN}`, transform: "rotate(-10deg)" }}
+            >
+              カチッ
+            </span>
             {/* La grilla va en un envoltorio: las consultas de contenedor miden al padre, no a
                 sí mismas. */}
-            <div className="grid items-end gap-8 [--ratio:0.85] @3xl:grid-cols-[auto_minmax(0,1fr)] @3xl:gap-12 @3xl:[--ratio:0.6]">
+            <div className="relative grid items-end gap-8 [--ratio:0.85] @3xl:grid-cols-[auto_minmax(0,1fr)] @3xl:gap-12 @3xl:[--ratio:0.6]">
             <h1 className="relative" style={{ lineHeight: 0.92 }}>
               <span className="sr-only">{H.headlineLabel}</span>
               {[
