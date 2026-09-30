@@ -492,7 +492,14 @@ export function inkOf(
   // letras, mientras la letra blanca queda sin ver. Por color, un degradé de blanco a rojo
   // se aparta entero del "fondo" y parece tinta. Decide el borde de la caja: si es casi todo
   // de un mismo color que no es papel, es un cuadro de color y va primero por color.
-  const byLight = () => inkByLight(px, w, h, seed);
+  // Por brillo, un dibujo en tonos claros de color —una batalla en naranja— también pasa por
+  // papel, y lo que se borra es el dibujo: queda un rectángulo blanco. Si el "papel" es de
+  // color y por color no hay un fondo liso, es texto sobre dibujo y no se levanta.
+  const byLight = () => {
+    const found = inkByLight(px, w, h, seed);
+    if (found && coloredPaper(px, w, seed, found.paper as number) > MAX_COLORED_PAPER) return null;
+    return found;
+  };
   const byColor = () => inkByColor(px, w, h, seed);
   const order = isColoredBox(px, w, seed) ? [byColor, byLight] : [byLight, byColor];
   for (const measure of order) {
@@ -500,6 +507,25 @@ export function inkOf(
     if (found && readable(found.alpha, w, seed)) return found;
   }
   return null;
+}
+
+/** Qué parte del papel, medido por brillo, puede ser de color. */
+const MAX_COLORED_PAPER = 0.5;
+
+/** Qué fracción de los píxeles a nivel de papel son de un color fuerte. */
+function coloredPaper(px: Uint8ClampedArray, w: number, seed: Rect, paper: number): number {
+  let near = 0;
+  let colored = 0;
+  for (let y = seed.y; y < seed.y + seed.h; y++) {
+    for (let x = seed.x; x < seed.x + seed.w; x++) {
+      const i = (y * w + x) * 4;
+      const hi = Math.max(px[i], px[i + 1], px[i + 2]);
+      if (hi < paper - 15) continue;
+      near++;
+      if (hi - Math.min(px[i], px[i + 1], px[i + 2]) > 60) colored++;
+    }
+  }
+  return near ? colored / near : 0;
 }
 
 /** Qué parte del borde tiene que ser del mismo color para tomarlo como un cuadro liso. */

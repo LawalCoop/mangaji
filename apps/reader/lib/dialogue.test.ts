@@ -331,7 +331,8 @@ describe("borrado del diálogo", () => {
     const px = new Uint8ClampedArray(w * h * 4);
     for (let y = 0; y < h; y++) {
       for (let x = 0; x < w; x++) {
-        const t = x / (w - 1);
+        // Blanco en la mitad izquierda y de ahí a rojo, como en la página real.
+        const t = Math.max(0, (x - w / 2) / (w / 2 - 1));
         px.set([255, Math.round(255 * (1 - t)), Math.round(255 * (1 - t)), 255], (y * w + x) * 4);
       }
     }
