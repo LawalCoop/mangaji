@@ -1,6 +1,7 @@
 "use client";
 
 import { useRef, useState } from "react";
+import { asset } from "@/lib/base";
 import { LANGS, useI18n } from "@/lib/i18n";
 import { ReadingDemo } from "./reading-demo";
 
@@ -30,6 +31,9 @@ function mb(bytes: number): string {
   const v = bytes / 1024 / 1024;
   return v < 10 ? v.toFixed(1) : String(Math.round(v));
 }
+
+const LAWAL_URL = "https://lawal.coop";
+const REPO_URL = "https://github.com/LawalCoop/mangaji";
 
 /** Lo que se puede abrir. */
 const ACCEPT = ".cbza,.cbz,.cbr,.zip,.rar,application/zip";
@@ -419,19 +423,57 @@ export function Landing({ status, message, onFile, onUrl, download }: Props) {
           ))}
         </div>
 
+        {/* Quién lo hace y bajo qué términos. Serio y en el negro del lector: es el cierre. */}
         <footer
-          className="panel flex items-center justify-between gap-4 px-6 py-4 max-lg:order-5"
-          style={{ ...panel, background: "#0F0F12", border: `4px solid ${INK}` }}
+          className="panel grid gap-8 px-6 py-8 max-lg:order-5 sm:px-10 sm:py-10 md:grid-cols-[1fr_1.2fr] md:gap-12"
+          style={{ ...panel, background: "#0F0F12", border: `4px solid ${INK}`, color: "#B4B4BC" }}
         >
-          <span className="text-[15px] font-medium leading-none sm:text-[17px]" style={{ color: "#8A8A94" }}>
-            {L.madeBy} <span style={{ color: PAPER, fontWeight: 700 }}>lawal</span>
-          </span>
-          <span
-            className="font-[family-name:var(--font-kana)] text-[18px] font-bold leading-none"
-            style={{ color: "#5A5A62" }}
-          >
-            終
-          </span>
+          <div className="flex flex-col items-start gap-4">
+            <a
+              href={LAWAL_URL}
+              target="_blank"
+              rel="noopener"
+              className="block focus-visible:outline focus-visible:outline-3 focus-visible:outline-offset-4"
+              style={{ outlineColor: CYAN }}
+            >
+              {/* eslint-disable-next-line @next/next/no-img-element -- exportación estática, sin optimizador */}
+              <img src={asset("/lawal.png")} alt="Lawal" width={621} height={137} className="h-9 w-auto sm:h-10" />
+            </a>
+            <p className="text-[15px] leading-relaxed">{L.madeBy}</p>
+            <a
+              href={LAWAL_URL}
+              target="_blank"
+              rel="noopener"
+              className="text-[15px] font-bold underline decoration-2 underline-offset-4 transition-colors hover:text-white"
+              style={{ color: PAPER, textDecorationColor: MAGENTA }}
+            >
+              lawal.coop
+            </a>
+          </div>
+
+          <div className="flex flex-col items-start gap-3 md:border-l md:pl-12" style={{ borderColor: "#2A2A30" }}>
+            <h2 className="text-[17px] font-bold" style={{ color: PAPER }}>
+              {L.freeTitle}
+            </h2>
+            <p className="max-w-[40em] text-[15px] leading-relaxed">{L.freeText}</p>
+            <div className="mt-1 flex flex-wrap gap-x-6 gap-y-2 text-[15px] font-bold">
+              {[
+                { href: REPO_URL, label: L.source },
+                { href: `${REPO_URL}/blob/main/LICENSE`, label: L.license },
+              ].map((l) => (
+                <a
+                  key={l.href}
+                  href={l.href}
+                  target="_blank"
+                  rel="noopener"
+                  className="underline decoration-2 underline-offset-4 transition-colors hover:text-white"
+                  style={{ color: PAPER, textDecorationColor: CYAN }}
+                >
+                  {l.label}
+                </a>
+              ))}
+            </div>
+          </div>
         </footer>
       </div>
     </div>

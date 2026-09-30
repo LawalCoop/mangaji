@@ -63,7 +63,12 @@ const es = {
         text: "Analiza la página y la separa cuadro por cuadro. Deduce en qué orden se leen, aun cuando la composición se parte en diagonales.",
       },
     ],
-    madeBy: "Desarrollado por",
+    madeBy: "Hecho por Lawal, cooperativa de software.",
+    freeTitle: "Software libre",
+    freeText:
+      "Mangaji es software libre, con licencia MIT: podés usarlo, estudiarlo, modificarlo y compartirlo.",
+    source: "Código fuente en GitHub",
+    license: "Licencia MIT",
   },
 
   processing: {
@@ -85,6 +90,7 @@ const es = {
     pageCount: (n: number) => `${n} páginas`,
     gpu: "acelerado por GPU",
     noGpu: "sin GPU: va a tardar bastante más",
+    downloadingModels: "bajando los detectores",
     loadingPanels: "cargando el detector de viñetas",
     loadingDialogue: "cargando el detector de diálogo",
     findingPanels: "buscando viñetas",
@@ -192,7 +198,11 @@ const en: Messages = {
         text: "Analyzes the page and splits it panel by panel. Works out the reading order, even when the layout breaks into diagonals.",
       },
     ],
-    madeBy: "Made by",
+    madeBy: "Made by Lawal, a software cooperative.",
+    freeTitle: "Free software",
+    freeText: "Mangaji is free software under the MIT license: you can use, study, change and share it.",
+    source: "Source code on GitHub",
+    license: "MIT license",
   },
 
   processing: {
@@ -214,6 +224,7 @@ const en: Messages = {
     pageCount: (n: number) => `${n} pages`,
     gpu: "GPU accelerated",
     noGpu: "no GPU: this will take quite a bit longer",
+    downloadingModels: "downloading the detectors",
     loadingPanels: "loading the panel detector",
     loadingDialogue: "loading the dialogue detector",
     findingPanels: "finding panels",
@@ -319,7 +330,12 @@ const ja: Messages = {
         text: "ページを解析して、コマごとに分けます。斜めに割られたレイアウトでも、読む順番を判断します。",
       },
     ],
-    madeBy: "制作",
+    madeBy: "ソフトウェア協同組合 Lawal が制作しました。",
+    freeTitle: "フリーソフトウェア",
+    freeText:
+      "Mangaji は MIT ライセンスのフリーソフトウェアです。自由に使い、調べ、改変し、共有できます。",
+    source: "GitHub でソースコードを見る",
+    license: "MIT ライセンス",
   },
 
   processing: {
@@ -341,6 +357,7 @@ const ja: Messages = {
     pageCount: (n: number) => `${n} ページ`,
     gpu: "GPU で高速処理",
     noGpu: "GPU なし：かなり時間がかかります",
+    downloadingModels: "検出モデルをダウンロード中",
     loadingPanels: "コマ検出モデルを読み込み中",
     loadingDialogue: "セリフ検出モデルを読み込み中",
     findingPanels: "コマを検出中",
