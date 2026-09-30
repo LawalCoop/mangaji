@@ -40,6 +40,8 @@ const CLASSES: DetectionClass[] = ["frame", "text", "balloon"];
  */
 const CONF: Record<DetectionClass, number> = { frame: SHAPE_CONF, balloon: 0.25, text: 0.05 };
 const TEXT_MODEL_CONF = 0.12;
+/** Con esta fracción de la página en manchas negras se busca también letra blanca sobre negro. */
+const INVERT_DARK_SHARE = 0.03;
 /** Dos bloques de texto que se solapan más que esto son el mismo, visto por ambos modelos. */
 const TEXT_MERGE_IOU = 0.4;
 /** Douglas-Peucker en píxeles: 202 vértices de mediana quedan en unos 20. */
@@ -146,7 +148,21 @@ export class Detector {
     const textOut = await this.#text.run({ [this.#text.inputNames[0]]: tensor });
 
     const fromPanels = this.#decodeSegmentation(panelOut, image, scale, validW, validH);
-    const fromText = this.#decodeBoxes(textOut, scale, image.width, image.height);
+    let fromText = this.#decodeBoxes(textOut, scale, image.width, image.height);
+
+    // Los modelos aprendieron letra oscura sobre blanco: la letra blanca sobre negro —un
+    // grito dentro de una mancha negra— no la ven. Con la página invertida pasa a ser letra
+    // oscura sobre blanco y el de texto la encuentra. Solo en páginas con bastante negro:
+    // en las demás no hay nada que buscar y sería una inferencia más por página.
+    if (darkShare(image) >= INVERT_DARK_SHARE) {
+      const planes = tensor.data as Float32Array;
+      const inverted = new Float32Array(planes.length);
+      for (let i = 0; i < planes.length; i++) inverted[i] = 1 - planes[i];
+      const invertedOut = await this.#text.run({
+        [this.#text.inputNames[0]]: new this.#ort.Tensor("float32", inverted, [1, 3, SIZE, SIZE]),
+      });
+      fromText = mergeText(fromText, this.#decodeBoxes(invertedOut, scale, image.width, image.height));
+    }
 
     return mergeText(fromPanels, fromText).sort((a, b) => b.conf - a.conf);
   }
@@ -421,4 +437,33 @@ async function downloadAll(urls: string[], onFraction?: (fraction: number) => vo
       return bytes;
     }),
   );
+}
+
+/**
+ * Qué fracción de la página son manchas negras sólidas.
+ *
+ * Se cuentan bloques casi enteramente negros, no píxeles: las líneas de tinta suman un 10 %
+ * de negro en cualquier página y no llenan ningún bloque; una mancha negra sí.
+ */
+function darkShare(image: ImageData): number {
+  const { data, width, height } = image;
+  const side = Math.max(8, Math.floor(width / 64));
+  let solid = 0;
+  let total = 0;
+  for (let by = 0; by + side <= height; by += side) {
+    for (let bx = 0; bx + side <= width; bx += side) {
+      total++;
+      let dark = 0;
+      let seen = 0;
+      for (let y = by; y < by + side; y += 2) {
+        for (let x = bx; x < bx + side; x += 2) {
+          const i = (y * width + x) * 4;
+          seen++;
+          if (Math.max(data[i], data[i + 1], data[i + 2]) < 50) dark++;
+        }
+      }
+      if (dark >= seen * 0.9) solid++;
+    }
+  }
+  return total ? solid / total : 0;
 }

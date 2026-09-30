@@ -358,12 +358,6 @@ export async function lift(
   if (!measured) return null;
   const { alpha, paper } = measured;
 
-  const inked = crop(alpha, cw, seed);
-  let ink = 0;
-  for (const a of inked) if (a > 40) ink++;
-  if (ink / inked.length < 0.005) return null;
-  if (!looksLikeText(inked, seed.w, seed.h)) return null;
-
   // Los colores de antes de borrar, que son los que se lleva el sprite: `erase` los pisa con
   // el papel, y leerlos después dejaba el diálogo escrito en blanco sobre el globo blanco.
   const before = new Uint8ClampedArray(px);
@@ -396,9 +390,8 @@ const MIN_FLAT_RATIO = 0.3;
  *
  * Lo común es letra oscura sobre papel claro, y ahí manda el brillo: la tinta es lo que se
  * aparta del papel hacia el negro. Pero hay cuadros de color —naranja con letra blanca, negro
- * con letra blanca— donde eso no ve nada, porque la letra es más clara que el fondo. Por eso
- * primero se mira el color del fondo del bloque: si es papel, se sigue como siempre; si es
- * un color liso, la tinta es lo que se aparta de ese color, hacia donde sea.
+ * con letra blanca— donde eso no ve nada, porque la letra es más clara que el fondo; ahí la
+ * tinta es lo que se aparta del color del cuadro, hacia donde sea.
  */
 export function inkOf(
   px: Uint8ClampedArray,
@@ -406,37 +399,57 @@ export function inkOf(
   h: number,
   seed: Rect,
 ): { alpha: Uint8Array; paper: number | Rgb } | null {
+  // Primero por brillo, que es lo de siempre y lo que mejor anda: ignora el tono, así que
+  // letra oscura sobre un degradé de blanco a rojo sigue siendo letra sobre papel. Medida por
+  // color, en ese degradé todo se aparta del "fondo" y parece tinta.
+  const byLight = inkByLight(px, w, h, seed);
+  if (byLight && readable(byLight.alpha, w, seed)) return byLight;
+  // Si por brillo no aparece texto, puede ser letra clara sobre un cuadro de color.
+  const byColor = inkByColor(px, w, h, seed);
+  if (byColor && readable(byColor.alpha, w, seed)) return byColor;
+  return null;
+}
+
+/** ¿Hay tinta, y está repartida como letras? */
+function readable(alpha: Uint8Array, w: number, seed: Rect): boolean {
+  const inked = crop(alpha, w, seed);
+  let ink = 0;
+  for (const a of inked) if (a > 40) ink++;
+  return ink / inked.length >= 0.005 && looksLikeText(inked, seed.w, seed.h);
+}
+
+/** Tinta como lo que se aparta del papel hacia el negro. */
+function inkByLight(px: Uint8ClampedArray, w: number, h: number, seed: Rect) {
+  const count = w * h;
+  const levels = new Uint8Array(count);
+  for (let i = 0, p = 0; i < px.length; i += 4, p++) {
+    levels[p] = Math.max(px[i], px[i + 1], px[i + 2]);
+  }
+  const core = crop(levels, w, seed);
+  if (!isSafeToLift(core)) return null;
+
+  // El papel del bloque: percentil alto, no la media, que estaría ensuciada por las letras.
+  const sorted = Uint8Array.from(core).sort();
+  const paper = sorted[Math.floor(core.length * 0.85)];
+
+  // El alfa sale de la tinta, así el sprite son las letras y no un recuadro blanco.
+  const alpha = new Uint8Array(count);
+  for (let p = 0; p < count; p++) {
+    alpha[p] = Math.max(0, Math.min(255, ((paper - levels[p]) * 255) / Math.max(paper, 1)));
+  }
+  return { alpha, paper };
+}
+
+/** Tinta como lo que se aparta del color del cuadro, hacia donde sea. */
+function inkByColor(px: Uint8ClampedArray, w: number, h: number, seed: Rect) {
   const count = w * h;
   const bg = backdrop(px, w, seed);
-
-  const neutralLight = Math.min(...bg) >= PAPER_LEVEL - 15 && Math.max(...bg) - Math.min(...bg) <= 40;
-  if (neutralLight) {
-    const levels = new Uint8Array(count);
-    for (let i = 0, p = 0; i < px.length; i += 4, p++) {
-      levels[p] = Math.max(px[i], px[i + 1], px[i + 2]);
-    }
-    const core = crop(levels, w, seed);
-    if (!isSafeToLift(core)) return null;
-
-    // El papel del bloque: percentil alto, no la media, que estaría ensuciada por las letras.
-    const sorted = Uint8Array.from(core).sort();
-    const paper = sorted[Math.floor(core.length * 0.85)];
-
-    // El alfa sale de la tinta, así el sprite son las letras y no un recuadro blanco.
-    const alpha = new Uint8Array(count);
-    for (let p = 0; p < count; p++) {
-      alpha[p] = Math.max(0, Math.min(255, ((paper - levels[p]) * 255) / Math.max(paper, 1)));
-    }
-    return { alpha, paper };
-  }
-
-  // Un cuadro de color: la distancia al color del fondo, en cualquier dirección.
   const alpha = new Uint8Array(count);
-  let flat = 0;
   for (let i = 0, p = 0; p < count; i += 4, p++) {
     const d = Math.hypot(px[i] - bg[0], px[i + 1] - bg[1], px[i + 2] - bg[2]);
     alpha[p] = Math.max(0, Math.min(255, ((d - COLOR_INK_FROM) * 255) / (COLOR_INK_FULL - COLOR_INK_FROM)));
   }
+  let flat = 0;
   for (const a of crop(alpha, w, seed)) if (a === 0) flat++;
   if (flat / (seed.w * seed.h) < MIN_FLAT_RATIO) return null;
   return { alpha, paper: bg };

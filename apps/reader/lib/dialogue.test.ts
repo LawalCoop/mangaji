@@ -306,6 +306,50 @@ describe("borrado del diálogo", () => {
     expect(Math.abs(px[i + 2] - orange[2])).toBeLessThan(8);
   });
 
+  it("levanta la letra roja sobre blanco", () => {
+    // Medido por brillo —el canal más alto— el rojo puro es tan claro como el papel.
+    const w = 40;
+    const h = 40;
+    const px = new Uint8ClampedArray(w * h * 4).fill(255);
+    for (const [x0, y0] of [
+      [8, 10],
+      [20, 10],
+      [8, 24],
+      [20, 24],
+    ]) {
+      for (let y = y0; y < y0 + 8; y++) for (let x = x0; x < x0 + 4; x++) px.set([220, 20, 30, 255], (y * w + x) * 4);
+    }
+    const measured = inkOf(px, w, h, { x: 4, y: 6, w: 32, h: 30 });
+    expect(measured).not.toBeNull();
+    expect(measured!.alpha[12 * w + 10]).toBeGreaterThan(200);
+  });
+
+  it("levanta la letra oscura sobre un degradé de blanco a rojo", () => {
+    // Medido por color, el degradé entero se aparta del "fondo" y parece tinta.
+    const w = 40;
+    const h = 40;
+    const px = new Uint8ClampedArray(w * h * 4);
+    for (let y = 0; y < h; y++) {
+      for (let x = 0; x < w; x++) {
+        const t = x / (w - 1);
+        px.set([255, Math.round(255 * (1 - t)), Math.round(255 * (1 - t)), 255], (y * w + x) * 4);
+      }
+    }
+    for (const [x0, y0] of [
+      [8, 10],
+      [20, 10],
+      [8, 24],
+      [20, 24],
+    ]) {
+      for (let y = y0; y < y0 + 8; y++) for (let x = x0; x < x0 + 4; x++) px.set([20, 20, 20, 255], (y * w + x) * 4);
+    }
+    const measured = inkOf(px, w, h, { x: 4, y: 6, w: 32, h: 30 });
+    expect(measured).not.toBeNull();
+    expect(measured!.alpha[12 * w + 10]).toBeGreaterThan(200);
+    // El rojo del fondo no es tinta.
+    expect(measured!.alpha[4 * w + 36]).toBeLessThan(40);
+  });
+
   it("el sprite se lleva la tinta original, no el papel que quedó en su lugar", () => {
     const w = 40;
     const h = 40;
