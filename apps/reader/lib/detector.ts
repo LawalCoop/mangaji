@@ -46,6 +46,8 @@ const TEXT_MODEL_CONF = 0.12;
 export const INVERTED_TEXT_CONF = 0.08;
 /** Con esta fracción de la página en manchas negras se busca también letra blanca sobre negro. */
 export const INVERT_DARK_SHARE = 0.03;
+/** Con esta fracción de la página en colores fuertes se busca también texto por brillo. */
+export const COLOR_PAGE_SHARE = 0.1;
 /** Dos bloques de texto que se solapan más que esto son el mismo, visto por ambos modelos. */
 const TEXT_MERGE_IOU = 0.4;
 /** Douglas-Peucker en píxeles: 202 vértices de mediana quedan en unos 20. */
@@ -174,6 +176,23 @@ export class Detector {
         .filter((d) => onDark(image, d.bbox))
         .map((d) => ({ ...d, light: true }));
       fromText = mergeText(fromText, light);
+    }
+
+    // Letra negra sobre un color fuerte —un estallido rojo— tampoco la ven: aprendieron
+    // sobre blanco y negro. Mirando solo el brillo, el rojo pasa a ser papel y la letra queda
+    // negra sobre blanco. Solo en páginas con bastante color.
+    if (colorShare(image) >= COLOR_PAGE_SHARE) {
+      const planes = tensor.data as Float32Array;
+      const plane = SIZE * SIZE;
+      const light = new Float32Array(planes.length);
+      for (let i = 0; i < plane; i++) {
+        const v = Math.max(planes[i], planes[plane + i], planes[2 * plane + i]);
+        light[i] = light[plane + i] = light[2 * plane + i] = v;
+      }
+      const lightOut = await this.#text.run({
+        [this.#text.inputNames[0]]: new this.#ort.Tensor("float32", light, [1, 3, SIZE, SIZE]),
+      });
+      fromText = mergeText(fromText, decodeBoxes(lightOut, scale, image.width, image.height));
     }
 
     return mergeText(fromPanels, fromText).sort((a, b) => b.conf - a.conf);
@@ -316,12 +335,13 @@ const iou = (a: Detection["bbox"], b: Detection["bbox"]) => {
 /** Suma los bloques del segundo detector sin duplicar los que el primero ya encontró. */
 export function mergeText(primary: Detection[], extra: Detection[]): Detection[] {
   const out = [...primary];
-  const existing = primary.filter((d) => d.cls === "text");
   for (const det of extra) {
-    if (existing.every((e) => iou(det.bbox, e.bbox) < TEXT_MERGE_IOU)) {
-      out.push(det);
-      existing.push(det);
-    }
+    // Un texto que los dos ven es uno solo: queda el de más confianza, que suele ser el
+    // mejor encuadrado. Quedarse siempre con el primero dejaba a veces una caja chica de
+    // 0.07 en lugar de una de 0.90 que abarcaba todo el texto.
+    const twin = out.findIndex((e) => e.cls === "text" && iou(det.bbox, e.bbox) >= TEXT_MERGE_IOU);
+    if (twin < 0) out.push(det);
+    else if (det.conf > out[twin].conf) out[twin] = det;
   }
   return out;
 }
@@ -528,4 +548,18 @@ export function onDark(image: Pick<ImageData, "data" | "width" | "height">, box:
     }
   }
   return dark / total >= DARK_FILL;
+}
+
+/** Qué fracción de la página es de un color fuerte, mirando uno de cada tantos píxeles. */
+export function colorShare(image: Pick<ImageData, "data">): number {
+  const { data } = image;
+  let strong = 0;
+  let total = 0;
+  for (let i = 0; i < data.length; i += 4 * 7) {
+    total++;
+    const hi = Math.max(data[i], data[i + 1], data[i + 2]);
+    const lo = Math.min(data[i], data[i + 1], data[i + 2]);
+    if (hi - lo > 80) strong++;
+  }
+  return total ? strong / total : 0;
 }
