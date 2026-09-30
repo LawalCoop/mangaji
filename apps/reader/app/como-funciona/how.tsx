@@ -26,11 +26,11 @@ import {
 const pageTitle = (t: Messages) => t.how.title;
 
 /**
- * Cuánto del ancho de su columna ocupa el titular, por idioma, medido con cada uno. Son dos
- * tercios de lo que la llenaría: es una página secundaria, y un titular del tamaño del de la
- * portada le quitaba protagonismo al texto y al índice.
+ * El tamaño con el que el titular llenaría todo el ancho del cuadro, por idioma, medido con
+ * cada uno. Se usa una fracción: apilado sobre el texto ocupa casi todo el ancho; al lado del
+ * texto, algo más de la mitad. Es una página secundaria y no compite con el de la portada.
  */
-const HEADLINE_FIT = { es: 13.6, en: 16.7, ja: 9 } as const;
+const HEADLINE_FIT = { es: 20.7, en: 25.3, ja: 13.7 } as const;
 
 const SCENES = [OpenScene, PrepareScene, DetectScene, PolygonScene, OrderScene, LiftScene, DirectScene, SaveScene];
 
@@ -72,7 +72,13 @@ function How() {
         {/* Hero: armado como el de la portada. A la izquierda, en papel, el titular y de qué
             se trata; a la derecha, en el negro de pantalla donde allá va la demo, el índice. */}
         <section className="grid gap-[18px] lg:grid-cols-[minmax(0,1fr)_minmax(300px,0.42fr)]">
+          {/* Titular y texto lado a lado cuando el cuadro es ancho, como una página de revista;
+              apilados cuando no. Así el titular es más chico que el de la portada sin dejar
+              medio cuadro vacío. */}
           <div className="panel @container flex flex-col justify-center px-6 py-10 sm:px-10 sm:py-12" style={panel}>
+            {/* La grilla va en un envoltorio: las consultas de contenedor miden al padre, no a
+                sí mismas. */}
+            <div className="grid items-end gap-8 [--ratio:0.85] @3xl:grid-cols-[auto_minmax(0,1fr)] @3xl:gap-12 @3xl:[--ratio:0.6]">
             <h1 className="relative" style={{ lineHeight: 0.92 }}>
               <span className="sr-only">{H.headlineLabel}</span>
               {[
@@ -89,7 +95,7 @@ function How() {
                     position: i === 2 ? "relative" : "absolute",
                     left: layer.x,
                     top: layer.y,
-                    fontSize: `clamp(2.2rem, ${HEADLINE_FIT[lang]}cqi, 7.5rem)`,
+                    fontSize: `clamp(2.2rem, calc(${HEADLINE_FIT[lang]}cqi * var(--ratio)), 7.5rem)`,
                     letterSpacing: "-0.01em",
                     color: layer.color,
                   }}
@@ -101,11 +107,12 @@ function How() {
               ))}
             </h1>
             <p
-              className="relative mt-8 max-w-[34em] text-[17px] font-medium leading-[1.6] sm:text-[20px]"
+              className="relative max-w-[34em] pb-1 text-[17px] font-medium leading-[1.6] sm:text-[18px]"
               style={{ color: "#24242A" }}
             >
               {H.intro}
             </p>
+            </div>
           </div>
 
           <nav
