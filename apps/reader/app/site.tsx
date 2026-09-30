@@ -48,17 +48,13 @@ export const REPO_URL = "https://github.com/LawalCoop/mangaji";
 export function SiteHeader({ link }: { link: { href: string; label: string } }) {
   const { lang, t, setLang } = useI18n();
 
-  /**
-   * Una celda del lado derecho: toda la altura del encabezado, separada por la misma línea
-   * de tinta que separa los cuadros. Así los controles son viñetas del encabezado y no
-   * cajitas flotando adentro.
-   */
-  const cell =
-    "flex touch-manipulation items-center justify-center border-l-4 font-[family-name:var(--body)] text-[15px] font-bold leading-none transition-colors focus-visible:outline focus-visible:outline-3 focus-visible:-outline-offset-[7px]";
+  // Los colores van en clases y no en `style`: un color en línea le gana al hover, y así
+  // el hover de "Abrir el lector" dejaba la letra del mismo negro que el fondo.
+  const focus = "focus-visible:outline focus-visible:outline-3 focus-visible:outline-offset-4 focus-visible:outline-[#FF2E88]";
 
   return (
-    <header className="panel flex items-stretch justify-between" style={panel}>
-      <Link href="/" className="flex min-w-0 items-center gap-3 px-5 py-3 sm:gap-4 sm:px-7 sm:py-4">
+    <header className="panel flex items-center justify-between gap-6 px-5 py-3 sm:px-7 sm:py-4" style={panel}>
+      <Link href="/" className={`flex min-w-0 items-center gap-3 sm:gap-4 ${focus}`}>
         <span
           className="trim-caps font-[family-name:var(--display)] leading-none"
           style={{ fontSize: "clamp(2rem,4.2vw,3.25rem)", color: INK }}
@@ -74,18 +70,21 @@ export function SiteHeader({ link }: { link: { href: string; label: string } }) 
         </span>
       </Link>
 
-      <nav className="flex shrink-0 items-stretch">
+      {/* Un solo cuadro: el link y el idioma van en línea, sin cajas ni celdas propias. */}
+      <nav className="flex shrink-0 items-center gap-5 sm:gap-7">
         {/* En el celular no entra: ahí el link está en la página y en el pie. */}
         <Link
           href={link.href}
-          className={`${cell} px-6 hover:bg-[#0B0B0C] hover:text-[#F4EFE3] max-sm:hidden`}
-          style={{ borderColor: INK, color: INK, outlineColor: MAGENTA }}
+          className={`text-[16px] font-bold text-[#0B0B0C] underline decoration-[#FF2E88] decoration-[3px] underline-offset-[7px] transition-colors hover:text-[#FF2E88] max-sm:hidden ${focus}`}
         >
           {link.label}
         </Link>
 
-        {/* Selector de idioma: a la vista, porque quien no lee español no va a buscarlo. */}
-        <div role="group" aria-label={t.language} className="flex items-stretch">
+        <span className="h-7 w-0.5 bg-[#0B0B0C]/25 max-sm:hidden" aria-hidden />
+
+        {/* Selector de idioma: a la vista, porque quien no lee español no va a buscarlo. El
+            activo va en tinta y subrayado; los otros, en gris hasta que se los señala. */}
+        <div role="group" aria-label={t.language} className="flex items-center gap-1">
           {LANGS.map((l) => {
             const active = lang === l.id;
             return (
@@ -96,13 +95,11 @@ export function SiteHeader({ link }: { link: { href: string; label: string } }) 
                 title={l.name}
                 aria-pressed={active}
                 onClick={() => setLang(l.id)}
-                className={`${cell} min-w-14 px-4 ${active ? "" : "hover:bg-[#0B0B0C] hover:text-[#F4EFE3]"}`}
-                style={{
-                  borderColor: INK,
-                  background: active ? INK : "transparent",
-                  color: active ? PAPER : INK,
-                  outlineColor: MAGENTA,
-                }}
+                className={`touch-manipulation border-b-[3px] px-2 pt-1.5 pb-1 text-[15px] font-bold leading-none transition-colors ${focus} ${
+                  active
+                    ? "border-[#FF2E88] text-[#0B0B0C]"
+                    : "border-transparent text-[#7A7A84] hover:border-[#0B0B0C]/30 hover:text-[#0B0B0C]"
+                }`}
               >
                 {l.label}
               </button>
@@ -127,7 +124,7 @@ export function SiteFooter() {
 
   const heading = "trim-caps font-[family-name:var(--display)] text-[24px] leading-none";
   const link =
-    "w-fit text-[15px] font-bold underline decoration-2 underline-offset-4 transition-colors hover:text-white";
+    "w-fit text-[15px] font-bold text-[#F4EFE3] underline decoration-2 underline-offset-4 transition-colors hover:text-white";
 
   return (
     <footer
@@ -143,7 +140,7 @@ export function SiteFooter() {
           </a>
         </div>
         <p className="text-[15px] leading-relaxed">{L.madeBy}</p>
-        <a href={LAWAL_URL} target="_blank" rel="noopener" className={link} style={{ color: PAPER, textDecorationColor: MAGENTA }}>
+        <a href={LAWAL_URL} target="_blank" rel="noopener" className={`${link} decoration-[#FF2E88]`}>
           lawal.coop
         </a>
       </div>
@@ -164,13 +161,13 @@ export function SiteFooter() {
           </h2>
         </div>
         <nav className="flex flex-col gap-3">
-          <Link href="/como-funciona/" className={link} style={{ color: PAPER, textDecorationColor: CYAN }}>
+          <Link href="/como-funciona/" className={`${link} decoration-[#00D9F5]`}>
             {t.site.how}
           </Link>
-          <a href={REPO_URL} target="_blank" rel="noopener" className={link} style={{ color: PAPER, textDecorationColor: CYAN }}>
+          <a href={REPO_URL} target="_blank" rel="noopener" className={`${link} decoration-[#00D9F5]`}>
             {L.source}
           </a>
-          <a href={`${REPO_URL}/blob/main/LICENSE`} target="_blank" rel="noopener" className={link} style={{ color: PAPER, textDecorationColor: CYAN }}>
+          <a href={`${REPO_URL}/blob/main/LICENSE`} target="_blank" rel="noopener" className={`${link} decoration-[#00D9F5]`}>
             {L.license}
           </a>
         </nav>

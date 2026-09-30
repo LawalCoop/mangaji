@@ -360,8 +360,7 @@ export function Landing({ status, message, onFile, onUrl, download }: Props) {
         <div className="flex justify-end max-lg:order-4">
           <Link
             href="/como-funciona/"
-            className="inline-flex items-center gap-3 text-[17px] font-bold underline decoration-[3px] underline-offset-[6px] transition-colors hover:text-white sm:text-[19px]"
-            style={{ color: PAPER, textDecorationColor: CYAN }}
+            className="inline-flex items-center gap-3 text-[17px] font-bold text-[#F4EFE3] underline decoration-[#00D9F5] decoration-[3px] underline-offset-[6px] transition-colors hover:text-white sm:text-[19px]"
           >
             {t.landing.howLink}
           </Link>
