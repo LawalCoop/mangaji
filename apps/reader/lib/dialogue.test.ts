@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { erase, spriteOf } from "./dialogue";
+import { erase, inkOf, spriteOf } from "./dialogue";
 
 /**
  * Un bloque de papel con letras encima, como el interior de un globo.
@@ -270,6 +270,40 @@ describe("borrado del diálogo", () => {
     erase(px, alpha, w, h, 255, inside, seed);
 
     expect(darkest(px)).toBeGreaterThan(245);
+  });
+
+  it("en un cuadro de color levanta la letra clara y tapa con el color del cuadro", () => {
+    const w = 40;
+    const h = 40;
+    // Un recuadro naranja con letra blanca: medido por brillo, la letra no es tinta.
+    const orange = [230, 140, 100];
+    const px = new Uint8ClampedArray(w * h * 4);
+    for (let p = 0; p < w * h; p++) {
+      px.set([...orange, 255], p * 4);
+    }
+    for (const [x0, y0] of [
+      [8, 10],
+      [20, 10],
+      [8, 24],
+      [20, 24],
+    ]) {
+      for (let y = y0; y < y0 + 8; y++) for (let x = x0; x < x0 + 5; x++) px.set([255, 255, 255, 255], (y * w + x) * 4);
+    }
+    const seed = { x: 4, y: 6, w: 32, h: 30 };
+
+    const measured = inkOf(px, w, h, seed);
+    expect(measured).not.toBeNull();
+    const { alpha, paper } = measured!;
+    expect(alpha[(12 * w + 10)]).toBeGreaterThan(200);
+    expect(alpha[(3 * w + 3)]).toBe(0);
+
+    erase(px, alpha, w, h, paper, undefined, seed);
+
+    // Donde estaba la letra quedó naranja, no blanco ni gris.
+    const i = (12 * w + 10) * 4;
+    expect(Math.abs(px[i] - orange[0])).toBeLessThan(8);
+    expect(Math.abs(px[i + 1] - orange[1])).toBeLessThan(8);
+    expect(Math.abs(px[i + 2] - orange[2])).toBeLessThan(8);
   });
 
   it("el sprite se lleva la tinta original, no el papel que quedó en su lugar", () => {

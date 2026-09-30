@@ -117,7 +117,7 @@ export function erase(
   alpha: Uint8Array,
   w: number,
   h: number,
-  paper: number,
+  paper: number | Rgb,
   inside?: Uint8Array,
   seed?: Rect,
 ): Float32Array {
@@ -221,16 +221,22 @@ export function erase(
   // Un bloque cuyo fondo es papel es el interior de un globo, y ahí el hueco se tapa con
   // papel liso. Tomar el promedio de alrededor parece más fino pero es justo lo que ensucia:
   // un trazo pegado al dibujo arrastra su oscuridad y deja un velo gris dentro del globo.
-  if (paper >= PAPER_LEVEL) {
+  //
+  // Lo mismo en un cuadro de color —un recuadro naranja con letra blanca, uno negro—: el
+  // hueco se tapa con el color del cuadro.
+  const flat: Rgb | null =
+    typeof paper !== "number" ? paper : paper >= PAPER_LEVEL ? [paper, paper, paper] : null;
+  if (flat) {
     for (let p = 0, i = 0; p < count; p++, i += 4) {
       const a = cover[p];
       if (a <= 0) continue;
-      px[i] = px[i] * (1 - a) + paper * a;
-      px[i + 1] = px[i + 1] * (1 - a) + paper * a;
-      px[i + 2] = px[i + 2] * (1 - a) + paper * a;
+      px[i] = px[i] * (1 - a) + flat[0] * a;
+      px[i + 1] = px[i + 1] * (1 - a) + flat[1] * a;
+      px[i + 2] = px[i + 2] * (1 - a) + flat[2] * a;
     }
     return cover;
   }
+  const level = paper as number;
 
   // Sobre arte no hay papel con qué tapar, así que se usa lo que rodea a cada trazo. Lo que
   // se va a borrar no puede servir de muestra: si el halo de una letra contara como limpio,
@@ -254,7 +260,7 @@ export function erase(
 
     const total = weight[p];
     for (let c = 0; c < 3; c++) {
-      const around = total > 0.002 ? channels[c][p] / total : paper;
+      const around = total > 0.002 ? channels[c][p] / total : level;
       px[i + c] = px[i + c] * (1 - a) + around * a;
     }
   }
@@ -340,11 +346,6 @@ export async function lift(
   const px = region.data;
   const count = cw * ch;
 
-  const levels = new Uint8Array(count);
-  for (let i = 0, p = 0; i < px.length; i += 4, p++) {
-    levels[p] = Math.max(px[i], px[i + 1], px[i + 2]);
-  }
-
   // Los filtros miran solo lo que el detector marcó. El aire de alrededor está para seguir
   // los trazos, no para opinar sobre si esto es diálogo.
   const seed = {
@@ -353,18 +354,10 @@ export async function lift(
     w: Math.min(Math.ceil(w), cw),
     h: Math.min(Math.ceil(h), ch),
   };
-  const core = crop(levels, cw, seed);
-  if (!isSafeToLift(core)) return null;
+  const measured = inkOf(px, cw, ch, seed);
+  if (!measured) return null;
+  const { alpha, paper } = measured;
 
-  // El papel del bloque: percentil alto, no la media, que estaría ensuciada por las letras.
-  const sorted = Uint8Array.from(core).sort();
-  const paper = sorted[Math.floor(core.length * 0.85)];
-
-  // El alfa sale de la tinta, así el sprite son las letras y no un recuadro blanco.
-  const alpha = new Uint8Array(count);
-  for (let p = 0; p < count; p++) {
-    alpha[p] = Math.max(0, Math.min(255, ((paper - levels[p]) * 255) / Math.max(paper, 1)));
-  }
   const inked = crop(alpha, cw, seed);
   let ink = 0;
   for (const a of inked) if (a > 40) ink++;
@@ -387,6 +380,94 @@ export async function lift(
   image.data.set(data);
 
   return { image, rect: { x: x0, y: y0, w: cw, h: ch }, ink: taken / count };
+}
+
+type Rgb = [number, number, number];
+
+/** Qué tan lejos tiene que estar un color del fondo para empezar a contar como tinta. */
+const COLOR_INK_FROM = 40;
+/** Y desde qué distancia es tinta plena. */
+const COLOR_INK_FULL = 140;
+/** Qué parte del bloque tiene que ser del color del fondo para tomarlo como un cuadro liso. */
+const MIN_FLAT_RATIO = 0.3;
+
+/**
+ * La tinta del bloque, como alfa, y con qué se tapa el hueco.
+ *
+ * Lo común es letra oscura sobre papel claro, y ahí manda el brillo: la tinta es lo que se
+ * aparta del papel hacia el negro. Pero hay cuadros de color —naranja con letra blanca, negro
+ * con letra blanca— donde eso no ve nada, porque la letra es más clara que el fondo. Por eso
+ * primero se mira el color del fondo del bloque: si es papel, se sigue como siempre; si es
+ * un color liso, la tinta es lo que se aparta de ese color, hacia donde sea.
+ */
+export function inkOf(
+  px: Uint8ClampedArray,
+  w: number,
+  h: number,
+  seed: Rect,
+): { alpha: Uint8Array; paper: number | Rgb } | null {
+  const count = w * h;
+  const bg = backdrop(px, w, seed);
+
+  const neutralLight = Math.min(...bg) >= PAPER_LEVEL - 15 && Math.max(...bg) - Math.min(...bg) <= 40;
+  if (neutralLight) {
+    const levels = new Uint8Array(count);
+    for (let i = 0, p = 0; i < px.length; i += 4, p++) {
+      levels[p] = Math.max(px[i], px[i + 1], px[i + 2]);
+    }
+    const core = crop(levels, w, seed);
+    if (!isSafeToLift(core)) return null;
+
+    // El papel del bloque: percentil alto, no la media, que estaría ensuciada por las letras.
+    const sorted = Uint8Array.from(core).sort();
+    const paper = sorted[Math.floor(core.length * 0.85)];
+
+    // El alfa sale de la tinta, así el sprite son las letras y no un recuadro blanco.
+    const alpha = new Uint8Array(count);
+    for (let p = 0; p < count; p++) {
+      alpha[p] = Math.max(0, Math.min(255, ((paper - levels[p]) * 255) / Math.max(paper, 1)));
+    }
+    return { alpha, paper };
+  }
+
+  // Un cuadro de color: la distancia al color del fondo, en cualquier dirección.
+  const alpha = new Uint8Array(count);
+  let flat = 0;
+  for (let i = 0, p = 0; p < count; i += 4, p++) {
+    const d = Math.hypot(px[i] - bg[0], px[i + 1] - bg[1], px[i + 2] - bg[2]);
+    alpha[p] = Math.max(0, Math.min(255, ((d - COLOR_INK_FROM) * 255) / (COLOR_INK_FULL - COLOR_INK_FROM)));
+  }
+  for (const a of crop(alpha, w, seed)) if (a === 0) flat++;
+  if (flat / (seed.w * seed.h) < MIN_FLAT_RATIO) return null;
+  return { alpha, paper: bg };
+}
+
+/**
+ * El color del fondo del bloque: la mediana de su borde.
+ *
+ * El borde de la caja cae casi todo en el fondo, entre letra y letra. El color más frecuente
+ * del bloque entero parecía más natural y fallaba justo en los cuadros de color: la letra
+ * blanca gruesa es un solo tono, mientras que el naranja escaneado se reparte en muchos, y
+ * el "fondo" salía blanco.
+ */
+function backdrop(px: Uint8ClampedArray, w: number, seed: Rect): Rgb {
+  const ring: number[][] = [[], [], []];
+  const take = (x: number, y: number) => {
+    const i = (y * w + x) * 4;
+    for (let c = 0; c < 3; c++) ring[c].push(px[i + c]);
+  };
+  const x1 = seed.x + seed.w - 1;
+  const y1 = seed.y + seed.h - 1;
+  for (let x = seed.x; x <= x1; x++) {
+    take(x, seed.y);
+    take(x, y1);
+  }
+  for (let y = seed.y + 1; y < y1; y++) {
+    take(seed.x, y);
+    take(x1, y);
+  }
+  const median = (values: number[]) => values.sort((m, n) => m - n)[values.length >> 1] ?? 255;
+  return [median(ring[0]), median(ring[1]), median(ring[2])];
 }
 
 /**
