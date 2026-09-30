@@ -1,6 +1,6 @@
 import { zipSync } from "fflate";
 import type { Note } from "./notes";
-import { choosePanels, dedupe, fillAroundTexts, fillOrphans, inkGrid, isFolio, ownersOf } from "./panels";
+import { choosePanels, dedupe, fillAroundTexts, fillOrphans, inkGrid, isFolio, ownersOf, tailTip } from "./panels";
 // Solo el tipo: así quien únicamente empaqueta no se trae los modelos ni el runtime.
 import type { Detector, Detection } from "./detector";
 import { lift, type Sprite } from "./dialogue";
@@ -201,14 +201,14 @@ export async function processPage(
 
   // Los bloques se agrupan por globo: el modelo parte un diálogo largo en varios.
   const taken = new Set<number>();
-  const groups: { box: Detection["bbox"]; parts: Sprite[] }[] = [];
+  const groups: { box: Detection["bbox"]; parts: Sprite[]; tail?: [number, number] }[] = [];
   for (const balloon of balloons) {
     const mine = lifted
       .map((l, i) => ({ ...l, i }))
       .filter(({ i, det }) => !taken.has(i) && insideBox(balloon.bbox, det.bbox) >= 0.5);
     if (mine.length) {
       mine.forEach(({ i }) => taken.add(i));
-      groups.push({ box: balloon.bbox, parts: mine.map((m) => m.sprite) });
+      groups.push({ box: balloon.bbox, parts: mine.map((m) => m.sprite), tail: tailTip(balloon.polygon as [number, number][]) ?? undefined });
     }
   }
   lifted.forEach((l, i) => {
@@ -216,7 +216,7 @@ export async function processPage(
   });
   for (const balloon of balloons) {
     if (!groups.some((g) => insideBox(balloon.bbox, g.box) > 0.5)) {
-      groups.push({ box: balloon.bbox, parts: [] });
+      groups.push({ box: balloon.bbox, parts: [], tail: tailTip(balloon.polygon as [number, number][]) ?? undefined });
     }
   }
 
@@ -224,7 +224,7 @@ export async function processPage(
   const perPanel = new Map<number, { id: string; box: Detection["bbox"]; parts: Sprite[] }[]>();
   groups.forEach((group, gi) => {
     const id = `${pageId}.b${gi}`;
-    for (const owner of ownersOf(group.box, panels)) {
+    for (const owner of ownersOf(group.box, panels, group.tail)) {
       perPanel.set(owner, [...(perPanel.get(owner) ?? []), { id, ...group }]);
     }
   });

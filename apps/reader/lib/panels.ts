@@ -1,5 +1,6 @@
 import type { Detection } from "./detector";
 import { insidePolygon } from "./dialogue";
+import { open, type Point } from "./vision";
 
 /**
  * Qué detecciones de viñeta se quedan.
@@ -274,7 +275,7 @@ const CLEAR_SHARE = 0.5;
  * punta de la página— y aparecía mientras se leía esa. Entonces decide la caja de la viñeta,
  * y si tampoco lo toca ninguna, la más cercana.
  */
-export function ownersOf(box: Box, panels: Detection[]): number[] {
+export function ownersOf(box: Box, panels: Detection[], tail?: Point): number[] {
   if (!panels.length) return [];
   const shares = panels.map((p) => insidePolygon(p.polygon, box));
   const top = Math.max(...shares);
@@ -292,7 +293,14 @@ export function ownersOf(box: Box, panels: Detection[]): number[] {
     // Una viñeta de relleno —un rectángulo, o un candidato que el modelo apenas vio— no
     // comparte el globo con una detectada: su borde es aproximado y el globo es de la otra.
     const detected = owners.filter((i) => panels[i].conf >= RESCUE_CONF);
-    return detected.length ? detected : owners;
+    const shared = detected.length ? detected : owners;
+    // Un globo partido entre dos viñetas es de la que señala su colita: quien habla está
+    // ahí. Compartirlo lo mostraba al leer la otra, que muchas veces va antes.
+    if (shared.length > 1 && tail) {
+      const pointed = shared.filter((i) => containsPoint(panels[i].polygon as Point[], tail));
+      if (pointed.length === 1) return pointed;
+    }
+    return shared;
   }
 
   // Por caja, también ganan las detectadas: la caja de un relleno es aproximada.
@@ -413,4 +421,82 @@ export function fillAroundTexts(panels: Detection[], boxes: Box[], width: number
     });
   }
   return added;
+}
+
+/** Punto en polígono por cruce de rayos. */
+function containsPoint(polygon: Point[], [px, py]: Point): boolean {
+  let hit = false;
+  for (let i = 0, j = polygon.length - 1; i < polygon.length; j = i++) {
+    const [xi, yi] = polygon[i];
+    const [xj, yj] = polygon[j];
+    if (yi > py !== yj > py && px < ((xj - xi) * (py - yi)) / (yj - yi) + xi) hit = !hit;
+  }
+  return hit;
+}
+
+/** Radio del cuadrado con que se "plancha" el globo, como fracción de su lado menor. */
+const TAIL_OPEN = 0.15;
+
+/**
+ * La punta de la colita de un globo, si tiene.
+ *
+ * Se abre la silueta con un cuadrado: el cuerpo del globo sobrevive y lo angosto se va. Lo
+ * que se fue y más se aleja del cuerpo es la colita, y su extremo, hacia dónde señala. Un
+ * cuadrado y no un disco porque entra entero en una esquina: un globo recortado por el
+ * borde de la viñeta no pierde sus esquinas, que si no pasaban por colitas.
+ */
+export function tailTip(polygon: Point[]): Point | null {
+  if (polygon.length < 3) return null;
+  const xs = polygon.map((p) => p[0]);
+  const ys = polygon.map((p) => p[1]);
+  const x0 = Math.floor(Math.min(...xs)) - 2;
+  const y0 = Math.floor(Math.min(...ys)) - 2;
+  const w = Math.ceil(Math.max(...xs)) - x0 + 3;
+  const h = Math.ceil(Math.max(...ys)) - y0 + 3;
+  if (w < 8 || h < 8 || w * h > 4_000_000) return null;
+
+  const mask = new Uint8Array(w * h);
+  // Relleno por filas: los cruces de cada fila con los lados, de a pares.
+  for (let y = 0; y < h; y++) {
+    const cy = y + y0 + 0.5;
+    const cuts: number[] = [];
+    for (let i = 0, j = polygon.length - 1; i < polygon.length; j = i++) {
+      const [xi, yi] = polygon[i];
+      const [xj, yj] = polygon[j];
+      if (yi > cy !== yj > cy) cuts.push(((xj - xi) * (cy - yi)) / (yj - yi) + xi - x0);
+    }
+    cuts.sort((a, b) => a - b);
+    for (let k = 0; k + 1 < cuts.length; k += 2) {
+      for (let x = Math.max(0, Math.ceil(cuts[k] - 0.5)); x < Math.min(w, cuts[k + 1] - 0.5); x++) mask[y * w + x] = 1;
+    }
+  }
+
+  const r = Math.max(2, Math.round(Math.min(w, h) * TAIL_OPEN));
+  const body = open(mask, w, h, r);
+
+  // Distancia al cuerpo, recorriendo solo lo que el cuerpo perdió.
+  const dist = new Int32Array(w * h).fill(-1);
+  const queue: number[] = [];
+  for (let p = 0; p < w * h; p++) if (body[p]) (dist[p] = 0), queue.push(p);
+  let far = -1;
+  for (let head = 0; head < queue.length; head++) {
+    const p = queue[head];
+    const x = p % w;
+    const y = (p / w) | 0;
+    for (const [nx, ny] of [
+      [x - 1, y],
+      [x + 1, y],
+      [x, y - 1],
+      [x, y + 1],
+    ]) {
+      if (nx < 0 || ny < 0 || nx >= w || ny >= h) continue;
+      const n = ny * w + nx;
+      if (!mask[n] || dist[n] >= 0) continue;
+      dist[n] = dist[p] + 1;
+      queue.push(n);
+      if (far < 0 || dist[n] > dist[far]) far = n;
+    }
+  }
+  if (far < 0) return null;
+  return [(far % w) + x0, ((far / w) | 0) + y0];
 }

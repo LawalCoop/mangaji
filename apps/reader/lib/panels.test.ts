@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { Detection } from "./detector";
-import { choosePanels, fillAroundTexts, fillOrphans, inkGrid, isFolio, ownersOf } from "./panels";
+import { choosePanels, fillAroundTexts, fillOrphans, inkGrid, isFolio, ownersOf, tailTip } from "./panels";
 
 const PAGE = 1000 * 1400;
 
@@ -195,5 +195,35 @@ describe("viñeta alrededor de un texto suelto", () => {
   it("no toca los textos que ya están en una viñeta", () => {
     const panels = [frame(0.96, 0, 0, 1000, 1400)];
     expect(fillAroundTexts(panels, [{ x: 600, y: 1100, w: 200, h: 50 }], 1000, 1400)).toHaveLength(0);
+  });
+});
+
+describe("colita del globo", () => {
+  /** Un globo redondo con la colita saliendo hacia abajo a la izquierda. */
+  function balloon(): [number, number][] {
+    const points: [number, number][] = [];
+    for (let i = 0; i < 48; i++) {
+      const a = (i / 48) * 2 * Math.PI;
+      const x = 500 + 100 * Math.cos(a);
+      const y = 200 + 120 * Math.sin(a);
+      points.push([x, y]);
+      // Entre los ángulos de abajo a la izquierda, la colita.
+      if (i === 17) points.push([400, 390]);
+    }
+    return points;
+  }
+
+  it("encuentra la punta de la colita", () => {
+    const tip = tailTip(balloon())!;
+    expect(Math.hypot(tip[0] - 400, tip[1] - 390)).toBeLessThan(25);
+  });
+
+  it("un globo partido entre dos viñetas es de la que señala la colita", () => {
+    // El globo cruza la calle entre la viñeta de la izquierda y la de la derecha, que se lee
+    // primero; la colita señala la izquierda (tomo 1, p. 15).
+    const panels = [frame(0.88, 494, 5, 610, 1070), frame(0.97, 91, 96, 388, 493)];
+    const box = { x: 377, y: 60, w: 196, h: 256 };
+    expect(ownersOf(box, panels)).toHaveLength(2);
+    expect(ownersOf(box, panels, [399, 309])).toEqual([1]);
   });
 });
