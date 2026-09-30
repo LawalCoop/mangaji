@@ -141,7 +141,7 @@ describe("desenfoque de caja", () => {
   });
 });
 
-describe("reescalado bilineal", () => {
+describe("reescalado", () => {
   /** Imagen RGBA de un canal repetido, a partir de sus valores en filas. */
   const gray = (values: number[]) => new Uint8ClampedArray(values.flatMap((v) => [v, v, v, 255]));
 
@@ -150,6 +150,14 @@ describe("reescalado bilineal", () => {
     const out = resizeToPlanes(src, 4, 2, 2, 1, 2, 114);
     expect(Math.round(out[0] * 255)).toBe(50);
     expect(Math.round(out[1] * 255)).toBe(120);
+  });
+
+  it("al achicar promedia el área que cubre cada píxel, como cv2.INTER_AREA", () => {
+    // De tres píxeles a dos: cada uno cubre uno y medio. El bilineal daría 23 y 158.
+    const src = gray([0, 90, 180, 0, 90, 180]);
+    const out = resizeToPlanes(src, 3, 2, 2, 1, 2, 114);
+    expect(Math.round(out[0] * 255)).toBe(30);
+    expect(Math.round(out[1] * 255)).toBe(150);
   });
 
   it("rellena fuera de la imagen y separa los canales", () => {

@@ -95,6 +95,19 @@ describe("viñetas que el modelo no ve", () => {
     expect(added).toEqual([weak]);
   });
 
+  it("corta en la calle dos viñetas unidas por un dibujo que la cruza", () => {
+    // Un pelo que baja de una viñeta a la otra las une en una sola zona (Saint Seiya, p. 31).
+    const grid = page([
+      { x: 20, y: 20, w: 560, h: 400 },
+      { x: 20, y: 450, w: 560, h: 370 },
+      { x: 280, y: 420, w: 30, h: 30 },
+    ]);
+    const added = fillOrphans([frame(0.97, 590, 830, 5, 5)], [], grid);
+    expect(added).toHaveLength(2);
+    const top = added.find((a) => a.bbox.y < 100)!;
+    expect(top.bbox.y + top.bbox.h).toBeLessThanOrEqual(460);
+  });
+
   it("una zona grande con dibujo y sin viñeta pasa a ser una", () => {
     const grid = page([{ x: 20, y: 20, w: 560, h: 400 }, { x: 20, y: 440, w: 560, h: 380 }]);
     const added = fillOrphans([bottom], [bottom], grid);

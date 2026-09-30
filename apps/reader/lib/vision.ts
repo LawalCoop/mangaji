@@ -336,12 +336,17 @@ export function boundsOf(points: Point[]) {
 }
 
 /**
- * Reescala una imagen RGBA con interpolación bilineal, igual que `cv2.INTER_LINEAR`.
+ * Reescala una imagen RGBA como OpenCV: al achicar, promediando el área que cubre cada
+ * píxel (`cv2.INTER_AREA`); al agrandar, con interpolación bilineal (`cv2.INTER_LINEAR`).
  *
- * Los modelos se entrenaron con imágenes preparadas por OpenCV. `drawImage` no sirve: cada
- * navegador reescala a su manera —y Chrome distinto que Firefox—, y en una viñeta límite esa
- * diferencia pasa la confianza de 0.58 a 0.09 y la viñeta desaparece. Así el navegador ve
- * lo mismo que el pipeline de Python.
+ * `drawImage` no sirve: cada navegador reescala a su manera —y Chrome distinto que
+ * Firefox—, y en una viñeta límite esa diferencia pasa la confianza de 0.58 a 0.09 y la
+ * viñeta desaparece. Hecho acá, el navegador ve lo mismo que el pipeline de Python.
+ *
+ * Al achicar, el bilineal no alcanza: toma cuatro píxeles e ignora el resto, y en una trama
+ * o en líneas finas eso las rompe en un patrón que confunde al modelo. Una viñeta de Saint
+ * Seiya pasaba de 0.86 a 0.06 así; promediando el área, sobre páginas de tres mangas, se
+ * detectan igual o más viñetas.
  *
  * Devuelve los tres canales en planos separados (CHW), normalizados a 0–1, dentro de un
  * lienzo de `size`×`size` relleno con `pad`, con la imagen anclada arriba a la izquierda.
@@ -357,6 +362,10 @@ export function resizeToPlanes(
 ): Float32Array {
   const plane = size * size;
   const out = new Float32Array(3 * plane).fill(pad / 255);
+  if (dw < sw && dh < sh) {
+    resizeByArea(src, sw, sh, dw, dh, size, out);
+    return out;
+  }
 
   // Centros de píxel alineados, como OpenCV: `(d + 0.5) * escala - 0.5`, recortado al borde.
   const axis = (d: number, from: number, to: number) => {
@@ -385,4 +394,72 @@ export function resizeToPlanes(
     }
   }
   return out;
+}
+
+/** Qué píxeles de origen cubre cada píxel de destino, y con qué peso. */
+function areaWeights(from: number, to: number): { index: number; weight: number }[][] {
+  const scale = from / to;
+  return Array.from({ length: to }, (_, d) => {
+    const start = d * scale;
+    const end = Math.min(from, (d + 1) * scale);
+    const cells: { index: number; weight: number }[] = [];
+    for (let i = Math.floor(start); i < Math.ceil(end); i++) {
+      const weight = Math.min(end, i + 1) - Math.max(start, i);
+      if (weight > 1e-9) cells.push({ index: i, weight: weight / scale });
+    }
+    return cells;
+  });
+}
+
+/** Achica promediando el área que cubre cada píxel: primero a lo ancho, después a lo alto. */
+function resizeByArea(
+  src: Uint8ClampedArray,
+  sw: number,
+  sh: number,
+  dw: number,
+  dh: number,
+  size: number,
+  out: Float32Array,
+): void {
+  const plane = size * size;
+  const cols = areaWeights(sw, dw);
+  const rows = areaWeights(sh, dh);
+
+  const narrow = new Float32Array(sh * dw * 3);
+  for (let y = 0; y < sh; y++) {
+    const row = y * sw * 4;
+    for (let x = 0; x < dw; x++) {
+      let r = 0;
+      let g = 0;
+      let b = 0;
+      for (const { index, weight } of cols[x]) {
+        const i = row + index * 4;
+        r += src[i] * weight;
+        g += src[i + 1] * weight;
+        b += src[i + 2] * weight;
+      }
+      const o = (y * dw + x) * 3;
+      narrow[o] = r;
+      narrow[o + 1] = g;
+      narrow[o + 2] = b;
+    }
+  }
+
+  for (let y = 0; y < dh; y++) {
+    for (let x = 0; x < dw; x++) {
+      let r = 0;
+      let g = 0;
+      let b = 0;
+      for (const { index, weight } of rows[y]) {
+        const o = (index * dw + x) * 3;
+        r += narrow[o] * weight;
+        g += narrow[o + 1] * weight;
+        b += narrow[o + 2] * weight;
+      }
+      const p = y * size + x;
+      out[p] = Math.round(r) / 255;
+      out[plane + p] = Math.round(g) / 255;
+      out[2 * plane + p] = Math.round(b) / 255;
+    }
+  }
 }

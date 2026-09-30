@@ -54,6 +54,8 @@ export type ProcessedPage = {
   sprites: Record<string, Uint8Array>;
   panels: number;
   balloons: number;
+  /** Solo en desarrollo: lo que vio el modelo, para revisar el procesamiento. */
+  debug?: unknown;
 };
 
 export type PageReporter = (note: Note) => void;
@@ -308,6 +310,13 @@ export async function processPage(
     sprites,
     panels: outPanels.length,
     balloons: totalBalloons,
+    debug:
+      process.env.NODE_ENV !== "production"
+        ? {
+            dets: dets.map((d) => ({ cls: d.cls, conf: +d.conf.toFixed(3), bbox: [d.bbox.x, d.bbox.y, d.bbox.w, d.bbox.h].map(Math.round) })),
+            panels: panels.map((p) => ({ conf: +p.conf.toFixed(3), bbox: [p.bbox.x, p.bbox.y, p.bbox.w, p.bbox.h].map(Math.round), polygon: p.polygon })),
+          }
+        : undefined,
   };
 }
 

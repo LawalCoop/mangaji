@@ -76,6 +76,14 @@ const INK_CELL = 0.04;
 /** Una zona huérfana tiene que ser grande, compacta y no pisar viñetas. */
 const ORPHAN = { minArea: 0.06, minSide: 0.12, minFill: 0.6, maxCovered: 0.2, inside: 0.8, mostly: 0.6, maxCoveredLoose: 0.1 };
 
+/**
+ * Cómo se reconoce una calle dentro de una zona: una fila con a lo sumo `gap` de su ancho
+ * con dibujo y a lo sumo `drop` de lo que tienen en promedio las `above` filas de arriba,
+ * que tienen que llegar a `dense`; y con `below` filas todavía por debajo. Relativo y no
+ * absoluto porque la caja de la zona suele ser más ancha que la viñeta.
+ */
+const GUTTER = { gap: 0.3, dense: 0.5, drop: 0.4, above: 3, below: 3 };
+
 /** Qué celdas de la grilla tienen dibujo: fracción de píxeles oscuros por celda. */
 export type InkGrid = { cols: number; rows: number; cellW: number; cellH: number; ink: Float32Array };
 
@@ -197,11 +205,56 @@ export function fillOrphans(panels: Detection[], frames: Detection[], grid: InkG
     zones.push(zone);
   }
 
+  // Dos viñetas unidas por un dibujo que cruza la calle —un pelo, un brazo— forman una sola
+  // zona. La calle igual se nota: una fila casi vacía justo debajo de una franja llena. Ahí
+  // se corta y cada parte se evalúa sola (tomo 1 de Saint Seiya, p. 31).
+  const parts: typeof zones = [];
+  const pending = zones.map((z, i) => ({ ...z, id: i }));
+  while (pending.length) {
+    const z = pending.pop()!;
+    const width = z.x1 - z.x0 + 1;
+    const filled = (y: number) => {
+      let n = 0;
+      for (let x = z.x0; x <= z.x1; x++) if (label[y * cols + x] === z.id) n++;
+      return n / width;
+    };
+    let cut = -1;
+    for (let y = z.y0 + GUTTER.above; y <= z.y1 - GUTTER.below && cut < 0; y++) {
+      const here = filled(y);
+      if (here > GUTTER.gap) continue;
+      let above = 0;
+      for (let k = 1; k <= GUTTER.above; k++) above += filled(y - k);
+      above /= GUTTER.above;
+      if (above >= GUTTER.dense && here <= above * GUTTER.drop) cut = y;
+    }
+    if (cut < 0) {
+      parts.push(z);
+      continue;
+    }
+    for (const [from, to] of [
+      [z.y0, cut - 1],
+      [cut + 1, z.y1],
+    ]) {
+      const part = { x0: cols, y0: rows, x1: 0, y1: 0, n: 0, id: z.id };
+      for (let y = from; y <= to; y++) {
+        for (let x = z.x0; x <= z.x1; x++) {
+          if (label[y * cols + x] !== z.id) continue;
+          part.n++;
+          part.x0 = Math.min(part.x0, x);
+          part.y0 = Math.min(part.y0, y);
+          part.x1 = Math.max(part.x1, x);
+          part.y1 = Math.max(part.y1, y);
+        }
+      }
+      if (part.n) pending.push(part);
+    }
+  }
+
   const added: Detection[] = [];
   const all = () => [...panels, ...added];
   const overlapShare = (f: Detection) =>
     all().reduce((sum, p) => sum + intersection(f.bbox, p.bbox), 0) / (f.bbox.w * f.bbox.h);
-  for (const z of zones) {
+  for (const z of parts) {
     const w = z.x1 - z.x0 + 1;
     const h = z.y1 - z.y0 + 1;
     if (z.n / (cols * rows) < ORPHAN.minArea || w / cols < ORPHAN.minSide || h / rows < ORPHAN.minSide) continue;
@@ -372,6 +425,8 @@ export function isFolio(box: Box, panels: Detection[], width: number, height: nu
 
 /** Tamaño mínimo de la viñeta que se arma alrededor de un texto suelto: fracción de la hoja. */
 const LONE_MIN_AREA = 0.04;
+/** Qué parte del hueco tiene que pisar una vecina para limitarlo. */
+const LONE_TOUCH = 0.1;
 
 /**
  * Viñetas alrededor de textos que no caen en ninguna.
@@ -390,8 +445,12 @@ export function fillAroundTexts(panels: Detection[], boxes: Box[], width: number
 
     // Primero arriba y abajo, con las viñetas que comparten columna con el texto; después
     // a los costados, con las que comparten esa franja.
-    const overlapsX = (b: Box, x0: number, x1: number) => b.x < x1 && b.x + b.w > x0;
-    const overlapsY = (b: Box, y0: number, y1: number) => b.y < y1 && b.y + b.h > y0;
+    // Un roce de pocos píxeles con una vecina no cuenta: el borde de una viñeta de relleno
+    // es aproximado, y frenar ahí dejaba la viñeta nueva partida a la mitad.
+    const overlapsX = (b: Box, x0: number, x1: number) =>
+      Math.min(b.x + b.w, x1) - Math.max(b.x, x0) > LONE_TOUCH * (x1 - x0);
+    const overlapsY = (b: Box, y0: number, y1: number) =>
+      Math.min(b.y + b.h, y1) - Math.max(b.y, y0) > LONE_TOUCH * (y1 - y0);
     let y0 = 0;
     let y1 = height;
     for (const { bbox: b } of all) {

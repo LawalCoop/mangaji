@@ -556,6 +556,12 @@ export default function ReaderView() {
         // El manifest se valida página por página: el streaming no afloja las garantías que
         // daba leerlo entero de un archivo terminado.
         const parsed = Page.safeParse(done.page);
+        // En desarrollo queda a mano cómo se leyó cada página, para revisar el procesamiento.
+        if (process.env.NODE_ENV !== "production") {
+          const w = window as unknown as { __mangajiPages?: unknown[]; __mangajiDebug?: unknown[] };
+          (w.__mangajiPages ??= [])[done.index] = done.page;
+          (w.__mangajiDebug ??= [])[done.index] = done.debug;
+        }
         if (parsed.success) panelFrames.append(parsed.data, done.index);
         else console.warn(`página ${done.index + 1} inválida`, parsed.error.issues);
 

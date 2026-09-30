@@ -44,3 +44,4 @@ apps/reader/public/samples/
 apps/reader/public/ort/
 apps/reader/public/libarchive/
 apps/reader/public/coi-serviceworker.min.js
+apps/reader/public/debug/
