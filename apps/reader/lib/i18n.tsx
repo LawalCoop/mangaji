@@ -133,56 +133,57 @@ const es = {
     headline: ["DEL ARCHIVO", "A LA ESCENA"],
     headlineLabel: "Del archivo a la escena",
     intro:
-      "Mangaji no trae nada procesado de antemano. Cuando abrís un tomo, tu navegador lo lee página por página: encuentra las viñetas y los globos con dos redes neuronales, decide en qué orden se leen y arma la dirección de cada escena. Todo en tu dispositivo, sin servidores. Este es el recorrido de una página.",
+      "Mangaji no usa ningún servidor: cuando abrís un tomo, todo el trabajo lo hace tu navegador, página por página. Primero encuentra las viñetas y los globos de diálogo con inteligencia artificial; después decide en qué orden se leen y prepara cómo mostrar cada una. Estos son los ocho pasos por los que pasa cada página.",
     stepsLabel: "Las etapas",
     step: (n: number) => `Etapa ${n}`,
     steps: [
       {
         title: "Abrir el archivo",
-        body: "Un CBZ es un ZIP con imágenes; un CBR, un RAR. El ZIP se abre con JavaScript. El RAR es un formato cerrado, así que para él corre libarchive compilado a WebAssembly. Las páginas se ordenan por nombre, respetando capítulos y numeración.",
+        body: "Un archivo .cbz es una carpeta comprimida en formato ZIP con las páginas adentro; un .cbr es lo mismo, pero en formato RAR. Mangaji los descomprime en tu navegador y ordena las páginas por nombre, respetando capítulos y numeración.",
         detail:
-          "El trabajo pesado pasa en workers, hilos aparte del que dibuja la pantalla. Por eso se puede empezar a leer mientras el resto del tomo se sigue procesando.",
+          "El RAR es un formato cerrado, así que para abrirlo se usa libarchive, una biblioteca compilada a WebAssembly para que corra dentro del navegador. El trabajo pesado va en segundo plano: por eso podés empezar a leer mientras el resto del tomo se sigue procesando.",
       },
       {
-        title: "Preparar la página",
-        body: "La red neuronal espera siempre lo mismo: un cuadrado de 1280 × 1280 píxeles. La página se achica sin deformarse, se ancla arriba a la izquierda y el resto se rellena de gris. Después se separa en sus tres colores, rojo, verde y azul: casi cinco millones de números entre 0 y 1.",
+        title: "Preparar la imagen",
+        body: "La inteligencia artificial siempre recibe una imagen del mismo tamaño: un cuadrado de 1280 × 1280 píxeles. La página se achica sin deformarse hasta entrar en ese cuadrado, y el espacio que sobra se rellena de gris. Después la imagen se convierte en números: una tabla por color —rojo, verde y azul—, casi cinco millones de valores en total.",
         detail:
-          "El achique tiene que ser idéntico al del entrenamiento. Con el del navegador, una viñeta de Kingdom bajaba de 58 % de confianza a 9 % y desaparecía. Por eso se hace a mano, píxel por píxel, igual que OpenCV.",
+          "Este paso tiene que hacerse igual que cuando se entrenó el modelo. El navegador achica las imágenes a su manera, y con esa diferencia mínima una viñeta de Kingdom bajaba de 58 % a 9 % de confianza y dejaba de detectarse. Por eso el achique se calcula a mano, píxel por píxel, con el mismo método del entrenamiento.",
       },
       {
-        title: "Dos redes neuronales miran",
-        body: "Dos modelos de la familia YOLO analizan la página. Uno, entrenado con el corpus Manga109, reconoce viñetas, globos y texto, y dibuja la silueta de cada uno. El otro está especializado en texto: a un globo al que el primero le da 0,2 % de confianza, este le da 66 %.",
+        title: "Buscar viñetas y globos",
+        body: "Dos redes neuronales —modelos de inteligencia artificial entrenados con miles de páginas de manga— analizan la imagen. La primera encuentra viñetas, globos y texto, y marca la forma de cada uno. La segunda está especializada en texto y encuentra diálogos que a la primera se le escapan.",
         detail:
-          "Corren con ONNX Runtime dentro del navegador: en la placa de video con WebGPU, o en el procesador con WebAssembly y varios hilos. Cada red devuelve hasta 300 candidatos con su confianza, y se quedan los que superan el umbral de su clase.",
+          "Cada red propone hasta 300 candidatos con un porcentaje de confianza, y se quedan los que superan un mínimo. Si una zona grande de la página queda sin ninguna viñeta, se acepta una candidata con menos confianza: pasa con las viñetas que llegan al borde de la hoja sin marco. Las redes corren en la placa de video si el dispositivo lo permite, o en el procesador.",
       },
       {
-        title: "De la mancha al polígono",
-        body: "La silueta de cada detección sale de mezclar 32 «prototipos», imágenes borrosas que la red comparte entre todas, con 32 coeficientes propios de esa detección. Lo que supera el 50 % es parte de la figura. Esa mancha se limpia, se queda con su pieza más grande y se le traza el contorno.",
+        title: "Dibujar el contorno",
+        body: "La red no entrega el contorno de cada viñeta ya dibujado: entrega una mancha borrosa que indica dónde está. Esa mancha se convierte en un polígono de pocos lados. Se decide qué píxeles forman parte de la viñeta, se limpian los bordes y se traza el contorno.",
         detail:
-          "Si el contorno es casi convexo —el 93 % o más del área de su envolvente—, se usa la envolvente: los cuadros de manga son de lados rectos. Una simplificación de Douglas-Peucker deja de unos 200 vértices unos 20.",
+          "La mancha sale de mezclar 32 imágenes base que la red usa para todas sus detecciones; cada viñeta tiene su propia mezcla. Los píxeles que superan el 50 % pasan a ser parte de la viñeta. Como los cuadros de manga tienen lados rectos, el contorno se endereza y se simplifica: de unos 200 puntos quedan unos 20.",
       },
       {
-        title: "El orden de lectura",
-        body: "El manga se lee de derecha a izquierda y de arriba abajo, pero las páginas rara vez son una grilla. Se cortan en filas y cada fila en columnas, una y otra vez, eligiendo cada vez el corte que menos viñetas rebana.",
+        title: "Decidir el orden",
+        body: "El manga se lee de derecha a izquierda y de arriba abajo, pero las viñetas rara vez forman una grilla prolija, así que el orden no siempre es obvio. Mangaji corta la página en filas, después corta cada fila en columnas, y repite hasta que cada viñeta queda sola. En cada paso elige el corte que menos viñetas atraviesa.",
         detail:
-          "Un corte puede atravesar una viñeta mientras no le quite más del 15 %. Sin esa tolerancia, las páginas con bordes diagonales no se podrían separar. Es el algoritmo de Manga109 (Kovanen et al.).",
+          "Un corte puede pasar por encima de una viñeta si le toca menos del 15 % de su superficie. Esa tolerancia es la que permite separar páginas con bordes en diagonal, muy comunes en las escenas de acción. El método viene del proyecto de investigación Manga109.",
       },
       {
-        title: "Levantar el diálogo",
-        body: "Cada bloque de texto se separa del dibujo. Se estima el color del papel, la tinta pasa a ser transparencia y las letras quedan en una capa aparte, lista para aparecer cuando le toque. Después se borran de la página: dentro de un globo se tapan con papel liso; sobre el dibujo, con lo que rodea a cada trazo.",
+        title: "Separar el texto",
+        body: "Para que cada globo aparezca en su momento, el texto se separa del dibujo. Las letras se recortan y se guardan aparte, como una capa transparente. Después se borran de la página: dentro de un globo se pintan del color del papel, y fuera de un globo se rellenan con lo que las rodea.",
         detail:
-          "Antes de levantar nada se comprueba que parezca texto: que el fondo sea papel y que ninguna mancha se lleve casi toda la tinta, porque eso sería dibujo. Los bloques de un mismo globo se unen, y cada globo va a la viñeta con la que más se superpone.",
+          "Antes de recortar se comprueba que sea texto de verdad: el fondo tiene que ser papel y la tinta tiene que estar repartida en letras, no concentrada en una sola mancha, que sería un dibujo. Si un globo tiene varios bloques de texto se unen, y cada globo se asigna a la viñeta con la que más se superpone.",
       },
       {
         title: "Dirigir cada viñeta",
-        body: "Cada viñeta recibe una dirección: cómo entra la cámara, qué efecto dispara y cuánto dura. Sale de medirla: cuánta tinta tiene y qué forma. Una viñeta que ocupa más de media página se abre desde cerca; una muy ancha se recorre de derecha a izquierda; una muy alta, de arriba abajo.",
+        body: "Cada viñeta recibe su propia puesta en escena: cómo entra la cámara, si hay algún efecto y cuánto tiempo se muestra. Todo sale de medir la viñeta: cuánta tinta tiene y qué forma. Por ejemplo, una viñeta muy ancha se recorre de derecha a izquierda, y una muy alta, de arriba abajo.",
         detail:
-          "Con más del 42 % de tinta es acción: la cámara entra de golpe y la pantalla tiembla; con más del 52 %, destello. Cada globo aparece a su turno y se queda entre 0,65 y 2,8 segundos, según cuánto texto tiene.",
+          "Mucha tinta suele ser acción: con más del 42 % la cámara entra de golpe y la pantalla tiembla; con más del 52 %, hay un destello. Una viñeta que ocupa más de media página arranca de cerca y se abre. Los globos aparecen de a uno, y cada uno queda solo entre 0,25 y 1,6 segundos antes del siguiente, según cuánto texto tiene.",
       },
       {
-        title: "Guardarlo en un .cbza",
-        body: "Lo procesado se puede guardar. Un .cbza es un ZIP con las páginas limpias en WebP, cada globo como imagen aparte y un manifiesto JSON con las viñetas, el orden y la dirección. La próxima vez abre al instante, sin volver a pasar por las redes.",
-        detail: "El manifiesto sigue un esquema validado y se puede corregir a mano: ningún detector acierta siempre.",
+        title: "Guardar el resultado",
+        body: "Todo lo procesado se puede guardar en un archivo .cbza. Adentro van las páginas sin texto, cada globo como imagen aparte y un archivo que describe las viñetas, el orden y la puesta en escena. La próxima vez carga al instante, sin volver a pasar por la inteligencia artificial.",
+        detail:
+          "Ese archivo descriptivo —el manifiesto, en formato JSON— sigue un esquema fijo y se puede corregir a mano. Sirve para arreglar lo que la detección no acertó: ningún detector acierta siempre.",
       },
     ],
     scene: {
@@ -347,56 +348,57 @@ const en: Messages = {
     headline: ["FROM FILE", "TO SCENE"],
     headlineLabel: "From file to scene",
     intro:
-      "Mangaji ships nothing preprocessed. When you open a volume, your browser reads it page by page: it finds the panels and balloons with two neural networks, works out the reading order and builds the direction of every scene. All on your device, with no servers. This is the journey of one page.",
+      "Mangaji uses no servers: when you open a volume, your browser does all the work, page by page. First it finds the panels and speech balloons with artificial intelligence; then it works out the order they're read in and how to show each one. These are the eight steps every page goes through.",
     stepsLabel: "The stages",
     step: (n: number) => `Stage ${n}`,
     steps: [
       {
         title: "Opening the file",
-        body: "A CBZ is a ZIP full of images; a CBR is a RAR. The ZIP is opened with JavaScript. RAR is a closed format, so for it libarchive runs compiled to WebAssembly. Pages are sorted by name, keeping chapters and numbering in order.",
+        body: "A .cbz file is a folder compressed as a ZIP, with the pages inside; a .cbr is the same thing in RAR format. Mangaji unpacks it in your browser and sorts the pages by name, keeping chapters and numbering in order.",
         detail:
-          "The heavy lifting happens in workers, threads apart from the one that draws the screen. That's why you can start reading while the rest of the volume is still being processed.",
+          "RAR is a closed format, so it's opened with libarchive, a library compiled to WebAssembly so it can run inside the browser. The heavy lifting happens in the background: that's why you can start reading while the rest of the volume is still being processed.",
       },
       {
-        title: "Preparing the page",
-        body: "The neural network always expects the same thing: a 1280 × 1280 pixel square. The page is shrunk without distortion, anchored to the top left, and the rest is filled with gray. Then it's split into its three colors, red, green and blue: almost five million numbers between 0 and 1.",
+        title: "Preparing the image",
+        body: "The AI always receives an image of the same size: a 1280 × 1280 pixel square. The page is shrunk without distortion until it fits in that square, and the leftover space is filled with gray. Then the image is turned into numbers: one table per color — red, green and blue — almost five million values in total.",
         detail:
-          "The shrinking has to match training exactly. With the browser's own, a Kingdom panel dropped from 58% confidence to 9% and vanished. So it's done by hand, pixel by pixel, the same way OpenCV does it.",
+          "This step has to match how the model was trained. Browsers shrink images their own way, and with that tiny difference a Kingdom panel dropped from 58% to 9% confidence and stopped being detected. So the shrinking is calculated by hand, pixel by pixel, with the same method used in training.",
       },
       {
-        title: "Two neural networks look",
-        body: "Two YOLO-family models analyze the page. One, trained on the Manga109 corpus, recognizes panels, balloons and text, and outlines each of them. The other specializes in text: a balloon the first one gives 0.2% confidence, this one gives 66%.",
+        title: "Finding panels and balloons",
+        body: "Two neural networks — AI models trained on thousands of manga pages — analyze the image. The first finds panels, balloons and text, and marks the shape of each one. The second specializes in text and finds dialogue the first one misses.",
         detail:
-          "They run with ONNX Runtime inside the browser: on the graphics card with WebGPU, or on the processor with multi-threaded WebAssembly. Each network returns up to 300 candidates with their confidence, and the ones above their class threshold are kept.",
+          "Each network proposes up to 300 candidates with a confidence score, and the ones above a minimum are kept. If a large area of the page ends up with no panel, a lower-confidence candidate is accepted: this happens with panels that run to the edge of the page without a border. The networks run on the graphics card when the device allows it, or on the processor.",
       },
       {
-        title: "From blob to polygon",
-        body: "Each detection's outline comes from mixing 32 “prototypes” — blurry images the network shares across all detections — with 32 coefficients of its own. Whatever goes over 50% belongs to the shape. That blob is cleaned up, reduced to its largest piece, and traced.",
+        title: "Drawing the outline",
+        body: "The network doesn't hand over each panel's outline ready-made: it gives a blurry blob showing where the panel is. That blob is turned into a polygon with few sides. It decides which pixels belong to the panel, cleans up the edges and traces the outline.",
         detail:
-          "If the outline is nearly convex — 93% or more of its hull's area — the hull is used instead: manga panels have straight sides. A Douglas-Peucker simplification turns about 200 vertices into about 20.",
+          "The blob comes from mixing 32 base images the network uses for all its detections; each panel has its own mix. Pixels above 50% become part of the panel. Since manga panels have straight sides, the outline is straightened and simplified: about 200 points become about 20.",
       },
       {
-        title: "The reading order",
-        body: "Manga reads right to left and top to bottom, but pages are rarely a grid. They're cut into rows and each row into columns, over and over, each time picking the cut that slices the fewest panels.",
+        title: "Deciding the order",
+        body: "Manga reads right to left and top to bottom, but panels rarely form a neat grid, so the order isn't always obvious. Mangaji cuts the page into rows, then each row into columns, and repeats until every panel stands alone. At each step it picks the cut that crosses the fewest panels.",
         detail:
-          "A cut may run through a panel as long as it takes no more than 15% of it. Without that tolerance, pages with diagonal borders couldn't be split. It's the Manga109 algorithm (Kovanen et al.).",
+          "A cut may run over a panel as long as it touches less than 15% of it. That tolerance is what makes it possible to split pages with diagonal borders, very common in action scenes. The method comes from the Manga109 research project.",
       },
       {
-        title: "Lifting the dialogue",
-        body: "Every text block is separated from the art. The paper color is estimated, ink becomes transparency, and the letters move to a layer of their own, ready to appear when it's their turn. Then they're erased from the page: inside a balloon they're covered with plain paper; over the art, with whatever surrounds each stroke.",
+        title: "Separating the text",
+        body: "So each balloon can appear at the right moment, the text is separated from the art. The letters are cut out and stored apart, as a transparent layer. Then they're erased from the page: inside a balloon they're painted with the paper color, and outside a balloon they're filled with whatever surrounds them.",
         detail:
-          "Before lifting anything, it checks that it looks like text: the background has to be paper, and no single blob can hold almost all the ink — that would be drawing. Blocks from the same balloon are merged, and each balloon goes to the panel it overlaps most.",
+          "Before cutting anything out, it checks that it really is text: the background has to be paper, and the ink has to be spread across letters rather than concentrated in one blob, which would be a drawing. If a balloon has several blocks of text they're merged, and each balloon goes to the panel it overlaps most.",
       },
       {
         title: "Directing each panel",
-        body: "Every panel gets a direction: how the camera comes in, which effect fires and how long it lasts. It comes from measuring the panel: how much ink it holds and what shape it has. A panel taking over half the page opens from up close; a very wide one is swept right to left; a very tall one, top to bottom.",
+        body: "Every panel gets its own staging: how the camera comes in, whether there's an effect, and how long it stays on screen. It all comes from measuring the panel: how much ink it has and what shape it is. For example, a very wide panel is swept right to left, and a very tall one, top to bottom.",
         detail:
-          "Over 42% ink means action: the camera punches in and the screen shakes; over 52%, a flash. Each balloon appears in turn and stays between 0.65 and 2.8 seconds, depending on how much text it has.",
+          "Lots of ink usually means action: above 42% the camera punches in and the screen shakes; above 52%, there's a flash. A panel taking up more than half the page starts up close and pulls back. Balloons appear one at a time, and each stays alone between 0.25 and 1.6 seconds before the next, depending on how much text it has.",
       },
       {
-        title: "Saving it as .cbza",
-        body: "What was processed can be saved. A .cbza is a ZIP with the clean pages as WebP, each balloon as its own image, and a JSON manifest with the panels, the order and the direction. Next time it opens instantly, without going through the networks again.",
-        detail: "The manifest follows a validated schema and can be fixed by hand: no detector gets it right every time.",
+        title: "Saving the result",
+        body: "Everything processed can be saved as a .cbza file. Inside are the pages without text, each balloon as a separate image, and a file describing the panels, the order and the staging. Next time it loads instantly, without going through the AI again.",
+        detail:
+          "That description file — the manifest, in JSON format — follows a fixed schema and can be corrected by hand. It's there to fix whatever the detection got wrong: no detector gets it right every time.",
       },
     ],
     scene: {
@@ -562,56 +564,57 @@ const ja: Messages = {
     headline: ["ファイルから、", "シーンへ。"],
     headlineLabel: "ファイルから、シーンへ。",
     intro:
-      "Mangaji は、あらかじめ処理したデータを持っていません。単行本を開くと、ブラウザが 1 ページずつ読み込みます。2 つのニューラルネットワークでコマと吹き出しを見つけ、読む順番を決め、シーンごとの演出を組み立てます。すべてあなたの端末の中で、サーバーは使いません。ここでは、1 ページがたどる道のりを紹介します。",
+      "Mangaji はサーバーを使いません。単行本を開くと、あなたのブラウザが 1 ページずつすべての処理を行います。まず AI でコマと吹き出しを見つけ、次に読む順番と、それぞれの見せ方を決めます。ここでは、1 ページが通る 8 つのステップを紹介します。",
     stepsLabel: "ステップ",
     step: (n: number) => `ステップ ${n}`,
     steps: [
       {
         title: "ファイルを開く",
-        body: "CBZ は画像の入った ZIP、CBR は RAR です。ZIP は JavaScript で開きます。RAR は仕様が公開されていない形式なので、WebAssembly にコンパイルした libarchive を使います。ページはファイル名で並べ、章や番号の順番を守ります。",
+        body: ".cbz は、ページの画像をまとめて ZIP 形式で圧縮したファイルです。.cbr は同じものを RAR 形式にしたものです。Mangaji はこれをブラウザの中で展開し、章や番号の順番を守ってページをファイル名順に並べます。",
         detail:
-          "重い処理はワーカーで行います。画面を描くスレッドとは別のスレッドです。そのため、残りのページを処理している間にも読み始められます。",
+          "RAR は仕様が公開されていない形式なので、ブラウザの中で動くように WebAssembly にしたライブラリ「libarchive」で開きます。重い処理は裏で行うので、残りのページを処理している間にも読み始められます。",
       },
       {
-        title: "ページを準備する",
-        body: "ニューラルネットワークが受け取るのは、いつも 1280 × 1280 ピクセルの正方形です。ページは形を崩さずに縮小し、左上にそろえ、残りを灰色で埋めます。そのあと赤・緑・青の 3 色に分けます。0 から 1 までの数値が、約 500 万個になります。",
+        title: "画像を準備する",
+        body: "AI が受け取る画像は、いつも同じ大きさ、1280 × 1280 ピクセルの正方形です。ページは形を崩さずにこの正方形に収まるまで縮小し、余った部分は灰色で埋めます。そのあと画像を数値に変えます。赤・緑・青の色ごとに表を作り、合計で約 500 万個の数値になります。",
         detail:
-          "縮小のしかたは、学習のときとまったく同じでなければなりません。ブラウザ標準の縮小では、『キングダム』のあるコマの信頼度が 58% から 9% に下がり、検出されなくなりました。そのため OpenCV と同じ方法で、1 ピクセルずつ計算しています。",
+          "この処理は、モデルを学習させたときとまったく同じ方法で行う必要があります。ブラウザ独自の縮小では、その小さな違いだけで『キングダム』のあるコマの信頼度が 58% から 9% に下がり、検出されなくなりました。そのため、学習時と同じ方法で 1 ピクセルずつ計算しています。",
       },
       {
-        title: "2 つのネットワークが見る",
-        body: "YOLO 系の 2 つのモデルがページを解析します。ひとつは Manga109 コーパスで学習したモデルで、コマ・吹き出し・文字を見つけ、それぞれの輪郭を描きます。もうひとつは文字専用です。最初のモデルが 0.2% の信頼度しか出さない吹き出しにも、こちらは 66% を出します。",
+        title: "コマと吹き出しを探す",
+        body: "何千ページものマンガで学習した 2 つの AI モデル（ニューラルネットワーク）が画像を解析します。1 つ目はコマ・吹き出し・文字を見つけ、それぞれの形をとらえます。2 つ目は文字専用で、1 つ目が見落としたセリフを見つけます。",
         detail:
-          "どちらも ONNX Runtime でブラウザの中で動きます。WebGPU ならグラフィックボードで、そうでなければ WebAssembly のマルチスレッドで CPU を使います。各ネットワークは信頼度つきの候補を最大 300 個返し、クラスごとのしきい値を超えたものだけを残します。",
+          "それぞれのモデルは信頼度つきの候補を最大 300 個出し、基準を超えたものだけを残します。ページの広い範囲にコマがひとつもない場合は、信頼度の低い候補も採用します。枠線がなく紙の端まで描かれたコマで起こることです。AI は、端末が対応していればグラフィックボードで、そうでなければ CPU で動きます。",
       },
       {
-        title: "かたまりから多角形へ",
-        body: "検出ごとの輪郭は、すべての検出で共有される 32 枚のぼやけた画像「プロトタイプ」を、その検出に固有の 32 個の係数で混ぜ合わせて作ります。50% を超えた部分が形になります。そのかたまりを整え、いちばん大きな部分だけを残して、輪郭をなぞります。",
+        title: "輪郭を描く",
+        body: "AI はコマの輪郭をそのまま描いて返すわけではなく、コマのある場所をぼんやりしたかたまりで示します。そのかたまりを、少ない辺の多角形に変えます。どのピクセルがコマに含まれるかを決め、ふちを整えて、輪郭をなぞります。",
         detail:
-          "輪郭がほぼ凸形（凸包の面積の 93% 以上）なら、凸包を使います。マンガのコマは辺がまっすぐだからです。最後に Douglas-Peucker 法で、約 200 個の頂点を約 20 個に減らします。",
+          "かたまりは、AI がすべての検出で共通して使う 32 枚の基本画像を混ぜて作られ、コマごとに混ぜ方が違います。50% を超えたピクセルがコマの一部になります。マンガのコマは辺がまっすぐなので、輪郭をまっすぐに整えて単純にします。約 200 個の点が約 20 個になります。",
       },
       {
-        title: "読む順番",
-        body: "マンガは右から左、上から下へ読みますが、ページがきれいな格子になっていることはまれです。ページを行に分け、各行を列に分ける、という分割をくり返します。毎回、切ってしまうコマがいちばん少ない線を選びます。",
+        title: "順番を決める",
+        body: "マンガは右から左、上から下へ読みますが、コマがきれいな格子に並んでいることはまれなので、順番はいつも明らかとは限りません。Mangaji はページを行に分け、各行を列に分けることを、コマがひとつずつに分かれるまでくり返します。そのたびに、横切るコマがいちばん少ない線を選びます。",
         detail:
-          "分割線は、コマの 15% までなら横切ってもかまいません。この許容がないと、斜めの枠線のページは分けられません。Manga109 のアルゴリズム（Kovanen ほか）です。",
+          "分ける線は、コマの面積の 15% 未満なら横切ってもかまいません。この余裕があるからこそ、アクションシーンに多い斜めの枠線のページも分けられます。この方法は研究プロジェクト Manga109 によるものです。",
       },
       {
-        title: "セリフを切り出す",
-        body: "文字のかたまりを、絵から切り離します。紙の色を推定し、インクを透明度に変えて、文字だけを別のレイヤーに移します。出番が来たら表示するためです。そのあとページから文字を消します。吹き出しの中は無地の紙の色で、絵の上では線のまわりの色で埋めます。",
+        title: "文字を切り離す",
+        body: "吹き出しをちょうどいいタイミングで表示するために、文字を絵から切り離します。文字を切り抜いて、透明なレイヤーとして別に保存します。そのあとページから文字を消します。吹き出しの中は紙の色で塗り、吹き出しの外ではまわりの絵で埋めます。",
         detail:
-          "切り出す前に、本当に文字かどうかを確かめます。背景が紙であること、そしてひとつのかたまりがインクのほとんどを占めていないこと（それは絵です）。同じ吹き出しの文字はまとめ、いちばん重なるコマに割り当てます。",
+          "切り抜く前に、本当に文字かどうかを確かめます。背景が紙であること、そしてインクがひとつのかたまりに集中せず文字として散らばっていること（集中していれば絵です）。ひとつの吹き出しに文字のかたまりが複数あればまとめ、吹き出しはいちばん重なるコマに割り当てます。",
       },
       {
-        title: "コマごとの演出",
-        body: "コマごとに演出が決まります。カメラの入り方、効果、表示時間です。どれもコマを測った結果から決まります。インクの量と、コマの形です。ページの半分以上を占めるコマは寄りから引き、とても横長なら右から左へ、とても縦長なら上から下へカメラが動きます。",
+        title: "コマごとに演出する",
+        body: "コマごとに演出が決まります。カメラの入り方、効果の有無、表示する時間です。どれもコマを測った結果、つまりインクの量と形から決まります。たとえば、とても横長のコマは右から左へ、とても縦長のコマは上から下へカメラが動きます。",
         detail:
-          "インクが 42% を超えるとアクション。カメラが一気に寄り、画面が揺れます。52% を超えるとフラッシュ。吹き出しは順番に現れ、文字の量に応じて 0.65 秒から 2.8 秒表示されます。",
+          "インクが多いのはたいていアクションです。42% を超えるとカメラが一気に寄って画面が揺れ、52% を超えるとフラッシュが入ります。ページの半分以上を占めるコマは、寄りから始まって引いていきます。吹き出しはひとつずつ現れ、文字の量に応じて 0.25 秒から 1.6 秒で次に進みます。",
       },
       {
-        title: ".cbza に保存する",
-        body: "処理した結果は保存できます。.cbza は ZIP ファイルで、文字を消したページ（WebP）、吹き出しごとの画像、そしてコマ・順番・演出を記録した JSON のマニフェストが入っています。次からはネットワークを通さず、すぐに開けます。",
-        detail: "マニフェストは検証済みのスキーマに従っていて、手で修正することもできます。完璧な検出器はないからです。",
+        title: "結果を保存する",
+        body: "処理した結果は .cbza ファイルに保存できます。中身は、文字を消したページ、吹き出しごとの画像、そしてコマ・順番・演出を記したファイルです。次に開くときは AI を通さないので、すぐに読めます。",
+        detail:
+          "この記述ファイル（JSON 形式のマニフェスト）は決まった形式に沿っていて、手で直すこともできます。検出が外れたところを直すためです。完璧な検出器はありません。",
       },
     ],
     scene: {
