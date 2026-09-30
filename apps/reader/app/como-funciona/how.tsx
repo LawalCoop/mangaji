@@ -25,8 +25,12 @@ import {
 /** Estable: el proveedor lo usa en un efecto y una función nueva por render lo reiniciaría. */
 const pageTitle = (t: Messages) => t.how.title;
 
-/** Cuánto del ancho de su columna ocupa el titular, por idioma, medido con cada uno. */
-const HEADLINE_FIT = { es: 20.7, en: 25.3, ja: 13.7 } as const;
+/**
+ * Cuánto del ancho de su columna ocupa el titular, por idioma, medido con cada uno. Son dos
+ * tercios de lo que la llenaría: es una página secundaria, y un titular del tamaño del de la
+ * portada le quitaba protagonismo al texto y al índice.
+ */
+const HEADLINE_FIT = { es: 13.6, en: 16.7, ja: 9 } as const;
 
 const SCENES = [OpenScene, PrepareScene, DetectScene, PolygonScene, OrderScene, LiftScene, DirectScene, SaveScene];
 
@@ -85,7 +89,7 @@ function How() {
                     position: i === 2 ? "relative" : "absolute",
                     left: layer.x,
                     top: layer.y,
-                    fontSize: `clamp(2.4rem, ${HEADLINE_FIT[lang]}cqi, 12.5rem)`,
+                    fontSize: `clamp(2.2rem, ${HEADLINE_FIT[lang]}cqi, 7.5rem)`,
                     letterSpacing: "-0.01em",
                     color: layer.color,
                   }}
