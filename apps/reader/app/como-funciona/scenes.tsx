@@ -436,10 +436,11 @@ export function OrderScene({ label }: { label: string }) {
 
 export function LiftScene({ label, t }: { label: string; t: Labels }) {
   const { ref, step, motion } = useSteps([1200, 1900, 1600]);
+  // Todo centrado en el cuadro: la viñeta en x = 60…260 y el globo en el medio de la viñeta.
   const lines = [
-    [112, 92, 190],
-    [104, 106, 198],
-    [118, 120, 184],
+    [121, 96, 199],
+    [113, 110, 207],
+    [127, 124, 193],
   ];
   const Text = () => (
     <g stroke={INK} strokeWidth="5" strokeLinecap="round">
@@ -451,26 +452,26 @@ export function LiftScene({ label, t }: { label: string; t: Labels }) {
   return (
     <Frame sceneRef={ref} label={label}>
       {/* La viñeta: trama y un globo. */}
-      <rect x="20" y="30" width="200" height="180" fill={PAPER} stroke={INK} strokeWidth="3" />
+      <rect x="60" y="40" width="200" height="180" fill={PAPER} stroke={INK} strokeWidth="3" />
       <g stroke={INK} strokeWidth="1.2" opacity="0.5">
-        {Array.from({ length: 12 }, (_, i) => (
-          <line key={i} x1={20} y1={150 + i * 6} x2={220} y2={130 + i * 6} />
+        {Array.from({ length: 11 }, (_, i) => (
+          <line key={i} x1={60} y1={170 + i * 5} x2={260} y2={150 + i * 5} />
         ))}
       </g>
-      <path d="M 120 146 L 108 176 L 140 146 Z" fill="white" stroke={INK} strokeWidth="2.5" strokeLinejoin="round" />
-      <ellipse cx="150" cy="106" rx="70" ry="44" fill="white" stroke={INK} strokeWidth="2.5" />
+      <path d="M 140 148 L 126 182 L 162 150 Z" fill="white" stroke={INK} strokeWidth="2.5" strokeLinejoin="round" />
+      <ellipse cx="160" cy="110" rx="66" ry="42" fill="white" stroke={INK} strokeWidth="2.5" />
 
       {/* En la hoja: está, se borra, y vuelve cuando le toca. */}
       <g style={show(step !== 1, motion, 450, step === 2 ? 700 : 0)}>
         <Text />
       </g>
 
-      {/* La capa aparte, que sale del globo. */}
-      <g style={{ ...move(step === 1 ? "translate(100px, -56px)" : "translate(0px, 0px)", motion, 900), opacity: step === 1 ? 1 : 0 }}>
+      {/* La capa aparte, que sale del globo hacia la esquina, por encima del borde. */}
+      <g style={{ ...move(step === 1 ? "translate(62px, -52px)" : "translate(0px, 0px)", motion, 900), opacity: step === 1 ? 1 : 0 }}>
         {/* Fondo de papel: sobre la pantalla negra, las letras negras no se verían. */}
-        <rect x="92" y="78" width="118" height="56" fill={PAPER} fillOpacity="0.92" stroke={CYAN} strokeWidth="2" strokeDasharray="5 4" />
+        <rect x="102" y="82" width="116" height="56" fill={PAPER} fillOpacity="0.92" stroke={CYAN} strokeWidth="2" strokeDasharray="5 4" />
         <Text />
-        <text x="151" y="70" textAnchor="middle" fontSize="12" fill={CYAN} style={{ fontFamily: "var(--body)", fontWeight: 700 }}>
+        <text x="160" y="74" textAnchor="middle" fontSize="12" fill={CYAN} style={{ fontFamily: "var(--body)", fontWeight: 700 }}>
           {t.layer}
         </text>
       </g>
