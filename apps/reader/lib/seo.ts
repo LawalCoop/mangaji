@@ -60,6 +60,13 @@ export const HOW = {
     "Del archivo a la escena: cómo Mangaji encuentra viñetas y globos con inteligencia artificial, decide el orden de lectura y dirige cada viñeta, todo dentro de tu navegador.",
 };
 
+export const LEGAL = {
+  path: "/legal/",
+  title: "Términos y privacidad — Mangaji",
+  description:
+    "Términos de uso y privacidad de Mangaji: tus archivos se abren en tu navegador y no pasan por ningún servidor nuestro.",
+};
+
 /** Datos estructurados: para los buscadores, una aplicación web gratuita y libre. */
 export const APP_JSON_LD = {
   "@context": "https://schema.org",

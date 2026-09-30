@@ -174,6 +174,9 @@ export function SiteFooter() {
           <a href={`${REPO_URL}/blob/main/LICENSE`} target="_blank" rel="noopener" className={`${link} decoration-[#00D9F5]`}>
             {L.license}
           </a>
+          <Link href="/legal/" className={`${link} decoration-[#00D9F5]`}>
+            {t.site.legal}
+          </Link>
         </nav>
       </div>
       {/* Guiño: el sello de "fin" con que cierra un tomo, estampado en rojo. */}

@@ -368,7 +368,9 @@ export function Landing({ status, message, onFile, onUrl, download }: Props) {
               {status === "error" && message ? (
                 <span style={{ color: "#C31D45", fontWeight: 700 }}>{message}</span>
               ) : (
-                L.privacy
+                <>
+                  <strong className="font-bold text-[#0B0B0C]">{L.rights}</strong> {L.privacy}
+                </>
               )}
             </p>
           </div>

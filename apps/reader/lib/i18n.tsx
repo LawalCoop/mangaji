@@ -31,6 +31,7 @@ const es = {
     how: "Cómo funciona",
     reader: "Abrir el lector",
     project: "Proyecto",
+    legal: "Términos y privacidad",
     stats: "Contamos las visitas de forma anónima con GoatCounter, sin cookies. Tus tomos no salen de tu dispositivo.",
   },
 
@@ -54,6 +55,7 @@ const es = {
     linkHelp: "Links directos, de Dropbox o de GitHub. Google Drive todavía no.",
     downloaded: (pct: number, got: string, total: string) => `${pct} % · ${got} de ${total} MB`,
     downloadedUnknown: (got: string) => `${got} MB`,
+    rights: "Abrí solo archivos que tengas derecho a leer.",
     privacy:
       "El archivo se abre y se procesa en tu navegador. Si viene de un link, se baja directo del sitio donde está, sin pasar por ningún servidor nuestro.",
     features: [
@@ -248,6 +250,7 @@ const en: Messages = {
     how: "How it works",
     reader: "Open the reader",
     project: "Project",
+    legal: "Terms and privacy",
     stats: "We count visits anonymously with GoatCounter, without cookies. Your volumes never leave your device.",
   },
 
@@ -271,6 +274,7 @@ const en: Messages = {
     linkHelp: "Direct links, Dropbox or GitHub. Google Drive not yet.",
     downloaded: (pct: number, got: string, total: string) => `${pct}% · ${got} of ${total} MB`,
     downloadedUnknown: (got: string) => `${got} MB`,
+    rights: "Only open files you have the right to read.",
     privacy:
       "The file is opened and processed in your browser. If it comes from a link, it downloads straight from where it lives, without going through any server of ours.",
     features: [
@@ -462,6 +466,7 @@ const ja: Messages = {
     how: "しくみ",
     reader: "リーダーを開く",
     project: "プロジェクト",
+    legal: "利用規約とプライバシー",
     stats: "アクセス数は GoatCounter で匿名に集計しています（クッキーは使いません）。単行本のファイルが端末から出ることはありません。",
   },
 
@@ -485,6 +490,7 @@ const ja: Messages = {
     linkHelp: "直接リンク、Dropbox、GitHub に対応。Google ドライブはまだ使えません。",
     downloaded: (pct: number, got: string, total: string) => `${pct}% · ${got} / ${total} MB`,
     downloadedUnknown: (got: string) => `${got} MB`,
+    rights: "読む権利のあるファイルだけを開いてください。",
     privacy:
       "ファイルはブラウザの中で開いて処理します。リンクの場合も、ファイルのある場所から直接ダウンロードされ、私たちのサーバーは通りません。",
     features: [
@@ -789,6 +795,7 @@ export function I18nProvider({ children }: { children: React.ReactNode }) {
 const TITLES = {
   home: (t: Messages) => t.meta.title,
   how: (t: Messages) => t.how.title,
+  legal: (t: Messages) => `${t.site.legal} — Mangaji`,
 } as const;
 
 /**
