@@ -204,61 +204,17 @@ export class Detector {
         }
       }
 
-      const polygon = this.#maskToPolygon(small, vw, vh, image.width, image.height);
+      const polygon = maskToPolygon(small, vw, vh, image.width, image.height, {
+        x1: bx1,
+        y1: by1,
+        x2: bx2,
+        y2: by2,
+      });
       if (!polygon) continue;
 
       out.push({ cls, conf, bbox: boundsOf(polygon), polygon });
     }
     return out;
-  }
-
-  /**
-   * Lleva la máscara al tamaño de la página y saca su silueta.
-   *
-   * Se interpola la probabilidad y recién después se umbraliza: escalar la máscara ya
-   * binarizada convierte cada píxel de los prototipos —un cuarto de resolución— en un
-   * escalón visible en el borde.
-   */
-  #maskToPolygon(
-    small: Float32Array,
-    sw: number,
-    sh: number,
-    width: number,
-    height: number,
-  ): Point[] | null {
-    const mask = new Uint8Array(width * height);
-    let any = false;
-    for (let y = 0; y < height; y++) {
-      const sy = (y * sh) / height - 0.5;
-      const y0 = Math.max(0, Math.min(sh - 1, Math.floor(sy)));
-      const y1 = Math.min(sh - 1, y0 + 1);
-      const fy = Math.max(0, Math.min(1, sy - y0));
-      for (let x = 0; x < width; x++) {
-        const sx = (x * sw) / width - 0.5;
-        const x0 = Math.max(0, Math.min(sw - 1, Math.floor(sx)));
-        const x1 = Math.min(sw - 1, x0 + 1);
-        const fx = Math.max(0, Math.min(1, sx - x0));
-
-        const top = small[y0 * sw + x0] * (1 - fx) + small[y0 * sw + x1] * fx;
-        const bottom = small[y1 * sw + x0] * (1 - fx) + small[y1 * sw + x1] * fx;
-        if (top * (1 - fy) + bottom * fy > 0.5) {
-          mask[y * width + x] = 1;
-          any = true;
-        }
-      }
-    }
-    if (!any) return null;
-
-    const clean = largestComponent(open(mask, width, height, 2), width, height);
-    const contour = traceContour(clean, width, height);
-    if (contour.length < 3) return null;
-
-    // Un marco de manga es un polígono de lados rectos: si el contorno es casi convexo, su
-    // casco es esa forma ideal, y seguir el borde crudo solo copia el escalonado.
-    const hull = convexHull(contour);
-    const useHull = hull.length >= 3 && polygonArea(contour) / polygonArea(hull) >= CONVEX_RATIO;
-    const simple = simplify(useHull ? hull : contour, SIMPLIFY_EPS);
-    return simple.length >= 3 ? simple : null;
   }
 
   /** Salida del modelo de texto: `[1, 300, 6]`, solo cajas. */
@@ -320,4 +276,81 @@ function mergeText(primary: Detection[], extra: Detection[]): Detection[] {
     }
   }
   return out;
+}
+
+/** Margen del recorte, en píxeles de página: más que el radio de la apertura morfológica. */
+const CROP_MARGIN = 4;
+/** Radio de la apertura que corta los hilos de un píxel de las máscaras. */
+const OPEN_RADIUS = 2;
+
+/**
+ * Lleva la máscara al tamaño de la página y saca su silueta.
+ *
+ * Se interpola la probabilidad y recién después se umbraliza: escalar la máscara ya
+ * binarizada convierte cada píxel de los prototipos —un cuarto de resolución— en un
+ * escalón visible en el borde.
+ *
+ * `cells` es la caja de la detección en celdas de los prototipos, fuera de la cual la
+ * máscara vale cero. Con ella se trabaja solo sobre la zona que la interpolación puede
+ * alcanzar, más un margen; antes se recorría la página entera por cada detección, y en una
+ * página con veinte eran millones de píxeles para calcular ceros. El resultado es el mismo:
+ * fuera del recorte todo es fondo, y la apertura, los componentes y el contorno tratan el
+ * borde del recorte también como fondo.
+ */
+export function maskToPolygon(
+  small: Float32Array,
+  sw: number,
+  sh: number,
+  width: number,
+  height: number,
+  cells?: { x1: number; y1: number; x2: number; y2: number },
+): Point[] | null {
+  // Un píxel de página toca las celdas `floor(s)` y la siguiente, con s = p·sw/ancho − 0.5.
+  // Solo puede valer algo si alguna cae dentro de [x1, x2).
+  const reach = (lo: number, hi: number, cellsN: number, pixels: number) =>
+    cells
+      ? [
+          Math.max(0, Math.floor(((lo - 0.5) * pixels) / cellsN) - CROP_MARGIN),
+          Math.min(pixels, Math.ceil(((hi + 0.5) * pixels) / cellsN) + CROP_MARGIN),
+        ]
+      : [0, pixels];
+  const [cx0, cx1] = reach(cells?.x1 ?? 0, cells?.x2 ?? 0, sw, width);
+  const [cy0, cy1] = reach(cells?.y1 ?? 0, cells?.y2 ?? 0, sh, height);
+  const cw = cx1 - cx0;
+  const ch = cy1 - cy0;
+  if (cw <= 0 || ch <= 0) return null;
+
+  const mask = new Uint8Array(cw * ch);
+  let any = false;
+  for (let y = cy0; y < cy1; y++) {
+    const sy = (y * sh) / height - 0.5;
+    const y0 = Math.max(0, Math.min(sh - 1, Math.floor(sy)));
+    const y1 = Math.min(sh - 1, y0 + 1);
+    const fy = Math.max(0, Math.min(1, sy - y0));
+    for (let x = cx0; x < cx1; x++) {
+      const sx = (x * sw) / width - 0.5;
+      const x0 = Math.max(0, Math.min(sw - 1, Math.floor(sx)));
+      const x1 = Math.min(sw - 1, x0 + 1);
+      const fx = Math.max(0, Math.min(1, sx - x0));
+
+      const top = small[y0 * sw + x0] * (1 - fx) + small[y0 * sw + x1] * fx;
+      const bottom = small[y1 * sw + x0] * (1 - fx) + small[y1 * sw + x1] * fx;
+      if (top * (1 - fy) + bottom * fy > 0.5) {
+        mask[(y - cy0) * cw + (x - cx0)] = 1;
+        any = true;
+      }
+    }
+  }
+  if (!any) return null;
+
+  const clean = largestComponent(open(mask, cw, ch, OPEN_RADIUS), cw, ch);
+  const contour = traceContour(clean, cw, ch).map(([x, y]): Point => [x + cx0, y + cy0]);
+  if (contour.length < 3) return null;
+
+  // Un marco de manga es un polígono de lados rectos: si el contorno es casi convexo, su
+  // casco es esa forma ideal, y seguir el borde crudo solo copia el escalonado.
+  const hull = convexHull(contour);
+  const useHull = hull.length >= 3 && polygonArea(contour) / polygonArea(hull) >= CONVEX_RATIO;
+  const simple = simplify(useHull ? hull : contour, SIMPLIFY_EPS);
+  return simple.length >= 3 ? simple : null;
 }
