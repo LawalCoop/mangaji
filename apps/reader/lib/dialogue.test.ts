@@ -163,6 +163,35 @@ describe("borrado del diálogo", () => {
     expect(px[(20 * w + 34) * 4]).toBeLessThan(70);
   });
 
+  it("dentro del globo no blanquea el fondo gris pegado al contorno", () => {
+    const w = 40;
+    const h = 40;
+    // Un globo sobre un pasillo gris: el contorno toca la caja del texto y, por estar pegado
+    // al gris, forma una sola mancha con todo el fondo. Eso dejaba un cuadro claro.
+    const { px, alpha } = block(w, h, [[14, 14, 5, 10]]);
+    for (let y = 0; y < h; y++) {
+      for (let x = 0; x < w; x++) {
+        const edge = x < 8 || y < 8 || x >= 32 || y >= 32;
+        const outline = x === 8 || y === 8 || x === 31 || y === 31;
+        if (!edge && !outline) continue;
+        const i = (y * w + x) * 4;
+        const level = outline ? 20 : 170;
+        px[i] = px[i + 1] = px[i + 2] = level;
+        alpha[y * w + x] = Math.round(((255 - level) * 255) / 255);
+      }
+    }
+    const inside = new Uint8Array(w * h).fill(1);
+    const seed = { x: 7, y: 7, w: 26, h: 26 };
+
+    erase(px, alpha, w, h, 255, inside, seed);
+
+    // La letra se fue…
+    expect(px[(18 * w + 16) * 4]).toBeGreaterThan(245);
+    // …y el gris de afuera y el contorno siguen donde estaban.
+    expect(px[(3 * w + 3) * 4]).toBeLessThan(180);
+    expect(px[(8 * w + 20) * 4]).toBeLessThan(60);
+  });
+
   it("el sprite se lleva la tinta original, no el papel que quedó en su lugar", () => {
     const w = 40;
     const h = 40;

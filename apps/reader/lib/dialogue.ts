@@ -141,36 +141,34 @@ export function erase(
     touched.fill(1);
   }
 
+  // Qué es letra: cuánto del contorno de la región roza cada mancha. La letra queda holgada
+  // adentro, mientras que el dibujo entra de afuera y lo cruza a lo largo.
+  const contacts = new Int32Array(stats.length + 1);
+  for (let x = 0; x < w; x++) {
+    contacts[labels[x]]++;
+    contacts[labels[(h - 1) * w + x]]++;
+  }
+  for (let y = 0; y < h; y++) {
+    contacts[labels[y * w]]++;
+    contacts[labels[y * w + w - 1]]++;
+  }
+  const border = 2 * (w + h);
+  const isLetter = new Uint8Array(stats.length + 1);
+  for (const stat of stats) {
+    const label = stat.label;
+    isLetter[label] = touched[label] && contacts[label] / border <= EDGE_SHARE ? 1 : 0;
+  }
+
   if (inside) {
     // Estar dentro del globo no alcanza para borrar: hay que ser una de las manchas que el
-    // detector marcó. Borrar todo lo entintado del globo parece seguro y no lo es —el globo
-    // detectado se pasa sobre el dibujo más seguido de lo que uno querría—, y ahí se blanquea
-    // una franja entera y vuelve el corte cuadrado.
+    // detector marcó, y una letra. El contorno del globo, cuando está pegado a un fondo gris
+    // —un pasillo, un cielo tramado—, forma una sola mancha con todo ese gris; la caja la
+    // roza y se blanqueaba el rectángulo entero, que al revelarse el texto volvía a medias
+    // y se veía como un cuadro claro alrededor del globo.
     for (let p = 0; p < count; p++) {
-      cover[p] =
-        labels[p] && touched[labels[p]] ? Math.min(1, (alpha[p] / 255) * ERASE_GAIN) : 0;
+      cover[p] = labels[p] && isLetter[labels[p]] ? Math.min(1, (alpha[p] / 255) * ERASE_GAIN) : 0;
     }
   } else {
-    // Sin globo que respalde el borrado hay que adivinar qué es letra. Lo que se mide es
-    // cuánto del contorno de la región roza cada mancha: la letra queda holgada adentro,
-    // mientras que el dibujo entra de afuera y lo cruza a lo largo.
-    const contacts = new Int32Array(stats.length + 1);
-    for (let x = 0; x < w; x++) {
-      contacts[labels[x]]++;
-      contacts[labels[(h - 1) * w + x]]++;
-    }
-    for (let y = 0; y < h; y++) {
-      contacts[labels[y * w]]++;
-      contacts[labels[y * w + w - 1]]++;
-    }
-
-    const border = 2 * (w + h);
-    const isLetter = new Uint8Array(stats.length + 1);
-    for (const stat of stats) {
-      const label = stat.label;
-      isLetter[label] = touched[label] && contacts[label] / border <= EDGE_SHARE ? 1 : 0;
-    }
-
     for (let p = 0; p < count; p++) cover[p] = labels[p] && isLetter[labels[p]] ? 1 : 0;
   }
 
