@@ -797,6 +797,12 @@ export default function ReaderView() {
     const onKey = (e: KeyboardEvent) => {
       const eng = engine.current;
       if (!eng) return;
+      // Con Shift, las flechas de siempre saltan la página entera.
+      if (e.shiftKey && (e.key === "ArrowLeft" || e.key === "ArrowRight")) {
+        e.preventDefault();
+        eng.director.seekToPage(eng.director.frame.page + (e.key === "ArrowLeft" ? 1 : -1));
+        return;
+      }
       switch (e.key) {
         case "ArrowLeft":
         case " ":
@@ -960,6 +966,13 @@ export default function ReaderView() {
         Math.abs(dx) > SWIPE.px &&
         Math.abs(dx) > Math.abs(dy) * 1.5;
       if (swipe) (dx > 0 ? eng.director.next() : eng.director.prev());
+      // Deslizar hacia arriba o abajo salta la página entera, sin pasar globo por globo.
+      const flick =
+        e.pointerType !== "mouse" &&
+        performance.now() - g.t0 < SWIPE.ms &&
+        Math.abs(dy) > SWIPE.px &&
+        Math.abs(dy) > Math.abs(dx) * 1.5;
+      if (flick) eng.director.seekToPage(eng.director.frame.page + (dy < 0 ? 1 : -1));
       return;
     }
 
@@ -1028,9 +1041,13 @@ export default function ReaderView() {
             {t.reader.hintNext[1]}
           </div>
           <div className="flex items-center justify-center px-2">
-            {t.reader.hintCenter[0]}
-            <br />
-            {t.reader.hintCenter[1]}
+            <span>
+              {t.reader.hintCenter[0]}
+              <br />
+              {t.reader.hintCenter[1]}
+              <br />
+              <span className="mt-3 block text-[12px] text-neutral-300">{t.reader.hintPage}</span>
+            </span>
           </div>
           <div className="flex items-center justify-center bg-[#FF2E88]/15 px-3">
             {t.reader.hintBack[0]}

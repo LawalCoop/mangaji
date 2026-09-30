@@ -131,6 +131,7 @@ const es = {
     waiting: "preparando la página que sigue…",
     hintNext: ["tocá acá", "para avanzar"],
     hintCenter: ["centro:", "controles"],
+    hintPage: "deslizá ↑↓ para saltar de página",
     hintBack: ["acá para", "volver"],
   },
 
@@ -352,6 +353,7 @@ const en: Messages = {
     waiting: "getting the next page ready…",
     hintNext: ["tap here", "to go on"],
     hintCenter: ["center:", "controls"],
+    hintPage: "swipe ↑↓ to jump pages",
     hintBack: ["here to", "go back"],
   },
 
@@ -574,6 +576,7 @@ const ja: Messages = {
     waiting: "次のページを準備中…",
     hintNext: ["ここをタップで", "次へ"],
     hintCenter: ["中央：", "操作メニュー"],
+    hintPage: "上下にスワイプでページ移動",
     hintBack: ["ここで", "戻る"],
   },
 
