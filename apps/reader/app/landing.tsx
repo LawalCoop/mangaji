@@ -1,9 +1,10 @@
 "use client";
 
+import Link from "next/link";
 import { useRef, useState } from "react";
-import { asset } from "@/lib/base";
-import { LANGS, useI18n } from "@/lib/i18n";
+import { useI18n } from "@/lib/i18n";
 import { ReadingDemo } from "./reading-demo";
+import { CYAN, INK, MAGENTA, PAPER, SiteFooter, SiteHeader, TONE, panel, screenPanel } from "./site";
 
 /**
  * Portada de Mangaji.
@@ -32,16 +33,8 @@ function mb(bytes: number): string {
   return v < 10 ? v.toFixed(1) : String(Math.round(v));
 }
 
-const LAWAL_URL = "https://lawal.coop";
-const REPO_URL = "https://github.com/LawalCoop/mangaji";
-
 /** Lo que se puede abrir. */
 const ACCEPT = ".cbza,.cbz,.cbr,.zip,.rar,application/zip";
-
-const INK = "#0B0B0C";
-const PAPER = "#F4EFE3";
-const CYAN = "#00D9F5";
-const MAGENTA = "#FF2E88";
 
 /**
  * Cuánto del ancho de su columna ocupa el titular, por idioma: cada uno mide distinto
@@ -50,22 +43,12 @@ const MAGENTA = "#FF2E88";
  */
 const HEADLINE_FIT = { es: 21.5, en: 19.2, ja: 19.2 } as const;
 
-/** Marco de tinta con sombra dura: el borde de un cuadro impreso. */
-const panel = {
-  background: PAPER,
-  border: `4px solid ${INK}`,
-  boxShadow: `12px 12px 0 #0A0A0C`,
-} as const;
-
-/** Trama de puntos, el gris del manga. */
-const TONE = `radial-gradient(circle at 1px 1px, ${INK}2e 1.6px, transparent 0) 0 0 / 9px 9px`;
-
 export function Landing({ status, message, onFile, onUrl, download }: Props) {
   const [over, setOver] = useState(false);
   const [link, setLink] = useState("");
   const downloading = status === "loading" && download !== null;
   const input = useRef<HTMLInputElement>(null);
-  const { lang, t, setLang } = useI18n();
+  const { lang, t } = useI18n();
   const L = t.landing;
 
   const take = (file: File | undefined) => {
@@ -93,57 +76,7 @@ export function Landing({ status, message, onFile, onUrl, download }: Props) {
       </span>
 
       <div className="relative mx-auto flex w-full max-w-[1440px] flex-col gap-[18px]">
-        {/* Encabezado */}
-        <header
-          className="panel flex items-center justify-between gap-4 px-5 py-3 sm:px-7 sm:py-4"
-          style={panel}
-        >
-          <div className="flex min-w-0 items-center gap-3 sm:gap-4">
-            <span
-              className="trim-caps font-[family-name:var(--display)] leading-none"
-              style={{ fontSize: "clamp(2rem,4.2vw,3.25rem)", color: INK }}
-            >
-              MANGAJI
-            </span>
-            <span className="h-7 w-1 shrink-0 max-sm:hidden" style={{ background: MAGENTA }} aria-hidden />
-            <span
-              className="truncate py-1 text-[16px] font-medium leading-tight max-sm:hidden sm:text-[18px]"
-              style={{ color: INK }}
-            >
-              {L.subtitle}
-            </span>
-          </div>
-          <div className="flex shrink-0 items-center gap-4">
-            {/* Selector de idioma: a la vista, porque quien no lee español no va a buscarlo.
-                Los tres con la misma letra y la misma caja, para que no bailen. */}
-            <div role="group" aria-label={t.language} className="flex border-[3px]" style={{ borderColor: INK }}>
-              {LANGS.map((l) => (
-                <button
-                  key={l.id}
-                  type="button"
-                  lang={l.id}
-                  title={l.name}
-                  aria-pressed={lang === l.id}
-                  onClick={() => setLang(l.id)}
-                  className="flex h-9 min-w-11 touch-manipulation items-center justify-center px-2.5 font-[family-name:var(--body)] text-[14px] font-bold leading-none transition-colors focus-visible:outline focus-visible:outline-3 focus-visible:-outline-offset-4"
-                  style={
-                    lang === l.id
-                      ? { background: INK, color: PAPER, outlineColor: MAGENTA }
-                      : { background: "transparent", color: INK, outlineColor: MAGENTA }
-                  }
-                >
-                  {l.label}
-                </button>
-              ))}
-            </div>
-            <span
-              className="font-[family-name:var(--font-kana)] text-[22px] font-bold leading-none max-md:hidden"
-              style={{ color: "#4A4A50" }}
-            >
-              漫画児
-            </span>
-          </div>
-        </header>
+        <SiteHeader link={{ href: "/como-funciona/", label: t.site.how }} />
 
         {/* Hero: el titular y, al lado, la app haciendo lo que dice. En el celular el
             contenedor se disuelve y el orden cambia: titular y carga primero, que es a lo que
@@ -199,7 +132,7 @@ export function Landing({ status, message, onFile, onUrl, download }: Props) {
           {/* La demo va sobre el negro del lector: así se ve la hoja como se va a ver. */}
           <section
             className="panel px-5 py-5 max-lg:order-3 sm:px-7 sm:py-7"
-            style={{ ...panel, background: "#0F0F12" }}
+            style={screenPanel}
           >
             <ReadingDemo label={L.demoLabel} caption={L.direction} />
           </section>
@@ -423,58 +356,20 @@ export function Landing({ status, message, onFile, onUrl, download }: Props) {
           ))}
         </div>
 
-        {/* Quién lo hace y bajo qué términos. Serio y en el negro del lector: es el cierre. */}
-        <footer
-          className="panel grid gap-8 px-6 py-8 max-lg:order-5 sm:px-10 sm:py-10 md:grid-cols-[1fr_1.2fr] md:gap-12"
-          style={{ ...panel, background: "#0F0F12", border: `4px solid ${INK}`, color: "#B4B4BC" }}
-        >
-          <div className="flex flex-col items-start gap-4">
-            <a
-              href={LAWAL_URL}
-              target="_blank"
-              rel="noopener"
-              className="block focus-visible:outline focus-visible:outline-3 focus-visible:outline-offset-4"
-              style={{ outlineColor: CYAN }}
-            >
-              {/* eslint-disable-next-line @next/next/no-img-element -- exportación estática, sin optimizador */}
-              <img src={asset("/lawal.png")} alt="Lawal" width={621} height={137} className="h-9 w-auto sm:h-10" />
-            </a>
-            <p className="text-[15px] leading-relaxed">{L.madeBy}</p>
-            <a
-              href={LAWAL_URL}
-              target="_blank"
-              rel="noopener"
-              className="text-[15px] font-bold underline decoration-2 underline-offset-4 transition-colors hover:text-white"
-              style={{ color: PAPER, textDecorationColor: MAGENTA }}
-            >
-              lawal.coop
-            </a>
-          </div>
+        {/* Las tarjetas son el resumen; el detalle técnico está en su propia página. */}
+        <div className="flex justify-end max-lg:order-4">
+          <Link
+            href="/como-funciona/"
+            className="inline-flex items-center gap-3 text-[17px] font-bold underline decoration-[3px] underline-offset-[6px] transition-colors hover:text-white sm:text-[19px]"
+            style={{ color: PAPER, textDecorationColor: CYAN }}
+          >
+            {t.landing.howLink}
+          </Link>
+        </div>
 
-          <div className="flex flex-col items-start gap-3 md:border-l md:pl-12" style={{ borderColor: "#2A2A30" }}>
-            <h2 className="text-[17px] font-bold" style={{ color: PAPER }}>
-              {L.freeTitle}
-            </h2>
-            <p className="max-w-[40em] text-[15px] leading-relaxed">{L.freeText}</p>
-            <div className="mt-1 flex flex-wrap gap-x-6 gap-y-2 text-[15px] font-bold">
-              {[
-                { href: REPO_URL, label: L.source },
-                { href: `${REPO_URL}/blob/main/LICENSE`, label: L.license },
-              ].map((l) => (
-                <a
-                  key={l.href}
-                  href={l.href}
-                  target="_blank"
-                  rel="noopener"
-                  className="underline decoration-2 underline-offset-4 transition-colors hover:text-white"
-                  style={{ color: PAPER, textDecorationColor: CYAN }}
-                >
-                  {l.label}
-                </a>
-              ))}
-            </div>
-          </div>
-        </footer>
+        <div className="max-lg:order-5">
+          <SiteFooter />
+        </div>
       </div>
     </div>
   );

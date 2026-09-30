@@ -21,10 +21,10 @@ const MAGENTA = "#FF2E88";
 const W = 300;
 const H = 420;
 
-type Pt = [number, number];
+export type Pt = [number, number];
 
 /** Las viñetas, ya en orden de lectura. Los bordes inclinados son paralelos entre sí. */
-const PANELS: Pt[][] = [
+export const PANELS: Pt[][] = [
   [[160, 12], [288, 12], [288, 148], [152, 160]],
   [[12, 12], [150, 12], [142, 161], [12, 172]],
   [[12, 182], [288, 158], [288, 268], [12, 284]],

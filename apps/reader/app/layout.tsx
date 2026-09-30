@@ -39,10 +39,10 @@ export const viewport: Viewport = {
  * Los pocos glifos japoneses de la portada, pedidos uno por uno.
  *
  * El subset japonés completo son varios MB de kanji; con `text=` Google devuelve solo estos
- * cinco, que es lo único que la página escribe.
+ * pocos, que es lo único que las páginas escriben.
  */
 const KANA_URL =
-  "https://fonts.googleapis.com/css2?family=Zen+Kaku+Gothic+New:wght@700;900&text=%E3%83%89%E3%82%A9%E3%83%B3%E6%BC%AB%E7%94%BB%E5%85%90%E7%B5%82&display=swap";
+  "https://fonts.googleapis.com/css2?family=Zen+Kaku+Gothic+New:wght@700;900&text=%E3%83%89%E3%82%A9%E3%83%B3%E6%BC%AB%E7%94%BB%E5%85%90%E7%B5%82%E4%BB%95%E7%B5%84%E3%81%BF&display=swap";
 
 export default function RootLayout({ children }: LayoutProps<"/">) {
   return (

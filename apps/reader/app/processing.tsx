@@ -79,7 +79,7 @@ export function Processing({ title, stage, lines, progress, eta }: ProcessingPro
       <div className="relative mx-auto flex w-full max-w-4xl flex-1 flex-col justify-center gap-5">
         <section
           className="border-[4px] px-6 py-7 sm:px-10 sm:py-10"
-          style={{ borderColor: INK, background: PAPER, boxShadow: "12px 12px 0 #0A0A0C" }}
+          style={{ borderColor: INK, background: PAPER }}
         >
           <p
             className="mb-3 font-[family-name:var(--display)] text-[13px] tracking-wide"
