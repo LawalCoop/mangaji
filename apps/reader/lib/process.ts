@@ -174,6 +174,16 @@ export async function processPage(
     if (sprite) lifted.push({ det: text, sprite });
   }
 
+  // Un globo sin texto detectado adentro casi siempre tiene texto que el modelo no vio: dos
+  // globos encimados, o un texto con poca confianza. Se prueba con la caja del globo; los
+  // filtros de `lift` —fondo de papel, tinta repartida en letras— descartan los que no.
+  for (const balloon of balloons) {
+    if (lifted.some((l) => insideBox(balloon.bbox, l.det.bbox) >= 0.5)) continue;
+    const text: Detection = { ...balloon, cls: "text" };
+    const sprite = await lift(ctx, text, pageArea, shapes);
+    if (sprite) lifted.push({ det: text, sprite });
+  }
+
   // Los bloques se agrupan por globo: el modelo parte un diálogo largo en varios.
   const taken = new Set<number>();
   const groups: { box: Detection["bbox"]; parts: Sprite[] }[] = [];
