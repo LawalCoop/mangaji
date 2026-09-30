@@ -26,7 +26,7 @@ import {
 const pageTitle = (t: Messages) => t.how.title;
 
 /** Cuánto del ancho de su columna ocupa el titular, por idioma, medido con cada uno. */
-const HEADLINE_FIT = { es: 20.4, en: 25, ja: 13.5 } as const;
+const HEADLINE_FIT = { es: 20.7, en: 25.3, ja: 13.7 } as const;
 
 const SCENES = [OpenScene, PrepareScene, DetectScene, PolygonScene, OrderScene, LiftScene, DirectScene, SaveScene];
 
@@ -65,9 +65,10 @@ function How() {
       <div className="relative mx-auto flex w-full max-w-[1440px] flex-col gap-[18px]">
         <SiteHeader link={{ href: "/", label: t.site.reader }} />
 
-        {/* Hero: el titular a un lado; al otro, de qué se trata y el índice. */}
-        <section className="grid gap-[18px] lg:grid-cols-[minmax(0,1.15fr)_minmax(0,1fr)]">
-          <div className="panel @container flex flex-col justify-center px-6 py-10 sm:px-10 sm:py-14" style={panel}>
+        {/* Hero: armado como el de la portada. A la izquierda, en papel, el titular y de qué
+            se trata; a la derecha, en el negro de pantalla donde allá va la demo, el índice. */}
+        <section className="grid gap-[18px] lg:grid-cols-[minmax(0,1fr)_minmax(300px,0.42fr)]">
+          <div className="panel @container flex flex-col justify-center px-6 py-10 sm:px-10 sm:py-12" style={panel}>
             <h1 className="relative" style={{ lineHeight: 0.92 }}>
               <span className="sr-only">{H.headlineLabel}</span>
               {[
@@ -84,7 +85,7 @@ function How() {
                     position: i === 2 ? "relative" : "absolute",
                     left: layer.x,
                     top: layer.y,
-                    fontSize: `clamp(2.4rem, ${HEADLINE_FIT[lang]}cqi, 9rem)`,
+                    fontSize: `clamp(2.4rem, ${HEADLINE_FIT[lang]}cqi, 12.5rem)`,
                     letterSpacing: "-0.01em",
                     color: layer.color,
                   }}
@@ -95,33 +96,40 @@ function How() {
                 </span>
               ))}
             </h1>
-          </div>
-
-          <div className="panel flex flex-col gap-7 px-6 py-8 sm:px-10 sm:py-10" style={panel}>
-            <p className="text-[17px] font-medium leading-[1.65] sm:text-[19px]" style={{ color: "#24242A" }}>
+            <p
+              className="relative mt-8 max-w-[34em] text-[17px] font-medium leading-[1.6] sm:text-[20px]"
+              style={{ color: "#24242A" }}
+            >
               {H.intro}
             </p>
-            <nav aria-label={H.stepsLabel}>
-              <ol className="grid gap-x-6 gap-y-1 sm:grid-cols-2">
-                {H.steps.map((s, i) => (
-                  <li key={s.title}>
-                    <a
-                      href={`#etapa-${i + 1}`}
-                      className="group flex items-baseline gap-3 py-1.5 text-[16px] font-bold"
-                      style={{ color: INK }}
-                    >
-                      <span className="w-7 shrink-0 font-[family-name:var(--display)] text-[18px] font-normal tabular-nums" style={{ color: MAGENTA }}>
-                        {number(i)}
-                      </span>
-                      <span className="underline decoration-transparent decoration-2 underline-offset-4 transition-colors group-hover:decoration-current">
-                        {s.title}
-                      </span>
-                    </a>
-                  </li>
-                ))}
-              </ol>
-            </nav>
           </div>
+
+          <nav
+            aria-label={H.stepsLabel}
+            className="panel flex flex-col justify-center gap-5 px-6 py-8 sm:px-8 sm:py-10"
+            style={screenPanel}
+          >
+            <h2 className="trim-caps font-[family-name:var(--display)] text-[26px] leading-none text-[#F4EFE3]">
+              {H.stepsLabel}
+            </h2>
+            <ol className="flex flex-col">
+              {H.steps.map((s, i) => (
+                <li key={s.title} className="border-t border-[#2A2A31] first:border-t-0">
+                  <a
+                    href={`#etapa-${i + 1}`}
+                    className="group flex items-baseline gap-4 py-2.5 text-[16px] font-bold text-[#E4DFD3] transition-colors hover:text-white focus-visible:outline focus-visible:outline-3 focus-visible:outline-offset-2 focus-visible:outline-[#FF2E88]"
+                  >
+                    <span className="w-7 shrink-0 font-[family-name:var(--display)] text-[19px] font-normal tabular-nums text-[#FF2E88]">
+                      {number(i)}
+                    </span>
+                    <span className="underline decoration-transparent decoration-2 underline-offset-4 transition-colors group-hover:decoration-[#00D9F5]">
+                      {s.title}
+                    </span>
+                  </a>
+                </li>
+              ))}
+            </ol>
+          </nav>
         </section>
 
         {/* Las etapas: texto y pantalla, alternando de lado. */}
