@@ -416,6 +416,18 @@ describe("borrado del diálogo", () => {
     expect(inkOf(px, w, h, { x: 2, y: 2, w: 56, h: 56 })).toBeNull();
   });
 
+  it("no toma por texto una trama fina", () => {
+    // El gris de puntitos detrás de un dibujo, con algún trazo más grande: la mayor parte de
+    // la tinta queda en motas de un par de píxeles.
+    const w = 60;
+    const h = 60;
+    const px = new Uint8ClampedArray(w * h * 4).fill(255);
+    for (let y = 1; y < h - 1; y += 3) for (let x = 1; x < w - 1; x += 3) px.set([0, 0, 0, 255], (y * w + x) * 4);
+    for (let y = 10; y < 50; y++) for (let x = 28; x < 31; x++) px.set([0, 0, 0, 255], (y * w + x) * 4);
+    for (let y = 20; y < 23; y++) for (let x = 5; x < 25; x++) px.set([0, 0, 0, 255], (y * w + x) * 4);
+    expect(inkOf(px, w, h, { x: 2, y: 2, w: 56, h: 56 })).toBeNull();
+  });
+
   it("el sprite se lleva la tinta original, no el papel que quedó en su lugar", () => {
     const w = 40;
     const h = 40;

@@ -24,6 +24,8 @@ const MIN_BLOBS = 2;
 /** Una mancha que llena así su caja, y casi cuadrada, es un punto. */
 const DOT_FILL = 0.6;
 const DOT_ASPECT = 0.7;
+/** Con más de esta fracción de la tinta en motas sueltas, es trama y no texto. */
+const MAX_SPECK_SHARE = 0.08;
 /** Con más de esta fracción de puntos, es trama y no texto. */
 const MAX_DOT_SHARE = 0.5;
 /** Techo de tamaño de un bloque, como fracción de la página. */
@@ -74,6 +76,14 @@ function looksLikeText(alpha: Uint8Array, w: number, h: number): boolean {
   if (!total) return false;
 
   const { stats } = components(ink, w, h);
+
+  // Una trama fina —el gris de puntitos de un fondo— deja buena parte de la tinta en motas
+  // de pocos píxeles. Las letras casi nada: medido en diálogos reales, como mucho el 0,4 %;
+  // en una trama detrás de unas llamas, el 26 %.
+  let specks = 0;
+  for (const s of stats) if (s.area < 6) specks += s.area;
+  if (specks / total > MAX_SPECK_SHARE) return false;
+
   const blobs = stats.filter((s) => s.area >= 6);
   const areas = blobs.map((s) => s.area);
   if (areas.length < MIN_BLOBS) return false;
