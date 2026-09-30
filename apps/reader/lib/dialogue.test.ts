@@ -214,6 +214,21 @@ describe("borrado del diálogo", () => {
     for (let y = 6; y < 30; y++) expect(px[(y * w + 30) * 4]).toBeLessThan(60);
   });
 
+  it("dentro del globo borra entera la letra que se asoma fuera de la silueta", () => {
+    const w = 40;
+    const h = 40;
+    // La silueta del modelo es aproximada: con dos globos encimados, parte del texto queda
+    // fuera y esa letra no se borraba. Si está mayormente adentro, se va entera.
+    const { px, alpha } = block(w, h, [[14, 10, 5, 20]]);
+    const inside = new Uint8Array(w * h);
+    for (let y = 0; y < 24; y++) for (let x = 0; x < w; x++) inside[y * w + x] = 1;
+    const seed = { x: 6, y: 4, w: 28, h: 30 };
+
+    erase(px, alpha, w, h, 255, inside, seed);
+
+    expect(darkest(px)).toBeGreaterThan(245);
+  });
+
   it("el sprite se lleva la tinta original, no el papel que quedó en su lugar", () => {
     const w = 40;
     const h = 40;

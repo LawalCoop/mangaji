@@ -92,6 +92,8 @@ const EDGE_SHARE = 0.25;
 const ERASE_GAIN = 8;
 /** Cuánto se mete la máscara del globo hacia adentro, para no comerse su contorno. */
 const INSET = 3;
+/** Qué parte de una mancha tiene que caer dentro del globo para borrarse. */
+const INSIDE_SHARE = 0.5;
 
 /**
  * Borra la tinta reemplazándola por lo que la rodea, difuminado.
@@ -166,21 +168,28 @@ export function erase(
     // roza y se blanqueaba el rectángulo entero, que al revelarse el texto volvía a medias
     // y se veía como un cuadro claro alrededor del globo.
     //
-    // Y solo adentro de la silueta del globo, que ya viene metida unos píxeles: un tramo del
-    // contorno que cae entero dentro de la región no roza su borde y pasaba por letra, así
-    // que el globo quedaba recortado donde el texto le quedaba cerca.
+    // Y la mancha tiene que caer mayormente adentro de la silueta del globo, que ya viene
+    // metida unos píxeles: así un tramo del contorno cercano al texto, que por forma pasa por
+    // letra, se queda. Se decide por mancha y no por píxel porque la silueta del modelo es
+    // aproximada: una letra que se asoma un poco afuera se borra entera igual.
+    const within = new Int32Array(stats.length + 1);
+    for (let p = 0; p < count; p++) if (labels[p] && inside[p]) within[labels[p]]++;
+    for (const stat of stats) {
+      if (within[stat.label] < stat.area * INSIDE_SHARE) isLetter[stat.label] = 0;
+    }
     for (let p = 0; p < count; p++) {
-      cover[p] =
-        inside[p] && labels[p] && isLetter[labels[p]] ? Math.min(1, (alpha[p] / 255) * ERASE_GAIN) : 0;
+      cover[p] = labels[p] && isLetter[labels[p]] ? Math.min(1, (alpha[p] / 255) * ERASE_GAIN) : 0;
     }
   } else {
     for (let p = 0; p < count; p++) cover[p] = labels[p] && isLetter[labels[p]] ? 1 : 0;
   }
 
-  // El trazo se agranda un poco antes de taparlo, para alcanzar su halo.
-  // Dentro de un globo el halo tampoco puede salirse de su silueta: el contorno queda cerca.
+  // El trazo se agranda un poco antes de taparlo, para alcanzar su halo; pero lo que se
+  // agranda no puede pisar un trazo que se queda, como el contorno del globo.
   boxBlur(cover, w, h, SPREAD);
-  for (let p = 0; p < count; p++) cover[p] = inside && !inside[p] ? 0 : Math.min(1, cover[p] * 3);
+  for (let p = 0; p < count; p++) {
+    cover[p] = labels[p] && !isLetter[labels[p]] ? 0 : Math.min(1, cover[p] * 3);
+  }
 
   // Un bloque cuyo fondo es papel es el interior de un globo, y ahí el hueco se tapa con
   // papel liso. Tomar el promedio de alrededor parece más fino pero es justo lo que ensucia:
@@ -248,6 +257,16 @@ function balloonMask(
   return erode(mask, w, h, INSET);
 }
 
+/** El interior de varios globos juntos, cada uno metido hacia adentro por su cuenta. */
+function union(balloons: Point[][], x0: number, y0: number, w: number, h: number): Uint8Array {
+  const mask = new Uint8Array(w * h);
+  for (const balloon of balloons) {
+    const one = balloonMask(balloon, x0, y0, w, h);
+    for (let p = 0; p < mask.length; p++) mask[p] |= one[p];
+  }
+  return mask;
+}
+
 /**
  * Levanta el texto de la página y devuelve su sprite.
  *
@@ -312,8 +331,11 @@ export async function lift(
   const before = new Uint8ClampedArray(px);
 
   // El globo que aloja a este texto, si hay alguno: adentro se borra sin reparos.
-  const host = balloons.find((polygon) => insidePolygon(polygon, text.bbox) >= 0.5);
-  const cover = erase(px, alpha, cw, ch, paper, host && balloonMask(host, x0, y0, cw, ch), seed);
+  // Si hay globos encimados —dos que se tocan, uno delante del otro—, el texto puede caer
+  // entre los dos, así que el interior es la unión de todos los que lo tocan.
+  const hosts = balloons.filter((polygon) => insidePolygon(polygon, text.bbox) > 0);
+  const inside = hosts.length ? union(hosts, x0, y0, cw, ch) : undefined;
+  const cover = erase(px, alpha, cw, ch, paper, inside, seed);
   ctx.putImageData(region, x0, y0);
 
   const { data, taken } = spriteOf(before, alpha, cover, cw, ch);
