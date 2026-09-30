@@ -158,8 +158,10 @@ export function Toolbar(props: ToolbarProps) {
         <span className="w-11 shrink-0 text-right text-[11px] tabular-nums text-neutral-400 max-sm:hidden">
           {Math.round(progress * 100)}%
         </span>
+        {/* La barra también corre de derecha a izquierda: el principio del tomo a la derecha. */}
         <input
           type="range"
+          dir="rtl"
           min={1}
           max={Math.max(pages, 1)}
           value={page}
@@ -173,17 +175,19 @@ export function Toolbar(props: ToolbarProps) {
       </div>
 
       <div className="pointer-events-auto flex flex-wrap items-center gap-2 text-xs">
+        {/* De derecha a izquierda, como se lee el manga y como las flechas del teclado:
+            lo que apunta a la izquierda avanza. */}
         <Group>
-          <Button onClick={() => props.onPage(page - 1)} disabled={page <= 1} title={T.prevPage}>
+          <Button onClick={() => props.onPage(page + 1)} disabled={page >= pages} title={T.nextPage}>
             ‹‹
           </Button>
-          <Button onClick={() => props.onStep(-1)} title={T.prevPanel}>
+          <Button onClick={() => props.onStep(1)} title={T.nextPanel}>
             ‹
           </Button>
-          <Button onClick={() => props.onStep(1)} title={T.nextPanel}>
+          <Button onClick={() => props.onStep(-1)} title={T.prevPanel}>
             ›
           </Button>
-          <Button onClick={() => props.onPage(page + 1)} disabled={page >= pages} title={T.nextPage}>
+          <Button onClick={() => props.onPage(page - 1)} disabled={page <= 1} title={T.prevPage}>
             ››
           </Button>
         </Group>
