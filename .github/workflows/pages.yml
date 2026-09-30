@@ -34,6 +34,12 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: gh release download models --repo "$GITHUB_REPOSITORY" --pattern '*.onnx' --dir apps/reader/public/models
 
+      # El tomo de ejemplo, un episodio de uso libre: tampoco va en la historia del repo.
+      - name: Ejemplo
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release download samples --repo "$GITHUB_REPOSITORY" --pattern '*.cbz' --dir apps/reader/public/samples
+
       - name: Build
         env:
           # Con el dominio propio (mangaji.lawal.coop) la app vive en la raíz: sin ruta base.

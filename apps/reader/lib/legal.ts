@@ -65,6 +65,7 @@ export const LEGAL: Record<Lang, Legal> = {
         title: "Propiedad intelectual",
         body: [
           "El código de Mangaji es software libre bajo licencia MIT. Las obras que abras siguen perteneciendo a sus autores y editoriales. Los nombres y marcas de terceros mencionados pertenecen a sus respectivos titulares.",
+          "El ejemplo que ofrece el sitio es el primer episodio de «Give My Regards to Black Jack» (edición en inglés), de Shuho Sato, quien permite el uso libre de su obra, comercial o no, sin aviso previo. El autor conserva sus derechos.",
         ],
       },
       {
@@ -144,6 +145,7 @@ export const LEGAL: Record<Lang, Legal> = {
         title: "Intellectual property",
         body: [
           "Mangaji's code is free software under the MIT license. The works you open remain the property of their authors and publishers. Third-party names and trademarks mentioned belong to their respective owners.",
+          "The sample offered on the site is the first episode of “Give My Regards to Black Jack” (English edition) by Shuho Sato, who allows free use of his work, commercial or not, without prior notice. The author retains his rights.",
         ],
       },
       {
@@ -221,6 +223,7 @@ export const LEGAL: Record<Lang, Legal> = {
         title: "知的財産",
         body: [
           "Mangaji のコードは MIT ライセンスのフリーソフトウェアです。あなたが開く作品の権利は、引き続きその作者と出版社に帰属します。記載されている第三者の名称や商標は、それぞれの権利者に帰属します。",
+          "本サイトのサンプルは、佐藤秀峰『ブラックジャックによろしく』第 1 話（英語版）です。作者は商用・非商用を問わず、事前連絡なしでの自由な二次利用を認めています。著作権は作者に帰属します。",
         ],
       },
       {

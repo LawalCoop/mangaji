@@ -40,6 +40,7 @@ tests/fixtures/out/
 # modelos y runtime, pesados: los modelos se regeneran con `mangacut export-onnx` y los
 # runtimes se copian de node_modules con `pnpm vendor`
 apps/reader/public/models/
+apps/reader/public/samples/
 apps/reader/public/ort/
 apps/reader/public/libarchive/
 apps/reader/public/coi-serviceworker.min.js

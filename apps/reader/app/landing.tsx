@@ -2,7 +2,9 @@
 
 import Link from "next/link";
 import { useRef, useState } from "react";
+import { asset } from "@/lib/base";
 import { useI18n } from "@/lib/i18n";
+import { SAMPLE_PATH } from "@/lib/sample";
 import { ReadingDemo } from "./reading-demo";
 import { CYAN, INK, MAGENTA, PAPER, SiteFooter, SiteHeader, TONE, panel, screenPanel } from "./site";
 
@@ -288,6 +290,24 @@ export function Landing({ status, message, onFile, onUrl, download }: Props) {
               <p className="max-w-[26em] text-[15px] font-medium leading-snug sm:text-[17px]" style={{ color: "#3A3A42" }}>
                 {L.formats}
               </p>
+
+              {/* Para probar sin tener un tomo: un episodio que el autor liberó para uso libre. */}
+              <div className="flex max-w-[26em] flex-col gap-1">
+                <p className="text-[15px] font-medium leading-snug" style={{ color: "#3A3A42" }}>
+                  {L.sampleAsk}{" "}
+                  <button
+                    type="button"
+                    disabled={status === "loading"}
+                    onClick={() => onUrl(new URL(asset(SAMPLE_PATH), window.location.href).href)}
+                    className="font-bold text-[#0B0B0C] underline decoration-[#FF2E88] decoration-[3px] underline-offset-4 hover:text-[#FF2E88] focus-visible:outline focus-visible:outline-4 focus-visible:outline-offset-2 focus-visible:outline-[#FF2E88] disabled:opacity-40"
+                  >
+                    {L.sampleTry}
+                  </button>
+                </p>
+                <p className="text-[13px] leading-snug" style={{ color: "#5A5A62" }}>
+                  {L.sampleCredit}
+                </p>
+              </div>
             </div>
 
             {/* O desde un link: práctico cuando el tomo está en la nube y no en el teléfono. */}
