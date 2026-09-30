@@ -14,7 +14,17 @@ type Props = {
   status: "idle" | "loading" | "error";
   message?: string;
   onFile: (file: File) => void;
+  /** Abrir desde un link en vez de un archivo del dispositivo. */
+  onUrl: (link: string) => void;
+  /** Progreso de la descarga, si el tomo se está bajando de un link. */
+  download: { received: number; total: number | null } | null;
 };
+
+/** Megas, con un decimal solo cuando hace falta. */
+function mb(bytes: number): string {
+  const v = bytes / 1024 / 1024;
+  return v < 10 ? v.toFixed(1) : String(Math.round(v));
+}
 
 /** Lo que se puede abrir. */
 const ACCEPT = ".cbza,.cbz,.cbr,.zip,.rar,application/zip";
@@ -34,8 +44,10 @@ const panel = {
 /** Trama de puntos, el gris del manga. */
 const TONE = `radial-gradient(circle at 1px 1px, ${INK}2e 1.6px, transparent 0) 0 0 / 9px 9px`;
 
-export function Landing({ status, message, onFile }: Props) {
+export function Landing({ status, message, onFile, onUrl, download }: Props) {
   const [over, setOver] = useState(false);
+  const [link, setLink] = useState("");
+  const downloading = status === "loading" && download !== null;
   const input = useRef<HTMLInputElement>(null);
 
   const take = (file: File | undefined) => {
@@ -249,7 +261,7 @@ export function Landing({ status, message, onFile }: Props) {
                 className="relative font-[family-name:var(--font-display)] leading-none"
                 style={{ fontSize: "clamp(1.5rem,4.5vw,2.875rem)", color: INK }}
               >
-                {status === "loading" ? "ABRIENDO…" : "SUBÍ TU TOMO ACÁ"}
+                {downloading ? "BAJANDO…" : status === "loading" ? "ABRIENDO…" : "SUBÍ TU TOMO ACÁ"}
               </p>
             </div>
 
@@ -287,11 +299,73 @@ export function Landing({ status, message, onFile }: Props) {
             <p className="text-[16px] font-medium sm:text-[19px]" style={{ color: "#3A3A42" }}>
               Abrí un .cbz o .cbr. Si ya lo procesaste antes, el .cbza carga directo.
             </p>
+
+            {/* O desde un link: práctico cuando el tomo está en la nube y no en el teléfono. */}
+            <form
+              className="flex w-full max-w-lg flex-col gap-2"
+              onSubmit={(e) => {
+                e.preventDefault();
+                onUrl(link);
+              }}
+            >
+              <label
+                htmlFor="tomo-link"
+                className="font-[family-name:var(--font-display)] text-[15px] tracking-wide"
+                style={{ color: "#3A3A42" }}
+              >
+                O PEGÁ UN LINK
+              </label>
+              <div className="flex gap-2">
+                <input
+                  id="tomo-link"
+                  type="url"
+                  inputMode="url"
+                  autoComplete="off"
+                  autoCapitalize="off"
+                  spellCheck={false}
+                  placeholder="https://www.dropbox.com/…/tomo.cbz"
+                  value={link}
+                  onChange={(e) => setLink(e.target.value)}
+                  className="min-w-0 flex-1 border-[3px] bg-white px-3 py-2.5 text-[16px] outline-none focus-visible:outline focus-visible:outline-4 focus-visible:outline-offset-2"
+                  style={{ borderColor: INK, color: INK, outlineColor: MAGENTA }}
+                />
+                <button
+                  type="submit"
+                  disabled={!link.trim() || status === "loading"}
+                  className="shrink-0 border-[3px] px-4 font-[family-name:var(--font-display)] text-[18px] transition-opacity disabled:opacity-40"
+                  style={{ borderColor: INK, background: INK, color: PAPER }}
+                >
+                  ABRIR
+                </button>
+              </div>
+              <p className="text-[13px] leading-snug" style={{ color: "#5A5A62" }}>
+                Links directos, de Dropbox o de GitHub. Google Drive todavía no.
+              </p>
+            </form>
+
+            {downloading && download && (
+              <div className="flex w-full max-w-lg flex-col gap-1.5" role="status">
+                <div className="h-3 w-full border-[3px]" style={{ borderColor: INK }}>
+                  <div
+                    className="h-full"
+                    style={{
+                      background: INK,
+                      width: download.total ? `${(download.received / download.total) * 100}%` : "35%",
+                    }}
+                  />
+                </div>
+                <p className="text-[13px] font-medium tabular-nums" style={{ color: "#3A3A42" }}>
+                  {download.total
+                    ? `${Math.floor((download.received / download.total) * 100)} % · ${mb(download.received)} de ${mb(download.total)} MB`
+                    : `${mb(download.received)} MB`}
+                </p>
+              </div>
+            )}
             <p className="max-w-lg text-[14px] font-medium leading-relaxed" style={{ color: "#5A5A62" }}>
               {status === "error" && message ? (
                 <span style={{ color: "#C31D45", fontWeight: 700 }}>{message}</span>
               ) : (
-                "El archivo no sale de tu máquina: se abre y se procesa en tu navegador, sin pasar por ningún servidor."
+                "El archivo se abre y se procesa en tu navegador. Si viene de un link, se baja directo del sitio donde está, sin pasar por ningún servidor nuestro."
               )}
             </p>
           </div>

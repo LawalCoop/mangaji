@@ -7,6 +7,7 @@ import { Camera, type Viewport } from "@/lib/camera";
 import { Director } from "@/lib/director";
 import { PageFrameSource, PanelFrameSource } from "@/lib/frame-sources";
 import { LiveSource } from "@/lib/live-archive";
+import { download, LinkError, resolveLink, type DownloadProgress } from "@/lib/remote";
 import { DEFAULT_MOOD, MOOD_ORDER, MOODS, type MoodId } from "@/lib/mood";
 import { Music } from "@/lib/music";
 import { Stage } from "@/lib/stage";
@@ -134,6 +135,9 @@ export default function ReaderView() {
   const chromeHeld = useRef(false);
   /** Ayuda de gestos, la primera vez que se lee con el dedo. */
   const [hint, setHint] = useState(false);
+  /** Descarga en curso de un tomo pedido por link. */
+  const [fetching, setFetching] = useState<DownloadProgress | null>(null);
+  const fetchAbort = useRef<AbortController | null>(null);
 
   const scheduleHide = useCallback(() => {
     if (chromeTimer.current) clearTimeout(chromeTimer.current);
@@ -552,6 +556,7 @@ export default function ReaderView() {
   const open = useCallback(
     async (input: File) => {
       teardown();
+      setFetching(null);
       setStatus({ kind: "loading" });
       setTitle(input.name);
       setArchived(false);
@@ -600,6 +605,44 @@ export default function ReaderView() {
     },
     [build, mount, teardown],
   );
+
+  /**
+   * Abre un tomo desde un link: lo baja directo al navegador y sigue como si se lo hubiera
+   * elegido del dispositivo.
+   */
+  const openUrl = useCallback(
+    async (link: string) => {
+      fetchAbort.current?.abort();
+      const abort = new AbortController();
+      fetchAbort.current = abort;
+
+      try {
+        const url = resolveLink(link);
+        setStatus({ kind: "loading" });
+        setFetching({ received: 0, total: null });
+        const file = await download(url, setFetching, abort.signal);
+        if (abort.signal.aborted) return;
+        await open(file);
+      } catch (err) {
+        if (abort.signal.aborted) return;
+        setFetching(null);
+        const message =
+          err instanceof LinkError ? err.message : `No se pudo bajar: ${(err as Error).message}`;
+        setStatus({ kind: "error", message });
+      } finally {
+        if (fetchAbort.current === abort) fetchAbort.current = null;
+      }
+    },
+    [open],
+  );
+
+  // `?url=` en la dirección abre ese tomo de una: sirve para mandar un link que ya lo abre.
+  useEffect(() => {
+    const link = new URLSearchParams(window.location.search).get("url");
+    if (link) void openUrl(link);
+  }, [openUrl]);
+
+  useEffect(() => () => fetchAbort.current?.abort(), []);
 
   /** Aplica el mood a lo que ya está andando. */
   const applyMood = useCallback((id: MoodId) => {
@@ -947,7 +990,12 @@ export default function ReaderView() {
           <Landing
             status={status.kind === "error" ? "error" : status.kind === "loading" ? "loading" : "idle"}
             message={status.kind === "error" ? status.message : undefined}
-            onFile={(file) => void open(file)}
+            onFile={(file) => {
+              fetchAbort.current?.abort();
+              void open(file);
+            }}
+            onUrl={(link) => void openUrl(link)}
+            download={fetching}
           />
         </div>
       )}
