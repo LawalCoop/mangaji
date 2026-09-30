@@ -1,6 +1,6 @@
 import { zipSync } from "fflate";
 import type { Note } from "./notes";
-import { choosePanels, dedupe } from "./panels";
+import { choosePanels, dedupe, fillOrphans, inkGrid } from "./panels";
 // Solo el tipo: así quien únicamente empaqueta no se trae los modelos ni el runtime.
 import type { Detector, Detection } from "./detector";
 import { insidePolygon, lift, type Sprite } from "./dialogue";
@@ -128,11 +128,20 @@ export async function processPage(
   ctx.drawImage(bitmap, 0, 0);
 
   report?.({ key: "findingPanels" });
-  const dets = await detector.detect(ctx.getImageData(0, 0, width, height));
+  const pixels = ctx.getImageData(0, 0, width, height);
+  const dets = await detector.detect(pixels);
 
   let panels = choosePanels(
     dets.filter((d) => d.cls === "frame" && polygonArea(d.polygon) / pageArea >= MIN_PANEL_AREA),
     pageArea,
+  );
+  // Lo que el modelo no vio: zonas grandes con dibujo que no son de ninguna viñeta.
+  panels.push(
+    ...fillOrphans(
+      panels,
+      dets.filter((d) => d.cls === "frame"),
+      inkGrid(pixels.data, width, height),
+    ),
   );
   const balloons = dedupe(dets.filter((d) => d.cls === "balloon"));
   const texts = dets.filter((d) => d.cls === "text");

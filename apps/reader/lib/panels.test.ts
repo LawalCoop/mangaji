@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { Detection } from "./detector";
-import { choosePanels } from "./panels";
+import { choosePanels, fillOrphans, inkGrid } from "./panels";
 
 const PAGE = 1000 * 1400;
 
@@ -48,5 +48,50 @@ describe("elección de viñetas", () => {
 
   it("debajo del piso de confianza no se considera", () => {
     expect(choosePanels([...bottom, frame(0.05, 50, 0, 950, 730)], PAGE)).toHaveLength(3);
+  });
+});
+
+describe("viñetas que el modelo no ve", () => {
+  const W = 600;
+  const H = 840;
+
+  /** Una página RGBA blanca, con tinta en los rectángulos dados. */
+  function page(inked: { x: number; y: number; w: number; h: number }[]) {
+    const data = new Uint8ClampedArray(W * H * 4).fill(255);
+    for (const r of inked) {
+      for (let y = r.y; y < r.y + r.h; y++) {
+        for (let x = r.x; x < r.x + r.w; x++) {
+          // Trama: un píxel de cada dos oscuro, como el sombreado de una viñeta.
+          if ((x + y) % 2) data.set([0, 0, 0], (y * W + x) * 4);
+        }
+      }
+    }
+    return inkGrid(data, W, H);
+  }
+
+  const bottom = frame(0.97, 20, 440, 560, 380);
+
+  it("una zona grande con dibujo y sin viñeta pasa a ser una", () => {
+    const grid = page([{ x: 20, y: 20, w: 560, h: 400 }, { x: 20, y: 440, w: 560, h: 380 }]);
+    const added = fillOrphans([bottom], [bottom], grid);
+    expect(added).toHaveLength(1);
+    expect(added[0].bbox.y).toBeLessThan(60);
+    expect(added[0].bbox.h).toBeGreaterThan(320);
+  });
+
+  it("si el modelo propuso algo ahí, aunque sea con 4 %, se usa su forma", () => {
+    const grid = page([{ x: 20, y: 20, w: 560, h: 400 }, { x: 20, y: 440, w: 560, h: 380 }]);
+    const weak = frame(0.04, 15, 10, 570, 415);
+    expect(fillOrphans([bottom], [bottom, weak], grid)).toEqual([weak]);
+  });
+
+  it("una calle fina con tinta no es una viñeta", () => {
+    const grid = page([{ x: 20, y: 424, w: 560, h: 12 }, { x: 20, y: 440, w: 560, h: 380 }]);
+    expect(fillOrphans([bottom], [bottom], grid)).toHaveLength(0);
+  });
+
+  it("sin ninguna viñeta no hace nada: ahí ya se usa la página entera", () => {
+    const grid = page([{ x: 20, y: 20, w: 560, h: 800 }]);
+    expect(fillOrphans([], [], grid)).toHaveLength(0);
   });
 });
