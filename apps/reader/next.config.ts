@@ -1,10 +1,14 @@
 import type { NextConfig } from "next";
 
 /**
- * Publicación estática para GitHub Pages, que sirve la app bajo `/<repo>/`. Se activa
- * definiendo `NEXT_PUBLIC_BASE_PATH`; sin ella, la app corre en la raíz como siempre.
+ * Publicación estática para GitHub Pages. Se activa con `STATIC_EXPORT=1`.
+ *
+ * Con el dominio propio (mangaji.lawal.coop) la app vive en la raíz. Si alguna vez se
+ * publica bajo una ruta —como `lawalcoop.github.io/mangaji/`—, esa ruta va en
+ * `NEXT_PUBLIC_BASE_PATH`, y todo lo que se pide a mano la lleva (ver lib/base.ts).
  */
-const basePath = process.env.NEXT_PUBLIC_BASE_PATH;
+const staticExport = process.env.STATIC_EXPORT === "1";
+const basePath = process.env.NEXT_PUBLIC_BASE_PATH || undefined;
 
 /**
  * Aislamiento de origen.
@@ -17,7 +21,7 @@ const basePath = process.env.NEXT_PUBLIC_BASE_PATH;
  * En la exportación estática no hay servidor que mande cabeceras: ahí las agrega
  * `coi-serviceworker`, que carga el layout.
  */
-const nextConfig: NextConfig = basePath
+const nextConfig: NextConfig = staticExport
   ? { output: "export", basePath, trailingSlash: true, images: { unoptimized: true } }
   : {
       async headers() {

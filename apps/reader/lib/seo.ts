@@ -8,7 +8,7 @@ import type { Metadata } from "next";
  * y sus variantes por idioma se declaran como alternativas.
  */
 
-export const SITE_URL = "https://lawalcoop.github.io/mangaji";
+export const SITE_URL = "https://mangaji.lawal.coop";
 export const LAWAL_URL = "https://lawal.coop";
 export const REPO_URL = "https://github.com/LawalCoop/mangaji";
 
