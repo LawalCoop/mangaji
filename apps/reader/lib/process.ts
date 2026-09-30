@@ -1,6 +1,6 @@
 import { zipSync } from "fflate";
 import type { Note } from "./notes";
-import { choosePanels, dedupe, fillOrphans, inkGrid, isFolio, ownersOf } from "./panels";
+import { choosePanels, dedupe, fillAroundTexts, fillOrphans, inkGrid, isFolio, ownersOf } from "./panels";
 // Solo el tipo: así quien únicamente empaqueta no se trae los modelos ni el runtime.
 import type { Detector, Detection } from "./detector";
 import { lift, type Sprite } from "./dialogue";
@@ -166,6 +166,16 @@ export async function processPage(
       },
     ];
   }
+
+  // Y lo que ni eso: una viñeta casi blanca con un texto, que queda suelto. El folio no.
+  panels.push(
+    ...fillAroundTexts(
+      panels,
+      [...texts, ...balloons].map((d) => d.bbox).filter((b) => !isFolio(b, panels, width, height)),
+      width,
+      height,
+    ),
+  );
 
   report?.({ key: "liftingDialogue", n: panels.length });
 

@@ -73,7 +73,7 @@ const GRID_COLS = 60;
 /** Una celda con al menos esta fracción de píxeles oscuros tiene dibujo. */
 const INK_CELL = 0.04;
 /** Una zona huérfana tiene que ser grande, compacta y no pisar viñetas. */
-const ORPHAN = { minArea: 0.06, minSide: 0.12, minFill: 0.6, maxCovered: 0.2, inside: 0.8 };
+const ORPHAN = { minArea: 0.06, minSide: 0.12, minFill: 0.6, maxCovered: 0.2, inside: 0.8, mostly: 0.6, maxCoveredLoose: 0.1 };
 
 /** Qué celdas de la grilla tienen dibujo: fracción de píxeles oscuros por celda. */
 export type InkGrid = { cols: number; rows: number; cellW: number; cellH: number; ink: Float32Array };
@@ -198,6 +198,8 @@ export function fillOrphans(panels: Detection[], frames: Detection[], grid: InkG
 
   const added: Detection[] = [];
   const all = () => [...panels, ...added];
+  const overlapShare = (f: Detection) =>
+    all().reduce((sum, p) => sum + intersection(f.bbox, p.bbox), 0) / (f.bbox.w * f.bbox.h);
   for (const z of zones) {
     const w = z.x1 - z.x0 + 1;
     const h = z.y1 - z.y0 + 1;
@@ -224,8 +226,16 @@ export function fillOrphans(panels: Detection[], frames: Detection[], grid: InkG
         (f) =>
           f.conf >= SHAPE_CONF &&
           !panels.includes(f) &&
-          intersection(box, f.bbox) / area >= ORPHAN.inside &&
-          all().reduce((s, p) => s + intersection(f.bbox, p.bbox), 0) / (f.bbox.w * f.bbox.h) < ORPHAN.maxCovered,
+          // El candidato contiene la zona, o cae dentro de ella y cubre la mayor parte: en
+          // el segundo caso la zona abarcaba además otra viñeta que el modelo no ve, y el
+          // candidato marca dónde termina esta.
+          // En ese caso además tiene que respetar a las vecinas: un candidato flojo que se mete
+          // sobre ellas les roba los globos.
+          (intersection(box, f.bbox) / area >= ORPHAN.inside
+            ? overlapShare(f) < ORPHAN.maxCovered
+            : intersection(box, f.bbox) / (f.bbox.w * f.bbox.h) >= ORPHAN.inside &&
+              intersection(box, f.bbox) / area >= ORPHAN.mostly &&
+              overlapShare(f) < ORPHAN.maxCoveredLoose),
       )
       .sort((a, b) => b.conf - a.conf)[0];
 
@@ -279,16 +289,24 @@ export function ownersOf(box: Box, panels: Detection[]): number[] {
   }
   if (top >= CLEAR_SHARE) {
     const owners = shares.map((s, i) => (s >= SHARED_BALLOON ? i : -1)).filter((i) => i >= 0);
-    // Una viñeta de relleno —un rectángulo, sin confianza del modelo— no comparte el globo
-    // con una detectada: su borde es aproximado y el globo es de la otra.
-    const detected = owners.filter((i) => panels[i].conf > 0);
+    // Una viñeta de relleno —un rectángulo, o un candidato que el modelo apenas vio— no
+    // comparte el globo con una detectada: su borde es aproximado y el globo es de la otra.
+    const detected = owners.filter((i) => panels[i].conf >= RESCUE_CONF);
     return detected.length ? detected : owners;
   }
 
+  // Por caja, también ganan las detectadas: la caja de un relleno es aproximada.
   const area = Math.max(box.w * box.h, 1);
   const overlaps = panels.map((p) => intersection(box, p.bbox) / area);
-  const most = Math.max(...overlaps);
-  if (most > 0) return [overlaps.indexOf(most)];
+  const pick = (candidates: number[]) => {
+    const best = candidates.reduce((a, b) => (overlaps[b] > overlaps[a] ? b : a), candidates[0]);
+    return overlaps[best] > 0 ? best : -1;
+  };
+  const indices = panels.map((_, i) => i);
+  const fromDetected = pick(indices.filter((i) => panels[i].conf >= RESCUE_CONF));
+  if (fromDetected >= 0) return [fromDetected];
+  const fromAny = pick(indices);
+  if (fromAny >= 0) return [fromAny];
 
   const cx = box.x + box.w / 2;
   const cy = box.y + box.h / 2;
@@ -342,4 +360,57 @@ export function isFolio(box: Box, panels: Detection[], width: number, height: nu
   if (!top && !bottom) return false;
   const area = Math.max(box.w * box.h, 1);
   return panels.every((p) => intersection(box, p.bbox) / area < 0.2);
+}
+
+/** Tamaño mínimo de la viñeta que se arma alrededor de un texto suelto: fracción de la hoja. */
+const LONE_MIN_AREA = 0.04;
+
+/**
+ * Viñetas alrededor de textos que no caen en ninguna.
+ *
+ * Una viñeta casi toda blanca —una cara y un globo— no la ve el modelo ni se rellena por
+ * tinta, y su texto iba a parar a la viñeta más cercana: aparecía fuera de lugar y la cámara
+ * no lo encuadraba. Si hay un texto suelto, el hueco que lo rodea —entre las viñetas vecinas
+ * y el borde de la hoja— es su viñeta.
+ */
+export function fillAroundTexts(panels: Detection[], boxes: Box[], width: number, height: number): Detection[] {
+  const added: Detection[] = [];
+  for (const box of boxes) {
+    const all = [...panels, ...added];
+    const area = Math.max(box.w * box.h, 1);
+    if (all.some((p) => intersection(box, p.bbox) / area >= 0.2)) continue;
+
+    // Primero arriba y abajo, con las viñetas que comparten columna con el texto; después
+    // a los costados, con las que comparten esa franja.
+    const overlapsX = (b: Box, x0: number, x1: number) => b.x < x1 && b.x + b.w > x0;
+    const overlapsY = (b: Box, y0: number, y1: number) => b.y < y1 && b.y + b.h > y0;
+    let y0 = 0;
+    let y1 = height;
+    for (const { bbox: b } of all) {
+      if (!overlapsX(b, box.x, box.x + box.w)) continue;
+      if (b.y + b.h <= box.y) y0 = Math.max(y0, b.y + b.h);
+      if (b.y >= box.y + box.h) y1 = Math.min(y1, b.y);
+    }
+    let x0 = 0;
+    let x1 = width;
+    for (const { bbox: b } of all) {
+      if (!overlapsY(b, y0, y1)) continue;
+      if (b.x + b.w <= box.x) x0 = Math.max(x0, b.x + b.w);
+      if (b.x >= box.x + box.w) x1 = Math.min(x1, b.x);
+    }
+    const rect = { x: x0, y: y0, w: x1 - x0, h: y1 - y0 };
+    if (rect.w * rect.h < LONE_MIN_AREA * width * height) continue;
+    added.push({
+      cls: "frame",
+      conf: 0,
+      bbox: rect,
+      polygon: [
+        [rect.x, rect.y],
+        [rect.x + rect.w, rect.y],
+        [rect.x + rect.w, rect.y + rect.h],
+        [rect.x, rect.y + rect.h],
+      ],
+    });
+  }
+  return added;
 }

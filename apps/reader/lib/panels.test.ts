@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { Detection } from "./detector";
-import { choosePanels, fillOrphans, inkGrid, isFolio, ownersOf } from "./panels";
+import { choosePanels, fillAroundTexts, fillOrphans, inkGrid, isFolio, ownersOf } from "./panels";
 
 const PAGE = 1000 * 1400;
 
@@ -83,6 +83,16 @@ describe("viñetas que el modelo no ve", () => {
     const added = fillOrphans([column], [column], grid);
     expect(added).toHaveLength(1);
     expect(added[0].bbox.x).toBeGreaterThanOrEqual(290);
+  });
+
+  it("usa el candidato flojo que marca dónde termina la zona", () => {
+    // La zona abarca la viñeta de arriba y, unida por el dibujo que cruza la calle, la de
+    // abajo. El modelo propone la de arriba con poca confianza: se usa, y la de abajo queda
+    // libre (tomo 1, p. 31).
+    const grid = page([{ x: 20, y: 20, w: 560, h: 800 }]);
+    const weak = frame(0.03, 20, 20, 560, 560);
+    const added = fillOrphans([frame(0.97, 700, 700, 10, 10)], [weak], grid);
+    expect(added).toEqual([weak]);
   });
 
   it("una zona grande con dibujo y sin viñeta pasa a ser una", () => {
@@ -170,5 +180,20 @@ describe("relleno junto a viñetas detectadas", () => {
   it("no comparte un globo entre una viñeta detectada y un relleno", () => {
     const panels = [frame(0.96, 60, 300, 470, 280), frame(0, 430, 0, 600, 1300)];
     expect(ownersOf({ x: 343, y: 304, w: 188, h: 243 }, panels)).toEqual([0]);
+  });
+});
+
+describe("viñeta alrededor de un texto suelto", () => {
+  it("arma la viñeta con el hueco que rodea al texto", () => {
+    // Una viñeta casi blanca abajo, con un texto, que ni el modelo ni la tinta ven.
+    const panels = [frame(0.96, 0, 0, 1000, 1000)];
+    const added = fillAroundTexts(panels, [{ x: 600, y: 1100, w: 200, h: 50 }], 1000, 1400);
+    expect(added).toHaveLength(1);
+    expect(added[0].bbox).toEqual({ x: 0, y: 1000, w: 1000, h: 400 });
+  });
+
+  it("no toca los textos que ya están en una viñeta", () => {
+    const panels = [frame(0.96, 0, 0, 1000, 1400)];
+    expect(fillAroundTexts(panels, [{ x: 600, y: 1100, w: 200, h: 50 }], 1000, 1400)).toHaveLength(0);
   });
 });

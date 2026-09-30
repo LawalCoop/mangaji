@@ -40,6 +40,8 @@ const CLASSES: DetectionClass[] = ["frame", "text", "balloon"];
  */
 const CONF: Record<DetectionClass, number> = { frame: SHAPE_CONF, balloon: 0.25, text: 0.05 };
 const TEXT_MODEL_CONF = 0.12;
+/** Umbral de la pasada sobre la página invertida, que además exige fondo oscuro. */
+const INVERTED_TEXT_CONF = 0.08;
 /** Con esta fracción de la página en manchas negras se busca también letra blanca sobre negro. */
 const INVERT_DARK_SHARE = 0.03;
 /** Dos bloques de texto que se solapan más que esto son el mismo, visto por ambos modelos. */
@@ -164,8 +166,10 @@ export class Detector {
       // Solo lo que de verdad es letra clara sobre fondo oscuro. En negativo, una trama de
       // puntos sobre blanco —la letra de una onomatopeya— también parece texto, y se borraba
       // dejando un rectángulo blanco en el dibujo.
-      const light = this.#decodeBoxes(invertedOut, scale, image.width, image.height).filter((d) =>
-        onDark(image, d.bbox),
+      // Con un umbral más bajo que el de la pasada normal: el filtro de fondo oscuro ya es
+      // exigente, y la confianza en negativo sale más justa.
+      const light = this.#decodeBoxes(invertedOut, scale, image.width, image.height, INVERTED_TEXT_CONF).filter(
+        (d) => onDark(image, d.bbox),
       );
       fromText = mergeText(fromText, light);
     }
@@ -262,6 +266,7 @@ export class Detector {
     scale: number,
     width: number,
     height: number,
+    minConf = TEXT_MODEL_CONF,
   ): Detection[] {
     const preds = output[Object.keys(output)[0]];
     const rows = preds.data as Float32Array;
@@ -272,7 +277,7 @@ export class Detector {
       const base = i * stride;
       const conf = rows[base + 4];
       // Este modelo solo tiene dos clases y la que interesa es el texto.
-      if (conf < TEXT_MODEL_CONF || rows[base + 5] !== 1) continue;
+      if (conf < minConf || rows[base + 5] !== 1) continue;
 
       const x1 = Math.max(0, rows[base] / scale);
       const y1 = Math.max(0, rows[base + 1] / scale);
