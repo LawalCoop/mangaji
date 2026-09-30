@@ -47,16 +47,23 @@ export function Processing({ title, stage, lines, progress, eta }: ProcessingPro
 
   return (
     <div className="relative flex min-h-dvh w-full flex-col overflow-hidden bg-[#121214] px-4 py-6 sm:px-8">
-      {/* Líneas de velocidad girando: la página está en movimiento. */}
+      {/* Líneas de velocidad girando: la página está en movimiento.
+          Gira un cuadrado mucho más grande que la pantalla, no la pantalla misma: un
+          rectángulo del tamaño del viewport deja asomar sus esquinas al rotar. 160vmax
+          cubre la distancia del centro a la esquina más lejana en cualquier proporción. */}
       <div
         aria-hidden
-        className="pointer-events-none absolute inset-0 opacity-40"
+        className="pointer-events-none absolute opacity-40"
         style={{
+          left: "50%",
+          top: "45%",
+          width: "160vmax",
+          height: "160vmax",
           background:
-            "repeating-conic-gradient(from 0deg at 50% 45%, #ffffff 0deg 0.4deg, transparent 0.4deg 2.1deg)",
-          maskImage: "radial-gradient(circle at 50% 45%, transparent 26%, black 76%)",
-          WebkitMaskImage: "radial-gradient(circle at 50% 45%, transparent 26%, black 76%)",
-          transform: `rotate(${tick * 1.6}deg)`,
+            "repeating-conic-gradient(from 0deg, #ffffff 0deg 0.4deg, transparent 0.4deg 2.1deg)",
+          maskImage: "radial-gradient(circle, transparent 15vmax, black 45vmax)",
+          WebkitMaskImage: "radial-gradient(circle, transparent 15vmax, black 45vmax)",
+          transform: `translate(-50%, -50%) rotate(${tick * 1.6}deg)`,
           transition: "transform 420ms linear",
         }}
       />
