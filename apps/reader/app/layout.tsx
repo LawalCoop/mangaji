@@ -1,6 +1,8 @@
 import type { Metadata, Viewport } from "next";
 import { Anton, Zen_Kaku_Gothic_New } from "next/font/google";
 import "./globals.css";
+import { Analytics } from "./analytics";
+import { HOME, LAWAL_URL, SITE_URL, pageMetadata } from "@/lib/seo";
 import { asset } from "@/lib/base";
 
 /** Condensada y pesada: el peso de una onomatopeya. Se usa solo en titulares. */
@@ -18,9 +20,25 @@ const body = Zen_Kaku_Gothic_New({
 });
 
 export const metadata: Metadata = {
-  title: "Mangaji — tu manga, animeizado",
-  description:
-    "Abrí tus CBZ y leelos viñeta por viñeta: la cámara recorre la página y el diálogo aparece cuando le toca.",
+  metadataBase: new URL(`${SITE_URL}/`),
+  applicationName: "Mangaji",
+  authors: [{ name: "Lawal Cooperativa", url: LAWAL_URL }],
+  creator: "Lawal Cooperativa",
+  publisher: "Lawal Cooperativa",
+  keywords: [
+    "lector de manga",
+    "leer manga online",
+    "CBZ",
+    "CBR",
+    "lector CBZ",
+    "lector CBR",
+    "manga reader",
+    "comic reader",
+    "viñeta por viñeta",
+    "software libre",
+  ],
+  robots: { index: true, follow: true },
+  ...pageMetadata(HOME),
 };
 
 /**
@@ -67,6 +85,7 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
       </head>
       <body className="min-h-full flex flex-col overscroll-none font-[family-name:var(--body)]">
         {children}
+        <Analytics />
       </body>
     </html>
   );

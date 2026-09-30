@@ -37,6 +37,8 @@ jobs:
       - name: Build
         env:
           NEXT_PUBLIC_BASE_PATH: /${{ github.event.repository.name }}
+          # El sitio de GoatCounter, como variable del repo: sin ella no se cuentan visitas.
+          NEXT_PUBLIC_GOATCOUNTER: ${{ vars.GOATCOUNTER }}
         run: pnpm build
 
       - uses: actions/upload-pages-artifact@v3

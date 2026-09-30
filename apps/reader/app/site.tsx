@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { asset } from "@/lib/base";
 import { LANGS, useI18n } from "@/lib/i18n";
+import { LAWAL_URL, REPO_URL } from "@/lib/seo";
 
 /**
  * Lo que comparten las páginas del sitio: la paleta, el marco de los cuadros, el
@@ -41,8 +42,7 @@ export const screenPanel = {
 /** Trama de puntos, el gris del manga. */
 export const TONE = `radial-gradient(circle at 1px 1px, ${INK}2e 1.6px, transparent 0) 0 0 / 9px 9px`;
 
-export const LAWAL_URL = "https://lawal.coop";
-export const REPO_URL = "https://github.com/LawalCoop/mangaji";
+export { LAWAL_URL, REPO_URL } from "@/lib/seo";
 
 /** Encabezado: la marca, un link a la otra página y el idioma. */
 export function SiteHeader({ link }: { link: { href: string; label: string } }) {
@@ -152,6 +152,10 @@ export function SiteFooter() {
           </h2>
         </div>
         <p className="text-[15px] leading-relaxed">{L.freeText}</p>
+        {/* Si se cuentan visitas, se dice: el sitio promete no mandar nada a ningún lado. */}
+        {process.env.NEXT_PUBLIC_GOATCOUNTER && (
+          <p className="text-[13px] leading-relaxed text-[#8A8A94]">{t.site.stats}</p>
+        )}
       </div>
 
       <div className="relative flex flex-col gap-4 px-6 py-6 max-md:border-t sm:px-7 md:before:absolute md:before:inset-y-6 md:before:-left-[9px] md:before:w-px md:before:bg-[#2A2A30]" style={{ borderColor: "#2A2A30" }}>

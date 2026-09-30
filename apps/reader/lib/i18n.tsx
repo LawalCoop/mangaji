@@ -23,7 +23,7 @@ const STORAGE_KEY = "mangaji:lang";
 
 const es = {
   meta: {
-    title: "Mangaji — tu manga, animeizado",
+    title: "Mangaji — tu manga, animeizado | Lector de CBZ y CBR online",
   },
   language: "Idioma",
 
@@ -31,6 +31,7 @@ const es = {
     how: "Cómo funciona",
     reader: "Abrir el lector",
     project: "Proyecto",
+    stats: "Contamos las visitas de forma anónima con GoatCounter, sin cookies. Tus tomos no salen de tu dispositivo.",
   },
 
   landing: {
@@ -239,7 +240,7 @@ export type Messages = typeof es;
 
 const en: Messages = {
   meta: {
-    title: "Mangaji — your manga, animated",
+    title: "Mangaji — your manga, animated | Online CBZ & CBR reader",
   },
   language: "Language",
 
@@ -247,6 +248,7 @@ const en: Messages = {
     how: "How it works",
     reader: "Open the reader",
     project: "Project",
+    stats: "We count visits anonymously with GoatCounter, without cookies. Your volumes never leave your device.",
   },
 
   landing: {
@@ -452,7 +454,7 @@ const en: Messages = {
 
 const ja: Messages = {
   meta: {
-    title: "Mangaji — マンガが、動きだす",
+    title: "Mangaji — マンガが、動きだす｜CBZ・CBR オンラインリーダー",
   },
   language: "言語",
 
@@ -460,6 +462,7 @@ const ja: Messages = {
     how: "しくみ",
     reader: "リーダーを開く",
     project: "プロジェクト",
+    stats: "アクセス数は GoatCounter で匿名に集計しています（クッキーは使いません）。単行本のファイルが端末から出ることはありません。",
   },
 
   landing: {
