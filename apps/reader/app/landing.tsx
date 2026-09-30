@@ -200,7 +200,10 @@ export function Landing({ status, message, onFile, onUrl, download }: Props) {
             {/* Desde el dispositivo. */}
             <div className="flex flex-col items-center justify-center gap-5 text-center lg:border-r-[3px] lg:border-dashed lg:pr-12" style={{ borderColor: `${INK}55` }}>
               {/* Globo de diálogo: la instrucción, dicha por la página. */}
-              <div className="relative mb-3 px-10 py-6 sm:px-14 sm:py-7">
+              {/* El margen va en `em`, proporcional a la letra: un bloque rectangular dentro de un
+                  óvalo toca el borde con las esquinas, y con un margen fijo en píxeles la letra
+                  grande quedaba pegada. Con esto el texto ocupa unos dos tercios del ancho. */}
+              <div className="relative mb-3" style={{ fontSize: "clamp(1.5rem,3.6vw,2.5rem)", padding: "0.95em 1.55em 0.8em" }}>
                 {/* Globo y cola son un solo trazo: dibujados por separado, la cola tapaba un
                     tramo del contorno y la unión se veía cortada. */}
                 <svg
@@ -218,10 +221,7 @@ export function Landing({ status, message, onFile, onUrl, download }: Props) {
                     vectorEffect="non-scaling-stroke"
                   />
                 </svg>
-                <p
-                  className="trim-caps relative font-[family-name:var(--display)] leading-none"
-                  style={{ fontSize: "clamp(1.5rem,3.6vw,2.5rem)", color: INK }}
-                >
+                <p className="trim-caps relative font-[family-name:var(--display)] leading-none" style={{ color: INK }}>
                   {downloading ? L.bubbleDownloading : status === "loading" ? L.bubbleOpening : L.bubbleIdle}
                 </p>
               </div>
