@@ -399,6 +399,23 @@ describe("borrado del diálogo", () => {
     expect(px[(8 * w + 8) * 4]).toBeLessThan(60);
   });
 
+  it("no toma por texto una trama de puntos gruesos", () => {
+    // El relleno de una onomatopeya: muchas manchas separadas, como letras, pero puntos.
+    const w = 60;
+    const h = 60;
+    const px = new Uint8ClampedArray(w * h * 4).fill(255);
+    for (let cy = 5; cy < h - 3; cy += 9) {
+      for (let cx = 5; cx < w - 3; cx += 9) {
+        for (let y = -2; y <= 2; y++) {
+          for (let x = -2; x <= 2; x++) {
+            if (x * x + y * y <= 5) px.set([0, 0, 0, 255], ((cy + y) * w + cx + x) * 4);
+          }
+        }
+      }
+    }
+    expect(inkOf(px, w, h, { x: 2, y: 2, w: 56, h: 56 })).toBeNull();
+  });
+
   it("el sprite se lleva la tinta original, no el papel que quedó en su lugar", () => {
     const w = 40;
     const h = 40;
