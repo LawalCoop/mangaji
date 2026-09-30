@@ -41,7 +41,7 @@ const CLASSES: DetectionClass[] = ["frame", "text", "balloon"];
  * que solo las usa para cubrir zonas que ninguna viñeta segura reclama.
  */
 const CONF: Record<DetectionClass, number> = { frame: SHAPE_CONF, balloon: 0.25, text: 0.05 };
-const TEXT_MODEL_CONF = 0.12;
+const TEXT_MODEL_CONF = 0.1;
 /** Umbral de la pasada sobre la página invertida, que además exige fondo oscuro. */
 export const INVERTED_TEXT_CONF = 0.08;
 /** Con esta fracción de la página en manchas negras se busca también letra blanca sobre negro. */
