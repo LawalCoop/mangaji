@@ -124,6 +124,8 @@ export function erase(
   const count = w * h;
   const radius = Math.max(2, Math.min(FEATHER, Math.floor(Math.min(w, h) / 2)));
   const cover = new Float32Array(count);
+  /** Píxeles que se borran de una mancha que no se va entera. */
+  const partial = new Uint8Array(count);
 
   const ink = new Uint8Array(count);
   for (let p = 0; p < count; p++) ink[p] = alpha[p] > INK_LEVEL ? 1 : 0;
@@ -177,8 +179,26 @@ export function erase(
     for (const stat of stats) {
       if (within[stat.label] < stat.area * INSIDE_SHARE) isLetter[stat.label] = 0;
     }
+    //
+    // Una línea que toca el contorno —la más ancha del globo, con letras gruesas que se
+    // tocan entre sí— forma una sola mancha con él y no pasa por letra. De esa mancha se
+    // borra lo que cae dentro de la silueta y de la caja del texto: la línea se va y el
+    // contorno, que queda fuera de la silueta metida, se queda.
+    const inSeed = (p: number) => {
+      if (!seed) return true;
+      const x = p % w;
+      const y = (p / w) | 0;
+      return x >= seed.x && x < seed.x + seed.w && y >= seed.y && y < seed.y + seed.h;
+    };
+    const gain = (p: number) => Math.min(1, (alpha[p] / 255) * ERASE_GAIN);
     for (let p = 0; p < count; p++) {
-      cover[p] = labels[p] && isLetter[labels[p]] ? Math.min(1, (alpha[p] / 255) * ERASE_GAIN) : 0;
+      const label = labels[p];
+      if (!label) cover[p] = 0;
+      else if (isLetter[label]) cover[p] = gain(p);
+      else if (touched[label] && inside[p] && inSeed(p)) {
+        cover[p] = gain(p);
+        partial[p] = 1;
+      } else cover[p] = 0;
     }
   } else {
     for (let p = 0; p < count; p++) cover[p] = labels[p] && isLetter[labels[p]] ? 1 : 0;
@@ -188,7 +208,7 @@ export function erase(
   // agranda no puede pisar un trazo que se queda, como el contorno del globo.
   boxBlur(cover, w, h, SPREAD);
   for (let p = 0; p < count; p++) {
-    cover[p] = labels[p] && !isLetter[labels[p]] ? 0 : Math.min(1, cover[p] * 3);
+    cover[p] = labels[p] && !isLetter[labels[p]] && !partial[p] ? 0 : Math.min(1, cover[p] * 3);
   }
 
   // Un bloque cuyo fondo es papel es el interior de un globo, y ahí el hueco se tapa con

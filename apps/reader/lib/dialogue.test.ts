@@ -180,7 +180,9 @@ describe("borrado del diálogo", () => {
         alpha[y * w + x] = Math.round(((255 - level) * 255) / 255);
       }
     }
-    const inside = new Uint8Array(w * h).fill(1);
+    // La silueta del globo, metida hacia adentro: el contorno y el gris quedan afuera.
+    const inside = new Uint8Array(w * h);
+    for (let y = 11; y < 29; y++) for (let x = 11; x < 29; x++) inside[y * w + x] = 1;
     const seed = { x: 7, y: 7, w: 26, h: 26 };
 
     erase(px, alpha, w, h, 255, inside, seed);
@@ -227,6 +229,28 @@ describe("borrado del diálogo", () => {
     erase(px, alpha, w, h, 255, inside, seed);
 
     expect(darkest(px)).toBeGreaterThan(245);
+  });
+
+  it("dentro del globo borra la línea que toca el contorno sin llevarse el contorno", () => {
+    const w = 40;
+    const h = 40;
+    // El contorno a los costados y una línea de texto que lo toca de lado a lado: juntos son
+    // una sola mancha y la línea quedaba a la vista.
+    const { px, alpha } = block(w, h, [
+      [4, 4, 2, 32],
+      [34, 4, 2, 32],
+      [6, 12, 28, 5],
+    ]);
+    const inside = new Uint8Array(w * h);
+    for (let y = 4; y < 36; y++) for (let x = 9; x < 31; x++) inside[y * w + x] = 1;
+    const seed = { x: 6, y: 10, w: 28, h: 10 };
+
+    erase(px, alpha, w, h, 255, inside, seed);
+
+    // La línea se fue en lo que cae dentro del globo…
+    for (let x = 11; x < 29; x++) expect(px[(14 * w + x) * 4]).toBeGreaterThan(230);
+    // …y el contorno sigue entero.
+    for (let y = 4; y < 36; y++) expect(px[(y * w + 4) * 4]).toBeLessThan(60);
   });
 
   it("el sprite se lleva la tinta original, no el papel que quedó en su lugar", () => {
