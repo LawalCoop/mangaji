@@ -253,6 +253,25 @@ describe("borrado del diálogo", () => {
     for (let y = 4; y < 36; y++) expect(px[(y * w + 4) * 4]).toBeLessThan(60);
   });
 
+  it("dentro del globo borra también las letras que la caja dejó afuera", () => {
+    const w = 40;
+    const h = 40;
+    // La caja del detector cubre solo la mitad derecha del texto: con dos globos encimados
+    // pasa seguido, y la otra mitad quedaba a la vista antes de tiempo.
+    const { px, alpha } = block(w, h, [
+      [8, 10, 4, 6],
+      [8, 24, 4, 6],
+      [24, 10, 4, 6],
+    ]);
+    const inside = new Uint8Array(w * h);
+    for (let y = 4; y < 36; y++) for (let x = 4; x < 36; x++) inside[y * w + x] = 1;
+    const seed = { x: 20, y: 6, w: 14, h: 12 };
+
+    erase(px, alpha, w, h, 255, inside, seed);
+
+    expect(darkest(px)).toBeGreaterThan(245);
+  });
+
   it("el sprite se lleva la tinta original, no el papel que quedó en su lugar", () => {
     const w = 40;
     const h = 40;

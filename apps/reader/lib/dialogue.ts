@@ -176,8 +176,15 @@ export function erase(
     // aproximada: una letra que se asoma un poco afuera se borra entera igual.
     const within = new Int32Array(stats.length + 1);
     for (let p = 0; p < count; p++) if (labels[p] && inside[p]) within[labels[p]]++;
+    //
+    // Adentro del globo no hace falta que la caja la haya tocado: el modelo corta seguido la
+    // caja —más con dos globos encimados, que ve como uno— y las letras de afuera quedaban a
+    // la vista. Lo que está en el globo y tiene forma de letra se va con el resto.
     for (const stat of stats) {
-      if (within[stat.label] < stat.area * INSIDE_SHARE) isLetter[stat.label] = 0;
+      const label = stat.label;
+      const reached = touched[label] || within[label] > 0;
+      const letter = contacts[label] / border <= EDGE_SHARE && within[label] >= stat.area * INSIDE_SHARE;
+      isLetter[label] = reached && letter ? 1 : 0;
     }
     //
     // Una línea que toca el contorno —la más ancha del globo, con letras gruesas que se
@@ -298,17 +305,35 @@ export async function lift(
   text: Detection,
   pageArea: number,
   balloons: Point[][] = [],
+  maxArea = MAX_TEXT_AREA_RATIO,
 ): Promise<Sprite | null> {
   const { x, y, w, h } = text.bbox;
-  if (w * h > MAX_TEXT_AREA_RATIO * pageArea) return null; // es dibujo, no diálogo
+  if (w * h > maxArea * pageArea) return null; // es dibujo, no diálogo
+
+  // Los globos que tocan el texto. Si hay globos encimados —dos que se tocan, uno delante del
+  // otro—, el texto puede caer entre los dos, así que el interior es la unión de todos.
+  const hosts = balloons.filter((polygon) => insidePolygon(polygon, text.bbox) > 0);
 
   // Se trabaja con bastante aire alrededor de la caja, no porque haya que borrar tanto sino
   // para ver las letras enteras: la caja del detector recorta, y una letra que la cruza tiene
-  // que poder seguirse hasta donde termina.
-  const x0 = Math.max(0, Math.floor(x) - MARGIN);
-  const y0 = Math.max(0, Math.floor(y) - MARGIN);
-  const cw = Math.min(ctx.canvas.width - x0, Math.ceil(w) + (Math.floor(x) - x0) + MARGIN);
-  const ch = Math.min(ctx.canvas.height - y0, Math.ceil(h) + (Math.floor(y) - y0) + MARGIN);
+  // que poder seguirse hasta donde termina. Con globo, la región lo abarca entero: el texto
+  // que la caja dejó afuera también es de ese globo.
+  let left = x;
+  let top = y;
+  let right = x + w;
+  let bottom = y + h;
+  for (const polygon of hosts) {
+    for (const [px, py] of polygon) {
+      left = Math.min(left, px);
+      top = Math.min(top, py);
+      right = Math.max(right, px);
+      bottom = Math.max(bottom, py);
+    }
+  }
+  const x0 = Math.max(0, Math.floor(left) - MARGIN);
+  const y0 = Math.max(0, Math.floor(top) - MARGIN);
+  const cw = Math.min(ctx.canvas.width - x0, Math.ceil(right) - x0 + MARGIN);
+  const ch = Math.min(ctx.canvas.height - y0, Math.ceil(bottom) - y0 + MARGIN);
   if (cw < 3 || ch < 3) return null;
 
   const region = ctx.getImageData(x0, y0, cw, ch);
@@ -351,9 +376,6 @@ export async function lift(
   const before = new Uint8ClampedArray(px);
 
   // El globo que aloja a este texto, si hay alguno: adentro se borra sin reparos.
-  // Si hay globos encimados —dos que se tocan, uno delante del otro—, el texto puede caer
-  // entre los dos, así que el interior es la unión de todos los que lo tocan.
-  const hosts = balloons.filter((polygon) => insidePolygon(polygon, text.bbox) > 0);
   const inside = hosts.length ? union(hosts, x0, y0, cw, ch) : undefined;
   const cover = erase(px, alpha, cw, ch, paper, inside, seed);
   ctx.putImageData(region, x0, y0);

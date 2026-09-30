@@ -4,6 +4,12 @@ import { choosePanels, dedupe, fillOrphans, inkGrid } from "./panels";
 // Solo el tipo: así quien únicamente empaqueta no se trae los modelos ni el runtime.
 import type { Detector, Detection } from "./detector";
 import { insidePolygon, lift, type Sprite } from "./dialogue";
+
+/**
+ * Hasta qué tamaño se prueba levantar el texto de un globo entero, como fracción de la
+ * página. Más que el tope de un bloque de texto: la caja del globo incluye su aire.
+ */
+const BALLOON_TEXT_AREA = 0.12;
 import { readingOrder, type Box } from "./reading-order";
 import { polygonArea, type Point } from "./vision";
 
@@ -180,7 +186,7 @@ export async function processPage(
   for (const balloon of balloons) {
     if (lifted.some((l) => insideBox(balloon.bbox, l.det.bbox) >= 0.5)) continue;
     const text: Detection = { ...balloon, cls: "text" };
-    const sprite = await lift(ctx, text, pageArea, shapes);
+    const sprite = await lift(ctx, text, pageArea, shapes, BALLOON_TEXT_AREA);
     if (sprite) lifted.push({ det: text, sprite });
   }
 
