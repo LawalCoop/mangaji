@@ -284,3 +284,23 @@ export function ownersOf(box: Box, panels: Detection[]): number[] {
   );
   return [gap.indexOf(Math.min(...gap))];
 }
+
+/** Franja de arriba y de abajo de la hoja donde va el folio, como fracción del alto. */
+const FOLIO_BAND = 0.08;
+/** Alto máximo del folio, como fracción del alto de la hoja: una línea. */
+const FOLIO_HEIGHT = 0.04;
+
+/**
+ * ¿Es el folio —"057 Saint Seiya volume 1"— y no un diálogo?
+ *
+ * Para el modelo es texto, y lo es, pero no le habla nadie: va en el margen, fuera de las
+ * viñetas, pegado al borde de arriba o de abajo, y en una sola línea.
+ */
+export function isFolio(box: Box, panels: Detection[], width: number, height: number): boolean {
+  if (box.h > FOLIO_HEIGHT * height) return false;
+  const top = box.y + box.h <= FOLIO_BAND * height;
+  const bottom = box.y >= (1 - FOLIO_BAND) * height;
+  if (!top && !bottom) return false;
+  const area = Math.max(box.w * box.h, 1);
+  return panels.every((p) => intersection(box, p.bbox) / area < 0.2);
+}

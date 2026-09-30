@@ -1,6 +1,6 @@
 import { zipSync } from "fflate";
 import type { Note } from "./notes";
-import { choosePanels, dedupe, fillOrphans, inkGrid, ownersOf } from "./panels";
+import { choosePanels, dedupe, fillOrphans, inkGrid, isFolio, ownersOf } from "./panels";
 // Solo el tipo: así quien únicamente empaqueta no se trae los modelos ni el runtime.
 import type { Detector, Detection } from "./detector";
 import { lift, type Sprite } from "./dialogue";
@@ -174,6 +174,7 @@ export async function processPage(
   const lifted: { det: Detection; sprite: Sprite }[] = [];
   const shapes = balloons.map((b) => b.polygon);
   for (const text of texts) {
+    if (isFolio(text.bbox, panels, width, height)) continue;
     const sprite = await lift(ctx, text, pageArea, shapes);
     if (sprite) lifted.push({ det: text, sprite });
   }

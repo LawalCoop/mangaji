@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { Detection } from "./detector";
-import { choosePanels, fillOrphans, inkGrid, ownersOf } from "./panels";
+import { choosePanels, fillOrphans, inkGrid, isFolio, ownersOf } from "./panels";
 
 const PAGE = 1000 * 1400;
 
@@ -133,5 +133,21 @@ describe("a qué viñeta va cada texto", () => {
   it("comparte el globo que de verdad queda partido entre dos viñetas", () => {
     const panels = [frame(0.9, 0, 0, 500, 700), frame(0.9, 500, 0, 500, 700)];
     expect(ownersOf({ x: 440, y: 100, w: 120, h: 60 }, panels)).toEqual([0, 1]);
+  });
+});
+
+describe("folio", () => {
+  const panels = [frame(0.9, 50, 60, 900, 1240)];
+
+  it("reconoce el número de página al pie, fuera de las viñetas", () => {
+    expect(isFolio({ x: 60, y: 1330, w: 300, h: 30 }, panels, 1000, 1400)).toBe(true);
+  });
+
+  it("no toma por folio un diálogo dentro de una viñeta", () => {
+    expect(isFolio({ x: 100, y: 1250, w: 200, h: 30 }, panels, 1000, 1400)).toBe(false);
+  });
+
+  it("no toma por folio un texto alto, aunque esté en el margen", () => {
+    expect(isFolio({ x: 60, y: 1300, w: 200, h: 90 }, panels, 1000, 1400)).toBe(false);
   });
 });
