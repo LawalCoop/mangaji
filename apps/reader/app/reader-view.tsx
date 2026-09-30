@@ -28,9 +28,10 @@ const TRAVEL_MS = 520;
 /**
  * Apertura: la primera página no aparece, se descubre.
  *
- * La cámara arranca encima del borde superior derecho —donde empieza la lectura del manga—
- * y se abre hasta la portada completa mientras la pantalla se despeja. Es el momento en que
- * el lector tiene que entender de qué se trata, así que se toma su tiempo.
+ * La cámara arranca en un primer plano sobre el centro de la tapa y se aleja, sin moverse de
+ * lado, hasta mostrarla entera mientras la pantalla se despeja. Antes arrancaba corrida hacia
+ * una esquina y viajaba en diagonal, y se leía como un deslizamiento más que como una
+ * apertura. Es el momento en que el lector entiende de qué se trata, así que se toma su tiempo.
  */
 const OPENING = { ms: 2600, zoom: 2.3, curtain: 1100 };
 
@@ -332,12 +333,9 @@ export default function ReaderView() {
               opening = false;
               // Plano cerrado sobre el ángulo por donde se empieza a leer, y desde ahí se
               // abre a la página entera.
-              const close = Camera.fit(fresh.rect, stage.viewport, FIT_MARGIN * OPENING.zoom);
-              stage.camera.cut({
-                scale: close.scale,
-                x: close.x - stage.viewport.w * 0.3,
-                y: close.y + stage.viewport.h * 0.28,
-              });
+              // Primer plano sobre el centro de la tapa, que se abre sin desplazarse hasta
+              // mostrarla entera.
+              stage.camera.cut(Camera.fit(fresh.rect, stage.viewport, FIT_MARGIN * OPENING.zoom));
               stage.camera.glide(to, OPENING.ms * moodRef.current.pace);
               stage.openCurtain(OPENING.curtain);
             } else if (immediate || director.reducedMotion) {

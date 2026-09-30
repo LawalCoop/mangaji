@@ -77,7 +77,9 @@ export function Processing({ title, stage, lines, progress, eta }: ProcessingPro
         }}
       />
 
-      <div className="relative mx-auto flex w-full max-w-4xl flex-1 flex-col justify-center gap-5">
+      {/* Arriba y no centrada: el alto del contenido cambia mientras carga, y centrada la
+          tarjeta subía y bajaba con cada cambio. */}
+      <div className="relative mx-auto flex w-full max-w-4xl flex-1 flex-col justify-start gap-5 pt-[10vh]">
         {/* Guiño: el rumor amenazante, asomando por el costado de la tarjeta. */}
         <span
           aria-hidden
@@ -122,9 +124,10 @@ export function Processing({ title, stage, lines, progress, eta }: ProcessingPro
           </p>
 
           <h1
-            className="font-[family-name:var(--display)] uppercase leading-[0.9]"
+            className="relative whitespace-nowrap font-[family-name:var(--display)] uppercase leading-[0.9]"
             style={{
-              fontSize: "clamp(2.2rem,7vw,5rem)",
+              // En un renglón siempre: "Leyendo la página" en dos agrandaba la tarjeta.
+              fontSize: "clamp(1.9rem,6.5vw,5rem)",
               color: INK,
               textShadow: `0.04em 0 0 ${CYAN}, -0.04em 0 0 ${MAGENTA}`,
             }}
@@ -132,7 +135,7 @@ export function Processing({ title, stage, lines, progress, eta }: ProcessingPro
             {headline(t, stage)}
           </h1>
 
-          <p className="mt-4 text-[16px] font-medium sm:text-[19px]" style={{ color: "#24242A" }}>
+          <p className="relative mt-4 truncate text-[16px] font-medium sm:text-[19px]" style={{ color: "#24242A" }}>
             {detail(t, stage)}
             <span aria-hidden>{".".repeat(1 + (tick % 3))}</span>
           </p>
@@ -173,24 +176,28 @@ export function Processing({ title, stage, lines, progress, eta }: ProcessingPro
             </span>
           </div>
 
-          {eta !== null && (
-            <p className="mt-2 text-[13px] font-medium" style={{ color: "#5A5A62" }}>
-              {P.remaining(etaText(t, eta))}
-            </p>
-          )}
+          {/* Los avisos tienen su lugar reservado: aparecen y se van mientras carga, y sin
+              esto la tarjeta cambiaba de alto. */}
+          <div className="relative min-h-[5rem] sm:min-h-[3.5rem]">
+            {eta !== null && (
+              <p className="mt-2 text-[13px] font-medium" style={{ color: "#5A5A62" }}>
+                {P.remaining(etaText(t, eta))}
+              </p>
+            )}
 
-          {/* Desde el celular pesa: mejor saberlo antes que descubrirlo en la factura. */}
-          {stage?.kind === "models" && (
-            <p className="mt-3 text-[13px] font-medium leading-snug" style={{ color: "#5A5A62" }}>
-              {P.firstTime}
-            </p>
-          )}
+            {/* Desde el celular pesa: mejor saberlo antes que descubrirlo en la factura. */}
+            {stage?.kind === "models" && (
+              <p className="mt-3 text-[13px] font-medium leading-snug" style={{ color: "#5A5A62" }}>
+                {P.firstTime}
+              </p>
+            )}
+          </div>
         </section>
 
         {/* El registro: qué fue encontrando, línea por línea. */}
         <section
           ref={logRef}
-          className="max-h-52 overflow-y-auto border-[4px] px-5 py-4 sm:rotate-[0.5deg]"
+          className="h-52 overflow-y-auto border-[4px] px-5 py-4 sm:rotate-[0.5deg]"
           style={{ borderColor: INK, background: "#0F0F12" }}
         >
           <pre className="whitespace-pre-wrap text-[12px] leading-relaxed sm:text-[13px]">
