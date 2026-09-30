@@ -29,9 +29,10 @@ const es = {
 
   landing: {
     subtitle: "Lector de manga",
-    directionTitle: "SENTIDO DE LECTURA",
-    direction: "De derecha a izquierda y de arriba abajo, como el original en papel.",
-    tagline: "LECTOR DE CBZ Y CBR · TODO PASA EN TU NAVEGADOR",
+    direction: "Se lee de derecha a izquierda y de arriba abajo, como el original en papel.",
+    demoLabel:
+      "Demostración: la cámara recorre una página de manga viñeta por viñeta, de derecha a izquierda, y el diálogo aparece cuando le toca.",
+    tagline: "Lector de CBZ y CBR. Todo pasa en tu navegador.",
     headline: ["TU MANGA,", "ANIMEIZADO"],
     headlineLabel: "Tu manga, animeizado",
     intro:
@@ -157,9 +158,10 @@ const en: Messages = {
 
   landing: {
     subtitle: "Manga reader",
-    directionTitle: "READING DIRECTION",
-    direction: "Right to left and top to bottom, just like the printed original.",
-    tagline: "CBZ & CBR READER · EVERYTHING HAPPENS IN YOUR BROWSER",
+    direction: "Read right to left and top to bottom, just like the printed original.",
+    demoLabel:
+      "Demo: the camera moves through a manga page panel by panel, right to left, and the dialogue appears when it's due.",
+    tagline: "A CBZ and CBR reader. Everything happens in your browser.",
     headline: ["YOUR MANGA,", "ANIMATED"],
     headlineLabel: "Your manga, animated",
     intro:
@@ -283,9 +285,10 @@ const ja: Messages = {
 
   landing: {
     subtitle: "マンガリーダー",
-    directionTitle: "読む方向",
-    direction: "右から左へ、上から下へ。紙の単行本と同じ順番です。",
-    tagline: "CBZ・CBR 対応リーダー · すべてブラウザの中で",
+    direction: "右から左へ、上から下へ。紙の単行本と同じ順番で読みます。",
+    demoLabel:
+      "デモ：カメラがマンガのページを右から左へ、コマごとに進み、セリフはちょうどいいタイミングで現れます。",
+    tagline: "CBZ・CBR 対応リーダー。すべてブラウザの中で。",
     headline: ["マンガが、", "動きだす。"],
     headlineLabel: "マンガが、動きだす。",
     intro:

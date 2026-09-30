@@ -26,6 +26,20 @@ html:lang(ja) [class*="var(--display)"] {
   font-synthesis-weight: none;
 }
 
+/*
+ * Recorta la caja de una línea a la altura de las mayúsculas. Anton trae mucho aire arriba,
+ * y en botones y globos el texto se veía caído aunque la caja estuviera centrada. Donde el
+ * navegador no lo soporta queda como antes.
+ */
+.trim-caps {
+  text-box: trim-both cap alphabetic;
+}
+
+/* Los caracteres japoneses son más altos que una mayúscula latina: recortar los correría. */
+html:lang(ja) .trim-caps {
+  text-box: normal;
+}
+
 body {
   background: #101014;
   color: #ededed;
