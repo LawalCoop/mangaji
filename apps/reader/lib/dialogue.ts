@@ -26,8 +26,9 @@ const DOT_FILL = 0.6;
 const DOT_ASPECT = 0.7;
 /** Con más de esta fracción de la tinta en motas sueltas, es trama y no texto. */
 const MAX_SPECK_SHARE = 0.08;
-/** Con más de esta fracción de puntos, es trama y no texto. */
+/** Con esta fracción de puntos entre las manchas, y esta de la tinta en ellos, es trama. */
 const MAX_DOT_SHARE = 0.5;
+const MIN_DOT_INK = 0.25;
 /** Techo de tamaño de un bloque, como fracción de la página. */
 export const MAX_TEXT_AREA_RATIO = 0.04;
 
@@ -93,13 +94,24 @@ function looksLikeText(alpha: Uint8Array, w: number, h: number): boolean {
   // muchas manchas, pero casi todas son puntos redondos y macizos. Las letras no: son trazos
   // largos, curvas, anillos. Medido en páginas reales, en una trama el 68 % de las manchas
   // son puntos; en diálogos, entre el 11 y el 31 %.
+  //
+  // Pero una línea con muchos puntos suspensivos —"SE... SEIYA... DO...?"— también tiene
+  // media docena de puntos entre pocas letras. Lo que la separa es cuánta tinta llevan: en
+  // el texto, los puntos son poca cosa al lado de las letras (10 %); en la trama, casi un
+  // tercio.
   let dots = 0;
+  let dotInk = 0;
+  let blobInk = 0;
   for (const b of blobs) {
     const bw = b.maxX - b.minX + 1;
     const bh = b.maxY - b.minY + 1;
-    if (b.area / (bw * bh) > DOT_FILL && Math.min(bw, bh) / Math.max(bw, bh) > DOT_ASPECT) dots++;
+    blobInk += b.area;
+    if (b.area / (bw * bh) > DOT_FILL && Math.min(bw, bh) / Math.max(bw, bh) > DOT_ASPECT) {
+      dots++;
+      dotInk += b.area;
+    }
   }
-  return dots / blobs.length < MAX_DOT_SHARE;
+  return !(dots / blobs.length >= MAX_DOT_SHARE && dotInk / blobInk >= MIN_DOT_INK);
 }
 
 /** Cuánto se estira lo que rodea a un trazo para taparlo. */

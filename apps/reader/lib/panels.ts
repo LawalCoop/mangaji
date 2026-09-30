@@ -328,7 +328,7 @@ const CLEAR_SHARE = 0.5;
  * punta de la página— y aparecía mientras se leía esa. Entonces decide la caja de la viñeta,
  * y si tampoco lo toca ninguna, la más cercana.
  */
-export function ownersOf(box: Box, panels: Detection[], tail?: Point): number[] {
+export function ownersOf(box: Box, panels: Detection[], focus?: Point): number[] {
   if (!panels.length) return [];
   const shares = panels.map((p) => insidePolygon(p.polygon, box));
   const top = Math.max(...shares);
@@ -347,10 +347,11 @@ export function ownersOf(box: Box, panels: Detection[], tail?: Point): number[] 
     // comparte el globo con una detectada: su borde es aproximado y el globo es de la otra.
     const detected = owners.filter((i) => panels[i].conf >= RESCUE_CONF);
     const shared = detected.length ? detected : owners;
-    // Un globo partido entre dos viñetas es de la que señala su colita: quien habla está
-    // ahí. Compartirlo lo mostraba al leer la otra, que muchas veces va antes.
-    if (shared.length > 1 && tail) {
-      const pointed = shared.filter((i) => containsPoint(panels[i].polygon as Point[], tail));
+    // Un globo partido entre dos viñetas es de aquella hacia la que mira: la que tiene el
+    // centro de su texto, o su colita. Compartirlo lo mostraba al leer la otra, que muchas
+    // veces va antes.
+    if (shared.length > 1 && focus) {
+      const pointed = shared.filter((i) => containsPoint(panels[i].polygon as Point[], focus));
       if (pointed.length === 1) return pointed;
     }
     return shared;

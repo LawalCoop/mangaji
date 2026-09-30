@@ -43,9 +43,9 @@ const CLASSES: DetectionClass[] = ["frame", "text", "balloon"];
 const CONF: Record<DetectionClass, number> = { frame: SHAPE_CONF, balloon: 0.25, text: 0.05 };
 const TEXT_MODEL_CONF = 0.12;
 /** Umbral de la pasada sobre la página invertida, que además exige fondo oscuro. */
-const INVERTED_TEXT_CONF = 0.08;
+export const INVERTED_TEXT_CONF = 0.08;
 /** Con esta fracción de la página en manchas negras se busca también letra blanca sobre negro. */
-const INVERT_DARK_SHARE = 0.03;
+export const INVERT_DARK_SHARE = 0.03;
 /** Dos bloques de texto que se solapan más que esto son el mismo, visto por ambos modelos. */
 const TEXT_MERGE_IOU = 0.4;
 /** Douglas-Peucker en píxeles: 202 vértices de mediana quedan en unos 20. */
@@ -151,8 +151,8 @@ export class Detector {
     const panelOut = await this.#panels.run({ [this.#panels.inputNames[0]]: tensor });
     const textOut = await this.#text.run({ [this.#text.inputNames[0]]: tensor });
 
-    const fromPanels = this.#decodeSegmentation(panelOut, image, scale, validW, validH);
-    let fromText = this.#decodeBoxes(textOut, scale, image.width, image.height);
+    const fromPanels = decodeSegmentation(panelOut, image, scale, validW, validH);
+    let fromText = decodeBoxes(textOut, scale, image.width, image.height);
 
     // Los modelos aprendieron letra oscura sobre blanco: la letra blanca sobre negro —un
     // grito dentro de una mancha negra— no la ven. Con la página invertida pasa a ser letra
@@ -170,7 +170,7 @@ export class Detector {
       // dejando un rectángulo blanco en el dibujo.
       // Con un umbral más bajo que el de la pasada normal: el filtro de fondo oscuro ya es
       // exigente, y la confianza en negativo sale más justa.
-      const light = this.#decodeBoxes(invertedOut, scale, image.width, image.height, INVERTED_TEXT_CONF)
+      const light = decodeBoxes(invertedOut, scale, image.width, image.height, INVERTED_TEXT_CONF)
         .filter((d) => onDark(image, d.bbox))
         .map((d) => ({ ...d, light: true }));
       fromText = mergeText(fromText, light);
@@ -194,113 +194,115 @@ export class Detector {
     };
   }
 
-  /**
-   * Salida del modelo de segmentación: `[1, 300, 38]` y los prototipos de máscara.
-   *
-   * Las 38 columnas son la caja en xyxy, la confianza, la clase y 32 coeficientes que
-   * multiplican los prototipos para reconstruir la máscara de esa instancia.
-   */
-  #decodeSegmentation(
-    output: Ort.InferenceSession.OnnxValueMapType,
-    image: ImageData,
-    scale: number,
-    validW: number,
-    validH: number,
-  ): Detection[] {
-    const names = Object.keys(output);
-    const preds = output[names[0]];
-    const protos = output[names[1]];
-    const rows = preds.data as Float32Array;
-    const [, count, stride] = preds.dims as number[];
-    const [, channels, protoH, protoW] = protos.dims as number[];
-    const protoData = protos.data as Float32Array;
 
-    const out: Detection[] = [];
-    const vw = Math.round((validW * protoW) / SIZE);
-    const vh = Math.round((validH * protoH) / SIZE);
+}
 
-    for (let i = 0; i < count; i++) {
-      const base = i * stride;
-      const conf = rows[base + 4];
-      const cls = CLASSES[rows[base + 5]] ?? "frame";
-      if (conf < CONF[cls]) continue;
+/**
+ * Salida del modelo de segmentación: `[1, 300, 38]` y los prototipos de máscara.
+ *
+ * Las 38 columnas son la caja en xyxy, la confianza, la clase y 32 coeficientes que
+ * multiplican los prototipos para reconstruir la máscara de esa instancia.
+ */
+export function decodeSegmentation(
+  output: Ort.InferenceSession.OnnxValueMapType,
+  image: ImageData,
+  scale: number,
+  validW: number,
+  validH: number,
+): Detection[] {
+  const names = Object.keys(output);
+  const preds = output[names[0]];
+  const protos = output[names[1]];
+  const rows = preds.data as Float32Array;
+  const [, count, stride] = preds.dims as number[];
+  const [, channels, protoH, protoW] = protos.dims as number[];
+  const protoData = protos.data as Float32Array;
 
-      const x1 = rows[base];
-      const y1 = rows[base + 1];
-      const x2 = rows[base + 2];
-      const y2 = rows[base + 3];
+  const out: Detection[] = [];
+  const vw = Math.round((validW * protoW) / SIZE);
+  const vh = Math.round((validH * protoH) / SIZE);
 
-      // La máscara: sigmoide de la combinación de prototipos, recortada a la caja para que
-      // no sangre a las viñetas vecinas.
-      const bx1 = Math.max(0, Math.floor((x1 * protoW) / SIZE));
-      const by1 = Math.max(0, Math.floor((y1 * protoH) / SIZE));
-      const bx2 = Math.min(vw, Math.ceil((x2 * protoW) / SIZE));
-      const by2 = Math.min(vh, Math.ceil((y2 * protoH) / SIZE));
-      if (bx2 <= bx1 || by2 <= by1) continue;
+  for (let i = 0; i < count; i++) {
+    const base = i * stride;
+    const conf = rows[base + 4];
+    const cls = CLASSES[rows[base + 5]] ?? "frame";
+    if (conf < CONF[cls]) continue;
 
-      const small = new Float32Array(vw * vh);
-      for (let y = by1; y < by2; y++) {
-        for (let x = bx1; x < bx2; x++) {
-          let sum = 0;
-          for (let c = 0; c < channels; c++) {
-            sum += rows[base + 6 + c] * protoData[c * protoH * protoW + y * protoW + x];
-          }
-          small[y * vw + x] = 1 / (1 + Math.exp(-sum));
+    const x1 = rows[base];
+    const y1 = rows[base + 1];
+    const x2 = rows[base + 2];
+    const y2 = rows[base + 3];
+
+    // La máscara: sigmoide de la combinación de prototipos, recortada a la caja para que
+    // no sangre a las viñetas vecinas.
+    const bx1 = Math.max(0, Math.floor((x1 * protoW) / SIZE));
+    const by1 = Math.max(0, Math.floor((y1 * protoH) / SIZE));
+    const bx2 = Math.min(vw, Math.ceil((x2 * protoW) / SIZE));
+    const by2 = Math.min(vh, Math.ceil((y2 * protoH) / SIZE));
+    if (bx2 <= bx1 || by2 <= by1) continue;
+
+    const small = new Float32Array(vw * vh);
+    for (let y = by1; y < by2; y++) {
+      for (let x = bx1; x < bx2; x++) {
+        let sum = 0;
+        for (let c = 0; c < channels; c++) {
+          sum += rows[base + 6 + c] * protoData[c * protoH * protoW + y * protoW + x];
         }
+        small[y * vw + x] = 1 / (1 + Math.exp(-sum));
       }
-
-      const polygon = maskToPolygon(small, vw, vh, image.width, image.height, {
-        x1: bx1,
-        y1: by1,
-        x2: bx2,
-        y2: by2,
-      });
-      if (!polygon) continue;
-
-      out.push({ cls, conf, bbox: boundsOf(polygon), polygon });
     }
-    return out;
+
+    const polygon = maskToPolygon(small, vw, vh, image.width, image.height, {
+      x1: bx1,
+      y1: by1,
+      x2: bx2,
+      y2: by2,
+    });
+    if (!polygon) continue;
+
+    out.push({ cls, conf, bbox: boundsOf(polygon), polygon });
   }
+  return out;
+}
 
-  /** Salida del modelo de texto: `[1, 300, 6]`, solo cajas. */
-  #decodeBoxes(
-    output: Ort.InferenceSession.OnnxValueMapType,
-    scale: number,
-    width: number,
-    height: number,
-    minConf = TEXT_MODEL_CONF,
-  ): Detection[] {
-    const preds = output[Object.keys(output)[0]];
-    const rows = preds.data as Float32Array;
-    const [, count, stride] = preds.dims as number[];
+/** Salida del modelo de texto: `[1, 300, 6]`, solo cajas. */
+export function decodeBoxes(
+  output: Ort.InferenceSession.OnnxValueMapType,
+  scale: number,
+  width: number,
+  height: number,
+  minConf = TEXT_MODEL_CONF,
+): Detection[] {
+  const preds = output[Object.keys(output)[0]];
+  const rows = preds.data as Float32Array;
+  const [, count, stride] = preds.dims as number[];
 
-    const out: Detection[] = [];
-    for (let i = 0; i < count; i++) {
-      const base = i * stride;
-      const conf = rows[base + 4];
-      // Este modelo solo tiene dos clases y la que interesa es el texto.
-      if (conf < minConf || rows[base + 5] !== 1) continue;
+  const out: Detection[] = [];
+  for (let i = 0; i < count; i++) {
+    const base = i * stride;
+    const conf = rows[base + 4];
+    // Este modelo solo tiene dos clases y la que interesa es el texto.
+    if (conf < minConf || rows[base + 5] !== 1) continue;
 
-      const x1 = Math.max(0, rows[base] / scale);
-      const y1 = Math.max(0, rows[base + 1] / scale);
-      const x2 = Math.min(width, rows[base + 2] / scale);
-      const y2 = Math.min(height, rows[base + 3] / scale);
-      if (x2 - x1 < 2 || y2 - y1 < 2) continue;
+    const x1 = Math.max(0, rows[base] / scale);
+    const y1 = Math.max(0, rows[base + 1] / scale);
+    const x2 = Math.min(width, rows[base + 2] / scale);
+    const y2 = Math.min(height, rows[base + 3] / scale);
+    if (x2 - x1 < 2 || y2 - y1 < 2) continue;
 
-      out.push({
-        cls: "text",
-        conf,
-        bbox: { x: x1, y: y1, w: x2 - x1, h: y2 - y1 },
-        polygon: [
-          [x1, y1],
-          [x2, y1],
-          [x2, y2],
-          [x1, y2],
-        ],
-      });
-    }
-    return out;
+    out.push({
+      cls: "text",
+      conf,
+      bbox: { x: x1, y: y1, w: x2 - x1, h: y2 - y1 },
+      polygon: [
+        [x1, y1],
+        [x2, y1],
+        [x2, y2],
+        [x1, y2],
+      ],
+    });
   }
+  return out;
 }
 
 const iou = (a: Detection["bbox"], b: Detection["bbox"]) => {
@@ -312,7 +314,7 @@ const iou = (a: Detection["bbox"], b: Detection["bbox"]) => {
 };
 
 /** Suma los bloques del segundo detector sin duplicar los que el primero ya encontró. */
-function mergeText(primary: Detection[], extra: Detection[]): Detection[] {
+export function mergeText(primary: Detection[], extra: Detection[]): Detection[] {
   const out = [...primary];
   const existing = primary.filter((d) => d.cls === "text");
   for (const det of extra) {
@@ -458,7 +460,7 @@ async function downloadAll(urls: string[], onFraction?: (fraction: number) => vo
  * Se cuentan bloques casi enteramente negros, no píxeles: las líneas de tinta suman un 10 %
  * de negro en cualquier página y no llenan ningún bloque; una mancha negra sí.
  */
-function darkShare(image: ImageData): number {
+export function darkShare(image: ImageData): number {
   const { data, width, height } = image;
   const side = Math.max(8, Math.floor(width / 64));
   let solid = 0;

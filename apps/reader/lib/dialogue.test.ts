@@ -428,6 +428,24 @@ describe("borrado del diálogo", () => {
     expect(inkOf(px, w, h, { x: 2, y: 2, w: 56, h: 56 })).toBeNull();
   });
 
+  it("toma por texto una línea con muchos puntos suspensivos", () => {
+    // "SE... SEIYA... DO...?": la mitad de las manchas son puntos, pero llevan poca tinta al
+    // lado de las letras (tomo 1 de Saint Seiya, p. 21).
+    const w = 80;
+    const h = 40;
+    const px = new Uint8ClampedArray(w * h * 4).fill(255);
+    const ink = (x0: number, y0: number, bw: number, bh: number) => {
+      for (let y = y0; y < y0 + bh; y++) for (let x = x0; x < x0 + bw; x++) px.set([0, 0, 0, 255], (y * w + x) * 4);
+    };
+    for (const x of [6, 20, 34, 48]) {
+      ink(x, 8, 3, 22); // palo
+      ink(x, 8, 9, 3); // techo
+      ink(x + 6, 8, 3, 12); // otro palo
+    }
+    for (const x of [62, 66, 70, 74]) ink(x, 26, 3, 3); // puntos suspensivos
+    expect(inkOf(px, w, h, { x: 2, y: 4, w: 76, h: 32 })).not.toBeNull();
+  });
+
   it("el sprite se lleva la tinta original, no el papel que quedó en su lugar", () => {
     const w = 40;
     const h = 40;

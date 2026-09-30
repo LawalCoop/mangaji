@@ -203,14 +203,21 @@ export async function processPage(
 
   // Los bloques se agrupan por globo: el modelo parte un diálogo largo en varios.
   const taken = new Set<number>();
-  const groups: { box: Detection["bbox"]; parts: Sprite[]; tail?: [number, number] }[] = [];
+  const groups: { box: Detection["bbox"]; parts: Sprite[]; focus?: [number, number] }[] = [];
   for (const balloon of balloons) {
     const mine = lifted
       .map((l, i) => ({ ...l, i }))
       .filter(({ i, det }) => !taken.has(i) && insideBox(balloon.bbox, det.bbox) >= 0.5);
     if (mine.length) {
       mine.forEach(({ i }) => taken.add(i));
-      groups.push({ box: balloon.bbox, parts: mine.map((m) => m.sprite), tail: tailTip(balloon.polygon as [number, number][]) ?? undefined });
+      // Hacia dónde mira el globo, para decidir si queda partido entre dos viñetas: el centro
+      // de su texto. La colita sería lo natural, pero el modelo suele dejarla fuera de la
+      // silueta del globo.
+      const x0 = Math.min(...mine.map((m) => m.det.bbox.x));
+      const y0 = Math.min(...mine.map((m) => m.det.bbox.y));
+      const x1 = Math.max(...mine.map((m) => m.det.bbox.x + m.det.bbox.w));
+      const y1 = Math.max(...mine.map((m) => m.det.bbox.y + m.det.bbox.h));
+      groups.push({ box: balloon.bbox, parts: mine.map((m) => m.sprite), focus: [(x0 + x1) / 2, (y0 + y1) / 2] });
     }
   }
   lifted.forEach((l, i) => {
@@ -218,7 +225,7 @@ export async function processPage(
   });
   for (const balloon of balloons) {
     if (!groups.some((g) => insideBox(balloon.bbox, g.box) > 0.5)) {
-      groups.push({ box: balloon.bbox, parts: [], tail: tailTip(balloon.polygon as [number, number][]) ?? undefined });
+      groups.push({ box: balloon.bbox, parts: [], focus: tailTip(balloon.polygon as [number, number][]) ?? undefined });
     }
   }
 
@@ -226,7 +233,7 @@ export async function processPage(
   const perPanel = new Map<number, { id: string; box: Detection["bbox"]; parts: Sprite[] }[]>();
   groups.forEach((group, gi) => {
     const id = `${pageId}.b${gi}`;
-    for (const owner of ownersOf(group.box, panels, group.tail)) {
+    for (const owner of ownersOf(group.box, panels, group.focus)) {
       perPanel.set(owner, [...(perPanel.get(owner) ?? []), { id, ...group }]);
     }
   });
