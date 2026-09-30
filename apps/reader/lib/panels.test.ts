@@ -71,6 +71,20 @@ describe("viñetas que el modelo no ve", () => {
 
   const bottom = frame(0.97, 20, 440, 560, 380);
 
+  it("una viñeta alta junto a una columna detectada también se rellena", () => {
+    // La zona sin viñeta tiene forma de L —la viñeta alta de la derecha más el dibujo sobre
+    // la columna—, y su caja pisaba la columna: se descartaba por eso (tomo 1, p. 46).
+    const column = frame(0.97, 20, 100, 280, 700);
+    const grid = page([
+      { x: 300, y: 0, w: 280, h: 840 },
+      { x: 150, y: 0, w: 150, h: 90 },
+      { x: 20, y: 100, w: 280, h: 700 },
+    ]);
+    const added = fillOrphans([column], [column], grid);
+    expect(added).toHaveLength(1);
+    expect(added[0].bbox.x).toBeGreaterThanOrEqual(290);
+  });
+
   it("una zona grande con dibujo y sin viñeta pasa a ser una", () => {
     const grid = page([{ x: 20, y: 20, w: 560, h: 400 }, { x: 20, y: 440, w: 560, h: 380 }]);
     const added = fillOrphans([bottom], [bottom], grid);

@@ -203,11 +203,19 @@ export function fillOrphans(panels: Detection[], frames: Detection[], grid: InkG
     const h = z.y1 - z.y0 + 1;
     if (z.n / (cols * rows) < ORPHAN.minArea || w / cols < ORPHAN.minSide || h / rows < ORPHAN.minSide) continue;
     if (z.n / (w * h) < ORPHAN.minFill) continue;
-    let under = 0;
-    for (let y = z.y0; y <= z.y1; y++) for (let x = z.x0; x <= z.x1; x++) under += covered[y * cols + x];
-    if (under / (w * h) >= ORPHAN.maxCovered) continue;
-
+    // Cuánto pisa a las viñetas ya detectadas se mide después de recortarla contra ellas: la
+    // caja sale de una grilla gruesa y se mete sobre la vecina de al lado, y sin recortar una
+    // viñeta alta junto a una columna de viñetas quedaba descartada por eso.
     const box = { x: z.x0 * cellW, y: z.y0 * cellH, w: w * cellW, h: h * cellH };
+    const trimmed = clear(box, panels);
+    const cx0 = Math.max(0, Math.floor(trimmed.x / cellW));
+    const cy0 = Math.max(0, Math.floor(trimmed.y / cellH));
+    const cx1 = Math.min(cols - 1, Math.ceil((trimmed.x + trimmed.w) / cellW) - 1);
+    const cy1 = Math.min(rows - 1, Math.ceil((trimmed.y + trimmed.h) / cellH) - 1);
+    let under = 0;
+    for (let y = cy0; y <= cy1; y++) for (let x = cx0; x <= cx1; x++) under += covered[y * cols + x];
+    if (under / Math.max(1, (cx1 - cx0 + 1) * (cy1 - cy0 + 1)) >= ORPHAN.maxCovered) continue;
+
     const area = box.w * box.h;
     if (added.some((a) => intersection(box, a.bbox) / area >= ORPHAN.inside)) continue;
 
@@ -221,7 +229,7 @@ export function fillOrphans(panels: Detection[], frames: Detection[], grid: InkG
       )
       .sort((a, b) => b.conf - a.conf)[0];
 
-    const rect = shape ? box : clear(box, panels);
+    const rect = shape ? box : trimmed;
     added.push(
       shape ?? {
         cls: "frame",
