@@ -151,3 +151,10 @@ describe("folio", () => {
     expect(isFolio({ x: 60, y: 1300, w: 200, h: 90 }, panels, 1000, 1400)).toBe(false);
   });
 });
+
+describe("relleno junto a viñetas detectadas", () => {
+  it("no comparte un globo entre una viñeta detectada y un relleno", () => {
+    const panels = [frame(0.96, 60, 300, 470, 280), frame(0, 430, 0, 600, 1300)];
+    expect(ownersOf({ x: 343, y: 304, w: 188, h: 243 }, panels)).toEqual([0]);
+  });
+});

@@ -221,16 +221,17 @@ export function fillOrphans(panels: Detection[], frames: Detection[], grid: InkG
       )
       .sort((a, b) => b.conf - a.conf)[0];
 
+    const rect = shape ? box : clear(box, panels);
     added.push(
       shape ?? {
         cls: "frame",
         conf: 0,
-        bbox: box,
+        bbox: rect,
         polygon: [
-          [box.x, box.y],
-          [box.x + box.w, box.y],
-          [box.x + box.w, box.y + box.h],
-          [box.x, box.y + box.h],
+          [rect.x, rect.y],
+          [rect.x + rect.w, rect.y],
+          [rect.x + rect.w, rect.y + rect.h],
+          [rect.x, rect.y + rect.h],
         ],
       },
     );
@@ -269,7 +270,11 @@ export function ownersOf(box: Box, panels: Detection[]): number[] {
     return [whole.reduce((a, b) => (area(b) < area(a) ? b : a))];
   }
   if (top >= CLEAR_SHARE) {
-    return shares.map((s, i) => (s >= SHARED_BALLOON ? i : -1)).filter((i) => i >= 0);
+    const owners = shares.map((s, i) => (s >= SHARED_BALLOON ? i : -1)).filter((i) => i >= 0);
+    // Una viñeta de relleno —un rectángulo, sin confianza del modelo— no comparte el globo
+    // con una detectada: su borde es aproximado y el globo es de la otra.
+    const detected = owners.filter((i) => panels[i].conf > 0);
+    return detected.length ? detected : owners;
   }
 
   const area = Math.max(box.w * box.h, 1);
@@ -283,6 +288,32 @@ export function ownersOf(box: Box, panels: Detection[]): number[] {
     Math.hypot(Math.max(b.x - cx, 0, cx - (b.x + b.w)), Math.max(b.y - cy, 0, cy - (b.y + b.h))),
   );
   return [gap.indexOf(Math.min(...gap))];
+}
+
+/**
+ * Achica el rectángulo de una zona huérfana para que no pise las viñetas vecinas.
+ *
+ * La zona sale de una grilla gruesa y su caja se pasa sobre las vecinas: en una columna de
+ * viñetas junto a una grande, la de relleno se metía cien píxeles sobre la columna, y los
+ * globos de esas viñetas quedaban compartidos con ella y aparecían al leerla. Se recorta del
+ * lado por donde entra cada vecina, si con eso no pierde más de la mitad.
+ */
+function clear(box: Box, panels: Detection[]): Box {
+  let { x, y, w, h } = box;
+  for (const { bbox: p } of panels) {
+    const ox = Math.min(x + w, p.x + p.w) - Math.max(x, p.x);
+    const oy = Math.min(y + h, p.y + p.h) - Math.max(y, p.y);
+    if (ox <= 0 || oy <= 0) continue;
+    let next: Box;
+    if (ox < oy) {
+      // La vecina entra por un costado.
+      next = p.x + p.w / 2 < x + w / 2 ? { x: p.x + p.w, y, w: x + w - (p.x + p.w), h } : { x, y, w: p.x - x, h };
+    } else {
+      next = p.y + p.h / 2 < y + h / 2 ? { x, y: p.y + p.h, w, h: y + h - (p.y + p.h) } : { x, y, w, h: p.y - y };
+    }
+    if (next.w > 0 && next.h > 0 && next.w * next.h >= (box.w * box.h) / 2) ({ x, y, w, h } = next);
+  }
+  return { x, y, w, h };
 }
 
 /** Franja de arriba y de abajo de la hoja donde va el folio, como fracción del alto. */
