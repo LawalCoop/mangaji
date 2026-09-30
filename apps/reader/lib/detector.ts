@@ -1,6 +1,7 @@
 import type * as Ort from "onnxruntime-web";
 import { boundsOf, convexHull, largestComponent, open, polygonArea, resizeToPlanes, simplify, traceContour, type Point } from "./vision";
 import { asset } from "./base";
+import type { Note } from "./notes";
 
 /**
  * Detección de viñetas, globos y texto en el navegador.
@@ -44,7 +45,7 @@ const CONVEX_RATIO = 0.93;
 /** Gris del relleno alrededor de la página, el mismo que usa Ultralytics. */
 const PAD = 114;
 
-export type Progress = (stage: string, detail?: string) => void;
+export type Progress = (note: Note) => void;
 
 /**
  * El entorno de onnxruntime se configura una sola vez por página, porque estos ajustes solo
@@ -87,10 +88,7 @@ export class Detector {
     const hasGpu =
       "gpu" in navigator && Boolean(await (navigator as unknown as { gpu?: GPU }).gpu?.requestAdapter());
     Detector.backend = hasGpu ? "webgpu" : "wasm";
-    onProgress?.(
-      "backend",
-      hasGpu ? "acelerado por GPU" : "sin GPU: va a tardar bastante más",
-    );
+    onProgress?.({ key: hasGpu ? "gpu" : "noGpu" });
 
     const options: Ort.InferenceSession.SessionOptions = {
       executionProviders: [Detector.backend],
@@ -101,9 +99,9 @@ export class Detector {
       logSeverityLevel: 3,
     };
 
-    onProgress?.("modelo", "cargando el detector de viñetas");
+    onProgress?.({ key: "loadingPanels" });
     const panels = await ort.InferenceSession.create(asset("/models/panels.onnx"), options);
-    onProgress?.("modelo", "cargando el detector de diálogo");
+    onProgress?.({ key: "loadingDialogue" });
     const text = await ort.InferenceSession.create(asset("/models/text.onnx"), options);
 
     return new Detector(ort, panels, text);

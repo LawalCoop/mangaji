@@ -1,3 +1,4 @@
+import { ProblemError } from "./notes";
 /**
  * Acceso al archivo de manga desde el hilo principal.
  *
@@ -40,11 +41,11 @@ export class CbzSource implements ArchiveSource {
   private constructor(worker: Worker) {
     this.#worker = worker;
     this.#worker.onmessage = (ev: MessageEvent) => {
-      const { id, ok, error, ...rest } = ev.data;
+      const { id, ok, problem, ...rest } = ev.data;
       const p = this.#pending.get(id);
       if (!p) return;
       this.#pending.delete(id);
-      ok ? p.resolve(rest) : p.reject(new Error(error));
+      ok ? p.resolve(rest) : p.reject(new ProblemError(problem));
     };
   }
 
@@ -61,7 +62,7 @@ export class CbzSource implements ArchiveSource {
     const { isRar, readRar } = await import("./rar");
     const opened = (await isRar(file))
       ? await readRar(file as File).then((pages) => {
-          if (!pages.length) throw new Error("El CBR no contiene imágenes");
+          if (!pages.length) throw new ProblemError({ code: "noImages" });
           return source.#send({
             kind: "openFiles",
             files: pages.map((p) => ({ name: p.name, blob: p.file })),

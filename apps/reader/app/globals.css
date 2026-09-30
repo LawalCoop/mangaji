@@ -8,6 +8,22 @@
 /* Los glifos japoneses vienen de una hoja aparte con subset mínimo. */
 :root {
   --font-kana: "Zen Kaku Gothic New", var(--font-body), system-ui, sans-serif;
+  /*
+   * Pilas de uso. Anton y la gótica que trae next/font son solo latinas: lo japonés cae en
+   * la gótica completa, que se pide al elegir ese idioma (ver lib/i18n.tsx).
+   */
+  --display: var(--font-display), "Zen Kaku Gothic New", system-ui, sans-serif;
+  --body: var(--font-body), "Zen Kaku Gothic New", system-ui, sans-serif;
+}
+
+/*
+ * Anton tiene un solo grosor, y en japonés los titulares caen en la gótica con ese mismo
+ * 400: quedaban finos, sin el peso de la versión latina. Ahí se piden en 900.
+ */
+html:lang(ja) [class*="var(--display)"] {
+  font-weight: 900;
+  /* Anton no tiene 900: sin esto el navegador lo engrosa a mano y lo latino se empasta. */
+  font-synthesis-weight: none;
 }
 
 body {

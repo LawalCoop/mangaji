@@ -1,7 +1,8 @@
 "use client";
 
 import { useState } from "react";
-import { MOOD_ORDER, MOODS, type MoodId } from "@/lib/mood";
+import { etaText, useI18n } from "@/lib/i18n";
+import { MOOD_ORDER, type MoodId } from "@/lib/mood";
 
 /**
  * Controles del lector. Se muestran sobre la página y se apagan solos mientras se lee, para
@@ -30,8 +31,8 @@ export type ToolbarProps = {
   hasPanels: boolean;
   /** Páginas ya procesadas mientras se lee, o null si no hay nada en curso. */
   built: { done: number; total: number } | null;
-  /** Cuánto falta para tener el tomo entero. */
-  eta: string | null;
+  /** Segundos que faltan para tener el tomo entero. */
+  eta: number | null;
   /** El tomo está entero: se puede guardar para no volver a procesarlo. */
   canSave: boolean;
   onSave: () => void;
@@ -50,6 +51,8 @@ const RANGE =
 
 export function Toolbar(props: ToolbarProps) {
   const { page, pages, panel, panels, progress, visible } = props;
+  const { t } = useI18n();
+  const T = t.toolbar;
   // En el celular lo secundario vive en un panel aparte: en una sola fila no entra, y en
   // tres filas la barra tapaba la viñeta.
   const [more, setMore] = useState(false);
@@ -62,13 +65,13 @@ export function Toolbar(props: ToolbarProps) {
   const secondary = (
     <>
       <Group>
-        <Button onClick={() => props.onZoom(1 / 1.25)} title="Alejar (−)">
+        <Button onClick={() => props.onZoom(1 / 1.25)} title={T.zoomOut}>
           −
         </Button>
-        <Button onClick={props.onFit} title="Encuadrar (f)">
+        <Button onClick={props.onFit} title={T.fit}>
           ⤢
         </Button>
-        <Button onClick={() => props.onZoom(1.25)} title="Acercar (+)">
+        <Button onClick={() => props.onZoom(1.25)} title={T.zoomIn}>
           +
         </Button>
       </Group>
@@ -79,27 +82,27 @@ export function Toolbar(props: ToolbarProps) {
             key={id}
             onClick={() => props.onMood(id)}
             active={props.mood === id}
-            title={`Intensidad: ${MOODS[id].label}`}
+            title={T.intensity(t.moods[id])}
           >
-            {MOODS[id].label}
+            {t.moods[id]}
           </Button>
         ))}
       </Group>
 
       <Group>
-        <Button onClick={() => props.onMusic(!props.music)} active={props.music} title="Música (m)">
-          {props.music ? "♪ on" : "♪ off"}
+        <Button onClick={() => props.onMusic(!props.music)} active={props.music} title={T.music}>
+          {props.music ? T.musicOn : T.musicOff}
         </Button>
         {/* El volumen solo tiene sentido con la música puesta. */}
         {props.music && (
-          <label className="flex items-center gap-2 px-2.5 py-1.5" title="Volumen">
+          <label className="flex items-center gap-2 px-2.5 py-1.5" title={T.volume}>
             <input
               type="range"
               min={0}
               max={100}
               value={Math.round(props.volume * 100)}
               onChange={(e) => props.onVolume(Number(e.target.value) / 100)}
-              aria-label="Volumen de la música"
+              aria-label={T.volumeLabel}
               className={`${RANGE} h-1 w-20 [&::-webkit-slider-thumb]:h-2.5 [&::-webkit-slider-thumb]:w-2.5 pointer-coarse:w-28 pointer-coarse:[&::-webkit-slider-thumb]:h-5 pointer-coarse:[&::-webkit-slider-thumb]:w-5 pointer-coarse:[&::-moz-range-thumb]:h-5 pointer-coarse:[&::-moz-range-thumb]:w-5`}
             />
             <span className="w-7 text-right text-[10px] tabular-nums text-neutral-500">
@@ -114,20 +117,22 @@ export function Toolbar(props: ToolbarProps) {
       {props.built && (
         <span
           className="flex items-center gap-2 rounded-md border border-neutral-700/80 bg-neutral-900/70 px-2.5 py-1.5 text-[11px] text-neutral-400 backdrop-blur"
-          title="Las páginas que faltan se están procesando mientras leés"
+          title={T.buildingTitle}
         >
           <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-[#00D9F5]" />
           <span className="tabular-nums">
-            procesando {props.built.done} / {props.built.total}
-            {props.eta && <span className="ml-1 text-neutral-500">· queda {props.eta}</span>}
+            {T.building(props.built.done, props.built.total)}
+            {props.eta !== null && (
+              <span className="ml-1 text-neutral-500">{T.remaining(etaText(t, props.eta))}</span>
+            )}
           </span>
         </span>
       )}
 
       {props.canSave && (
         <Group>
-          <Button onClick={props.onSave} title="Guardar el tomo ya procesado para abrirlo al instante">
-            guardar .cbza
+          <Button onClick={props.onSave} title={T.saveTitle}>
+            {T.save}
           </Button>
         </Group>
       )}
@@ -159,7 +164,7 @@ export function Toolbar(props: ToolbarProps) {
           max={Math.max(pages, 1)}
           value={page}
           onChange={(e) => props.onPage(Number(e.target.value))}
-          aria-label="Ir a una página"
+          aria-label={T.goToPage}
           className={`${RANGE} h-1 w-full accent-neutral-100 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:w-3 pointer-coarse:h-1.5 pointer-coarse:[&::-webkit-slider-thumb]:h-5 pointer-coarse:[&::-webkit-slider-thumb]:w-5 pointer-coarse:[&::-moz-range-thumb]:h-5 pointer-coarse:[&::-moz-range-thumb]:w-5`}
         />
         <span className="shrink-0 text-[11px] tabular-nums text-neutral-400 sm:w-24">
@@ -169,24 +174,24 @@ export function Toolbar(props: ToolbarProps) {
 
       <div className="pointer-events-auto flex flex-wrap items-center gap-2 text-xs">
         <Group>
-          <Button onClick={() => props.onPage(page - 1)} disabled={page <= 1} title="Página anterior (↑)">
+          <Button onClick={() => props.onPage(page - 1)} disabled={page <= 1} title={T.prevPage}>
             ‹‹
           </Button>
-          <Button onClick={() => props.onStep(-1)} title="Viñeta anterior (→)">
+          <Button onClick={() => props.onStep(-1)} title={T.prevPanel}>
             ‹
           </Button>
-          <Button onClick={() => props.onStep(1)} title="Viñeta siguiente (← o espacio)">
+          <Button onClick={() => props.onStep(1)} title={T.nextPanel}>
             ›
           </Button>
-          <Button onClick={() => props.onPage(page + 1)} disabled={page >= pages} title="Página siguiente (↓)">
+          <Button onClick={() => props.onPage(page + 1)} disabled={page >= pages} title={T.nextPage}>
             ››
           </Button>
         </Group>
 
         {props.hasPanels && (
           <Group>
-            <Button onClick={props.onToggleMode} title="Alternar viñeta / página (v)">
-              {props.panelMode ? "viñeta" : "página"}
+            <Button onClick={props.onToggleMode} title={T.toggleMode}>
+              {props.panelMode ? T.modePanel : T.modePage}
             </Button>
           </Group>
         )}
@@ -194,7 +199,7 @@ export function Toolbar(props: ToolbarProps) {
         <div className="contents max-md:hidden">{secondary}</div>
 
         <Group className="md:hidden">
-          <Button onClick={toggleMore} active={more} title="Más controles">
+          <Button onClick={toggleMore} active={more} title={T.more}>
             <span className="relative">
               ⋯
               {/* Se sigue procesando: que se note aunque el panel esté cerrado. */}
@@ -209,7 +214,7 @@ export function Toolbar(props: ToolbarProps) {
           <span className="max-sm:hidden">{props.title}</span>
           {props.panelMode && panels > 0 && (
             <span className="ml-2 tabular-nums">
-              viñeta {panel} / {panels}
+              {T.panelOf(panel, panels)}
             </span>
           )}
         </span>

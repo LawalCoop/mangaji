@@ -1,5 +1,6 @@
 /// <reference lib="webworker" />
 import { Detector } from "./detector";
+import type { Note } from "./notes";
 import { processPage, type ProcessedPage } from "./process";
 
 /**
@@ -16,15 +17,15 @@ export type ProcessRequest =
   | { kind: "close" };
 
 export type ProcessResponse =
-  | { kind: "models"; detail: string }
-  | { kind: "progress"; index: number; detail: string }
+  | { kind: "models"; note: Note }
+  | { kind: "progress"; index: number; note: Note }
   | { kind: "page"; page: ProcessedPage }
   | { kind: "error"; index: number; message: string };
 
 let loading: Promise<Detector> | null = null;
 
 function ready(): Promise<Detector> {
-  loading ??= Detector.load((_, detail) => post({ kind: "models", detail: detail ?? "" }));
+  loading ??= Detector.load((note) => post({ kind: "models", note }));
   return loading;
 }
 
@@ -43,8 +44,8 @@ self.onmessage = async (ev: MessageEvent<ProcessRequest>) => {
 
   try {
     const detector = await ready();
-    const page = await processPage(detector, msg.bitmap, msg.index, (detail) =>
-      post({ kind: "progress", index: msg.index, detail }),
+    const page = await processPage(detector, msg.bitmap, msg.index, (note) =>
+      post({ kind: "progress", index: msg.index, note }),
     );
     msg.bitmap.close();
 

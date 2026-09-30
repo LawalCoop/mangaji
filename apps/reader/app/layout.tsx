@@ -65,7 +65,7 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
         <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="anonymous" />
         <link rel="stylesheet" href={KANA_URL} crossOrigin="anonymous" />
       </head>
-      <body className="min-h-full flex flex-col overscroll-none font-[family-name:var(--font-body)]">
+      <body className="min-h-full flex flex-col overscroll-none font-[family-name:var(--body)]">
         {children}
       </body>
     </html>

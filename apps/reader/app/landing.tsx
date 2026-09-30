@@ -1,6 +1,7 @@
 "use client";
 
 import { useRef, useState } from "react";
+import { LANGS, useI18n } from "@/lib/i18n";
 
 /**
  * Portada de Mangaji.
@@ -49,6 +50,8 @@ export function Landing({ status, message, onFile, onUrl, download }: Props) {
   const [link, setLink] = useState("");
   const downloading = status === "loading" && download !== null;
   const input = useRef<HTMLInputElement>(null);
+  const { lang, t, setLang } = useI18n();
+  const L = t.landing;
 
   const take = (file: File | undefined) => {
     if (file) onFile(file);
@@ -82,22 +85,48 @@ export function Landing({ status, message, onFile, onUrl, download }: Props) {
         >
           <div className="flex flex-wrap items-baseline gap-3 sm:gap-4">
             <span
-              className="font-[family-name:var(--font-display)] leading-none"
+              className="font-[family-name:var(--display)] leading-none"
               style={{ fontSize: "clamp(2rem,5vw,3.5rem)", color: INK }}
             >
               MANGAJI
             </span>
-            <span className="h-6 w-1" style={{ background: MAGENTA }} aria-hidden />
-            <span className="text-[15px] font-medium sm:text-[19px]" style={{ color: INK }}>
-              Lector de manga
+            <span className="h-6 w-1 max-sm:hidden" style={{ background: MAGENTA }} aria-hidden />
+            <span className="text-[15px] font-medium max-sm:hidden sm:text-[19px]" style={{ color: INK }}>
+              {L.subtitle}
             </span>
           </div>
-          <span
-            className="font-[family-name:var(--font-kana)] text-[22px] font-bold max-sm:hidden"
-            style={{ color: "#4A4A50" }}
-          >
-            漫画児
-          </span>
+          <div className="flex items-center gap-4">
+            {/* Selector de idioma: a la vista, porque quien no lee español no va a buscarlo. */}
+            <div
+              role="group"
+              aria-label={t.language}
+              className="flex border-[3px]"
+              style={{ borderColor: INK }}
+            >
+              {LANGS.map((l) => (
+                <button
+                  key={l.id}
+                  type="button"
+                  lang={l.id}
+                  title={l.name}
+                  aria-pressed={lang === l.id}
+                  onClick={() => setLang(l.id)}
+                  className="min-h-9 min-w-10 touch-manipulation px-2.5 font-[family-name:var(--display)] text-[15px] leading-none transition-colors"
+                  style={
+                    lang === l.id ? { background: INK, color: PAPER } : { background: "transparent", color: INK }
+                  }
+                >
+                  {l.label}
+                </button>
+              ))}
+            </div>
+            <span
+              className="font-[family-name:var(--font-kana)] text-[22px] font-bold max-md:hidden"
+              style={{ color: "#4A4A50" }}
+            >
+              漫画児
+            </span>
+          </div>
         </header>
 
         {/* Hero: sentido de lectura + titular. En el celular el contenedor se disuelve y el
@@ -109,20 +138,20 @@ export function Landing({ status, message, onFile, onUrl, download }: Props) {
             style={{ ...panel, backgroundImage: TONE }}
           >
             <p
-              className="font-[family-name:var(--font-display)] text-[17px] leading-tight"
+              className="font-[family-name:var(--display)] text-[17px] leading-tight"
               style={{ color: INK }}
             >
-              SENTIDO DE LECTURA
+              {L.directionTitle}
             </p>
             <span
-              className="font-[family-name:var(--font-display)] leading-none"
+              className="font-[family-name:var(--display)] leading-none"
               style={{ fontSize: "clamp(3rem,9vw,5rem)", color: INK }}
               aria-hidden
             >
               ←
             </span>
             <p className="text-[17px] font-medium leading-snug" style={{ color: INK }}>
-              De derecha a izquierda y de arriba abajo, como el original en papel.
+              {L.direction}
             </p>
           </aside>
 
@@ -152,16 +181,16 @@ export function Landing({ status, message, onFile, onUrl, download }: Props) {
             <div className="relative flex items-center gap-3">
               <span className="h-5 w-2" style={{ background: INK }} aria-hidden />
               <p
-                className="font-[family-name:var(--font-display)] text-[13px] tracking-wide sm:text-[19px]"
+                className="font-[family-name:var(--display)] text-[13px] tracking-wide sm:text-[19px]"
                 style={{ color: "#3A3A42" }}
               >
-                LECTOR DE CBZ Y CBR · TODO PASA EN TU NAVEGADOR
+                {L.tagline}
               </p>
             </div>
 
             {/* Titular en tres capas desplazadas: el desdoblamiento del cuadro de impacto. */}
             <h1 className="relative mt-5" style={{ lineHeight: 0.92 }}>
-              <span className="sr-only">Tu manga, animeizado</span>
+              <span className="sr-only">{L.headlineLabel}</span>
               {/* Desplazamientos en `em`, proporcionales a la letra: en píxeles fijos, con el
                   titular chico del celular las capas se despegaban y se leían como texto aparte. */}
               {[
@@ -172,7 +201,7 @@ export function Landing({ status, message, onFile, onUrl, download }: Props) {
                 <span
                   key={layer.color}
                   aria-hidden
-                  className="font-[family-name:var(--font-display)] whitespace-nowrap"
+                  className="font-[family-name:var(--display)] whitespace-nowrap"
                   style={{
                     display: "block",
                     position: i === 2 ? "relative" : "absolute",
@@ -183,9 +212,9 @@ export function Landing({ status, message, onFile, onUrl, download }: Props) {
                     color: layer.color,
                   }}
                 >
-                  TU MANGA,
+                  {L.headline[0]}
                   <br />
-                  ANIMEIZADO
+                  {L.headline[1]}
                 </span>
               ))}
             </h1>
@@ -194,9 +223,7 @@ export function Landing({ status, message, onFile, onUrl, download }: Props) {
               className="relative mt-7 max-w-[620px] text-[17px] font-medium leading-[1.6] sm:text-[21px]"
               style={{ color: "#24242A" }}
             >
-              Mangaji abre tus archivos CBZ y, en vez de dejarte la página entera enfrente, la
-              recorre: encuadra cada viñeta, viaja hasta la siguiente y muestra el diálogo cuando
-              le toca. Como ver el capítulo, salvo que el ritmo lo marcás vos.
+              {L.intro}
             </p>
           </section>
         </div>
@@ -258,10 +285,10 @@ export function Landing({ status, message, onFile, onUrl, download }: Props) {
                 />
               </svg>
               <p
-                className="relative font-[family-name:var(--font-display)] leading-none"
+                className="relative font-[family-name:var(--display)] leading-none"
                 style={{ fontSize: "clamp(1.5rem,4.5vw,2.875rem)", color: INK }}
               >
-                {downloading ? "BAJANDO…" : status === "loading" ? "ABRIENDO…" : "SUBÍ TU TOMO ACÁ"}
+                {downloading ? L.bubbleDownloading : status === "loading" ? L.bubbleOpening : L.bubbleIdle}
               </p>
             </div>
 
@@ -282,10 +309,10 @@ export function Landing({ status, message, onFile, onUrl, download }: Props) {
                 ▶
               </span>
               <span
-                className="font-[family-name:var(--font-display)] leading-none"
+                className="font-[family-name:var(--display)] leading-none"
                 style={{ fontSize: "clamp(1.15rem,3vw,1.875rem)", color: PAPER }}
               >
-                ELEGIR ARCHIVO
+                {L.choose}
               </span>
             </button>
             <input
@@ -297,7 +324,7 @@ export function Landing({ status, message, onFile, onUrl, download }: Props) {
             />
 
             <p className="text-[16px] font-medium sm:text-[19px]" style={{ color: "#3A3A42" }}>
-              Abrí un .cbz o .cbr. Si ya lo procesaste antes, el .cbza carga directo.
+              {L.formats}
             </p>
 
             {/* O desde un link: práctico cuando el tomo está en la nube y no en el teléfono. */}
@@ -310,10 +337,10 @@ export function Landing({ status, message, onFile, onUrl, download }: Props) {
             >
               <label
                 htmlFor="tomo-link"
-                className="font-[family-name:var(--font-display)] text-[15px] tracking-wide"
+                className="font-[family-name:var(--display)] text-[15px] tracking-wide"
                 style={{ color: "#3A3A42" }}
               >
-                O PEGÁ UN LINK
+                {L.linkLabel}
               </label>
               <div className="flex gap-2">
                 <input
@@ -332,14 +359,14 @@ export function Landing({ status, message, onFile, onUrl, download }: Props) {
                 <button
                   type="submit"
                   disabled={!link.trim() || status === "loading"}
-                  className="shrink-0 border-[3px] px-4 font-[family-name:var(--font-display)] text-[18px] transition-opacity disabled:opacity-40"
+                  className="shrink-0 border-[3px] px-4 font-[family-name:var(--display)] text-[18px] transition-opacity disabled:opacity-40"
                   style={{ borderColor: INK, background: INK, color: PAPER }}
                 >
-                  ABRIR
+                  {L.linkOpen}
                 </button>
               </div>
               <p className="text-[13px] leading-snug" style={{ color: "#5A5A62" }}>
-                Links directos, de Dropbox o de GitHub. Google Drive todavía no.
+                {L.linkHelp}
               </p>
             </form>
 
@@ -356,8 +383,12 @@ export function Landing({ status, message, onFile, onUrl, download }: Props) {
                 </div>
                 <p className="text-[13px] font-medium tabular-nums" style={{ color: "#3A3A42" }}>
                   {download.total
-                    ? `${Math.floor((download.received / download.total) * 100)} % · ${mb(download.received)} de ${mb(download.total)} MB`
-                    : `${mb(download.received)} MB`}
+                    ? L.downloaded(
+                        Math.floor((download.received / download.total) * 100),
+                        mb(download.received),
+                        mb(download.total),
+                      )
+                    : L.downloadedUnknown(mb(download.received))}
                 </p>
               </div>
             )}
@@ -365,7 +396,7 @@ export function Landing({ status, message, onFile, onUrl, download }: Props) {
               {status === "error" && message ? (
                 <span style={{ color: "#C31D45", fontWeight: 700 }}>{message}</span>
               ) : (
-                "El archivo se abre y se procesa en tu navegador. Si viene de un link, se baja directo del sitio donde está, sin pasar por ningún servidor nuestro."
+                L.privacy
               )}
             </p>
           </div>
@@ -374,24 +405,9 @@ export function Landing({ status, message, onFile, onUrl, download }: Props) {
         {/* Capacidades: numeradas al revés, porque se leen de derecha a izquierda. */}
         <div className="grid gap-[18px] max-lg:order-4 md:grid-cols-3">
           {[
-            {
-              n: "03",
-              title: "MUESTRA EL DIÁLOGO",
-              text: "Detecta los globos y muestra cada parlamento cuando le toca, con la pausa que pide la escena.",
-              icon: "▭",
-            },
-            {
-              n: "02",
-              title: "MUEVE LA CÁMARA",
-              text: "Encuadra una viñeta a la vez y se desplaza hasta la siguiente. En las escenas de acción corta seco; en las pausadas, viaja lento.",
-              icon: "◱",
-            },
-            {
-              n: "01",
-              title: "ENCUENTRA LAS VIÑETAS",
-              text: "Analiza la página y la separa cuadro por cuadro. Deduce en qué orden se leen, aun cuando la composición se parte en diagonales.",
-              icon: "▦",
-            },
+            { n: "03", icon: "▭", ...L.features[0] },
+            { n: "02", icon: "◱", ...L.features[1] },
+            { n: "01", icon: "▦", ...L.features[2] },
           ].map((cap) => (
             <section
               key={cap.n}
@@ -403,14 +419,14 @@ export function Landing({ status, message, onFile, onUrl, download }: Props) {
                   {cap.icon}
                 </span>
                 <span
-                  className="font-[family-name:var(--font-display)] leading-none"
+                  className="font-[family-name:var(--display)] leading-none"
                   style={{ fontSize: "clamp(2.6rem,5vw,4.75rem)", color: INK }}
                 >
                   {cap.n}
                 </span>
               </div>
               <h2
-                className="font-[family-name:var(--font-display)] leading-tight"
+                className="font-[family-name:var(--display)] leading-tight"
                 style={{ fontSize: "clamp(1.4rem,2.6vw,2.25rem)", color: INK }}
               >
                 {cap.title}
@@ -427,7 +443,7 @@ export function Landing({ status, message, onFile, onUrl, download }: Props) {
           style={{ ...panel, background: "#0F0F12", border: `4px solid ${INK}` }}
         >
           <span className="text-[15px] font-medium sm:text-[17px]" style={{ color: "#8A8A94" }}>
-            Desarrollado por <span style={{ color: PAPER, fontWeight: 700 }}>lawal</span>
+            {L.madeBy} <span style={{ color: PAPER, fontWeight: 700 }}>lawal</span>
           </span>
           <span
             className="font-[family-name:var(--font-kana)] text-[18px] font-bold"

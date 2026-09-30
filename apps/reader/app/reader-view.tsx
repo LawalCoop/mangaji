@@ -7,14 +7,16 @@ import { Camera, type Viewport } from "@/lib/camera";
 import { Director } from "@/lib/director";
 import { PageFrameSource, PanelFrameSource } from "@/lib/frame-sources";
 import { LiveSource } from "@/lib/live-archive";
-import { download, LinkError, resolveLink, type DownloadProgress } from "@/lib/remote";
+import { download, resolveLink, type DownloadProgress } from "@/lib/remote";
+import { problemText, useI18n } from "@/lib/i18n";
+import { ProblemError, problemOf, type Problem } from "@/lib/notes";
 import { DEFAULT_MOOD, MOOD_ORDER, MOODS, type MoodId } from "@/lib/mood";
 import { Music } from "@/lib/music";
 import { Stage } from "@/lib/stage";
 import type { Rect } from "@/lib/types";
 import type { ProcessRequest, ProcessResponse } from "@/lib/process.worker";
 import { Landing } from "./landing";
-import { Processing, type Stage as ProcessStage } from "./processing";
+import { Processing, type LogLine, type Stage as ProcessStage } from "./processing";
 import { Toolbar } from "./toolbar";
 
 /** Hasta que la página se decodifica no se sabe su tamaño; esto evita un encuadre en cero. */
@@ -70,19 +72,10 @@ type Status =
   | { kind: "loading" }
   | { kind: "processing" }
   | { kind: "ready" }
-  | { kind: "error"; message: string };
+  | { kind: "error"; problem: Problem };
 
 /** Cuántas páginas mirar hacia atrás para estimar lo que falta. */
 const ETA_WINDOW = 5;
-
-function formatEta(seconds: number): string {
-  // Se redondea el total antes de partirlo: redondear los segundos sueltos daba "2 min 60 s".
-  const total = Math.max(1, Math.round(seconds));
-  if (total < 60) return `${total} s`;
-  const min = Math.floor(total / 60);
-  const rest = total % 60;
-  return rest ? `${min} min ${rest} s` : `${min} min`;
-}
 
 export default function ReaderView() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -103,9 +96,10 @@ export default function ReaderView() {
   const [title, setTitle] = useState("");
   /** Lo que se muestra mientras se espera la primera página de un CBZ. */
   const [stage, setStage] = useState<ProcessStage | null>(null);
-  const [lines, setLines] = useState<string[]>([]);
+  const [lines, setLines] = useState<LogLine[]>([]);
   const [progress, setProgress] = useState<number | null>(null);
-  const [eta, setEta] = useState<string | null>(null);
+  /** Segundos que faltan para terminar de procesar el tomo. */
+  const [eta, setEta] = useState<number | null>(null);
   /** Cuánto del tomo lleva procesado mientras se lee, o null si no hay nada en curso. */
   const [built, setBuilt] = useState<{ done: number; total: number } | null>(null);
   /** El tomo terminó de procesarse y se puede guardar. */
@@ -130,6 +124,7 @@ export default function ReaderView() {
    * esconde sola mientras se lee y vuelve con un toque en el centro.
    */
   const [chrome, setChrome] = useState(true);
+  const { t } = useI18n();
   const chromeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   /** Hay un panel de la barra abierto: no se esconde mientras se lo usa. */
   const chromeHeld = useRef(false);
@@ -336,7 +331,7 @@ export default function ReaderView() {
             }
             stage.render();
           } catch (err) {
-            if (mine === token) setStatus({ kind: "error", message: (err as Error).message });
+            if (mine === token) setStatus({ kind: "error", problem: problemOf(err) });
           }
         };
 
@@ -428,7 +423,7 @@ export default function ReaderView() {
         setStatus({ kind: "ready" });
         void draw(true);
       } catch (err) {
-        setStatus({ kind: "error", message: (err as Error).message });
+        setStatus({ kind: "error", problem: problemOf(err) });
       }
     },
     [],
@@ -445,13 +440,13 @@ export default function ReaderView() {
     async (canvas: HTMLCanvasElement, file: File) => {
       setStatus({ kind: "processing" });
       setStage(null);
-      setLines(["descomprimiendo el archivo"]);
+      setLines([{ note: { key: "unpacking" } }]);
       setProgress(null);
       setEta(null);
 
       const cbz = await CbzSource.open(file);
       const total = cbz.pageCount;
-      setLines((l) => [...l, `${total} páginas`]);
+      setLines((l) => [...l, { note: { key: "pageCount", n: total } }]);
 
       const live = new LiveSource();
       liveRef.current = live;
@@ -476,14 +471,14 @@ export default function ReaderView() {
         const msg = ev.data;
 
         if (msg.kind === "models") {
-          setStage({ kind: "models", detail: msg.detail });
-          setLines((l) => [...l, msg.detail]);
+          setStage({ kind: "models", note: msg.note });
+          setLines((l) => [...l, { note: msg.note }]);
           return;
         }
 
         if (msg.kind === "progress") {
-          setStage({ kind: "page", index: msg.index, total, detail: msg.detail });
-          setLines((l) => [...l, `página ${msg.index + 1}: ${msg.detail}`]);
+          setStage({ kind: "page", index: msg.index, total, note: msg.note });
+          setLines((l) => [...l, { note: msg.note, page: msg.index + 1 }]);
           return;
         }
 
@@ -511,7 +506,7 @@ export default function ReaderView() {
         const from = Math.max(0, done.index - ETA_WINDOW);
         if (done.index > from) {
           const per = (marks[done.index] - marks[from]) / (done.index - from);
-          setEta(formatEta(((total - done.index - 1) * per) / 1000));
+          setEta(((total - done.index - 1) * per) / 1000);
         }
         setBuilt({ done: done.index + 1, total });
 
@@ -571,7 +566,7 @@ export default function ReaderView() {
         // que puede llegar cualquier cosa. Sin extensión se intenta igual: el contenido manda.
         const ext = /\.([^./]+)$/.exec(input.name)?.[1]?.toLowerCase();
         if (ext && !OPENABLE.has(ext)) {
-          throw new Error(`Eso es un .${ext}, no un tomo. Elegí un archivo .cbz, .cbr o .cbza.`);
+          throw new ProblemError({ code: "notATome", ext });
         }
 
         // Un CBZ hay que procesarlo, y eso se hace leyendo; un `.cbza` ya viene listo.
@@ -600,7 +595,7 @@ export default function ReaderView() {
 
         await mount(canvas, source, sizes, pageFrames, panelFrames);
       } catch (err) {
-        setStatus({ kind: "error", message: (err as Error).message });
+        setStatus({ kind: "error", problem: problemOf(err) });
       }
     },
     [build, mount, teardown],
@@ -626,9 +621,7 @@ export default function ReaderView() {
       } catch (err) {
         if (abort.signal.aborted) return;
         setFetching(null);
-        const message =
-          err instanceof LinkError ? err.message : `No se pudo bajar: ${(err as Error).message}`;
-        setStatus({ kind: "error", message });
+        setStatus({ kind: "error", problem: problemOf(err) });
       } finally {
         if (fetchAbort.current === abort) fetchAbort.current = null;
       }
@@ -950,7 +943,7 @@ export default function ReaderView() {
         <div className="pointer-events-none absolute inset-x-0 top-[max(1.5rem,env(safe-area-inset-top))] z-20 flex justify-center px-4">
           <span className="flex items-center gap-2 rounded-full border border-neutral-700/80 bg-neutral-900/85 px-4 py-2 text-xs text-neutral-300 backdrop-blur">
             <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-[#00D9F5]" />
-            preparando la página que sigue…
+            {t.reader.waiting}
           </span>
         </div>
       )}
@@ -962,19 +955,19 @@ export default function ReaderView() {
           aria-hidden
         >
           <div className="flex items-center justify-center bg-[#00D9F5]/15 px-3">
-            tocá acá
+            {t.reader.hintNext[0]}
             <br />
-            para avanzar
+            {t.reader.hintNext[1]}
           </div>
           <div className="flex items-center justify-center px-2">
-            centro:
+            {t.reader.hintCenter[0]}
             <br />
-            controles
+            {t.reader.hintCenter[1]}
           </div>
           <div className="flex items-center justify-center bg-[#FF2E88]/15 px-3">
-            acá para
+            {t.reader.hintBack[0]}
             <br />
-            volver
+            {t.reader.hintBack[1]}
           </div>
         </div>
       )}
@@ -989,7 +982,7 @@ export default function ReaderView() {
         <div className="absolute inset-0 overflow-y-auto">
           <Landing
             status={status.kind === "error" ? "error" : status.kind === "loading" ? "loading" : "idle"}
-            message={status.kind === "error" ? status.message : undefined}
+            message={status.kind === "error" ? problemText(t, status.problem) : undefined}
             onFile={(file) => {
               fetchAbort.current?.abort();
               void open(file);

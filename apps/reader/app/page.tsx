@@ -1,5 +1,10 @@
+import { I18nProvider } from "@/lib/i18n";
 import ReaderView from "./reader-view";
 
 export default function Home() {
-  return <ReaderView />;
+  return (
+    <I18nProvider>
+      <ReaderView />
+    </I18nProvider>
+  );
 }

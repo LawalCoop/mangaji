@@ -11,40 +11,37 @@
  * - Dropbox: `dl.dropboxusercontent.com` permite la descarga; `www.dropbox.com` no.
  * - GitHub: `raw.githubusercontent.com` sí; `github.com/.../raw/...` redirige sin permiso.
  * - Google Drive: sus links no lo permiten. Haría falta su API con una clave propia.
+ *
+ * Los errores salen como `ProblemError` con un código: los explica la interfaz, en el
+ * idioma que esté puesto.
  */
 
-export class LinkError extends Error {}
+import { ProblemError } from "./notes";
 
 const DRIVE_HOSTS = new Set(["drive.google.com", "docs.google.com", "drive.usercontent.google.com"]);
-
-const DRIVE_MESSAGE =
-  "Los links de Google Drive todavía no se pueden abrir desde acá: Drive no deja que otras páginas bajen sus archivos. Bajalo y elegilo con el botón, o compartilo por Dropbox.";
-
-const BLOCKED_MESSAGE =
-  "Ese sitio no deja que otras páginas bajen sus archivos. Probá con un link de Dropbox, o bajalo y elegilo con el botón.";
 
 /**
  * Convierte un link compartido en el de descarga directa del archivo.
  *
- * Lanza `LinkError` con una explicación si el link no sirve.
+ * Lanza `ProblemError` si el link no sirve.
  */
 export function resolveLink(input: string): string {
   const text = input.trim();
-  if (!text) throw new LinkError("Pegá un link.");
+  if (!text) throw new ProblemError({ code: "linkEmpty" });
 
   let url: URL;
   try {
     url = new URL(/^[a-z][a-z0-9+.-]*:\/\//i.test(text) ? text : `https://${text}`);
   } catch {
-    throw new LinkError("Eso no parece un link.");
+    throw new ProblemError({ code: "linkInvalid" });
   }
   if (url.protocol !== "https:" && url.protocol !== "http:") {
-    throw new LinkError("Eso no parece un link.");
+    throw new ProblemError({ code: "linkInvalid" });
   }
 
   const host = url.hostname.toLowerCase();
 
-  if (DRIVE_HOSTS.has(host)) throw new LinkError(DRIVE_MESSAGE);
+  if (DRIVE_HOSTS.has(host)) throw new ProblemError({ code: "linkDrive" });
 
   // Dropbox: el mismo camino, en el dominio que sirve el archivo. `dl` sobra ahí; `rlkey`
   // y compañía son los que autorizan el acceso y se conservan.
@@ -110,18 +107,16 @@ export async function download(
     if ((err as Error).name === "AbortError") throw err;
     // El navegador no distingue "no hay red" de "el sitio no lo permite": los dos llegan
     // como el mismo error. Lo segundo es lo que pasa casi siempre.
-    throw new LinkError(navigator.onLine === false ? "No hay conexión." : BLOCKED_MESSAGE);
+    throw new ProblemError({ code: navigator.onLine === false ? "offline" : "linkBlocked" });
   }
 
-  if (res.status === 404) throw new LinkError("Ese link no lleva a ningún archivo: puede que lo hayan borrado.");
-  if (res.status === 401 || res.status === 403) {
-    throw new LinkError("Ese archivo es privado. Compartilo para que cualquiera con el link lo pueda ver.");
-  }
-  if (!res.ok) throw new LinkError(`El sitio respondió con un error (${res.status}).`);
+  if (res.status === 404) throw new ProblemError({ code: "linkMissing" });
+  if (res.status === 401 || res.status === 403) throw new ProblemError({ code: "linkPrivate" });
+  if (!res.ok) throw new ProblemError({ code: "linkHttp", status: res.status });
 
   // Un link a la página del archivo en vez de al archivo: se bajaría el HTML.
   if ((res.headers.get("content-type") ?? "").includes("text/html")) {
-    throw new LinkError("El link lleva a una página, no al archivo. Buscá el link de descarga directa.");
+    throw new ProblemError({ code: "linkPage" });
   }
 
   const name = fileNameOf(res.url || url, res.headers.get("content-disposition"));

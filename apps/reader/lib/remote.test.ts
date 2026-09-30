@@ -1,5 +1,16 @@
 import { describe, expect, it } from "vitest";
-import { fileNameOf, LinkError, resolveLink } from "./remote";
+import { ProblemError, type Problem } from "./notes";
+import { fileNameOf, resolveLink } from "./remote";
+
+/** El código con el que `resolveLink` rechaza un link. */
+function rejection(link: string): Problem["code"] | null {
+  try {
+    resolveLink(link);
+    return null;
+  } catch (err) {
+    return err instanceof ProblemError ? err.problem.code : null;
+  }
+}
 
 describe("links compartidos a descarga directa", () => {
   it("Dropbox pasa al dominio que sirve el archivo, sin `dl` y con su clave", () => {
@@ -26,15 +37,13 @@ describe("links compartidos a descarga directa", () => {
   });
 
   it("Google Drive se explica en vez de fallar con un error de red", () => {
-    expect(() => resolveLink("https://drive.google.com/file/d/1abc/view?usp=sharing")).toThrow(
-      /Google Drive/,
-    );
+    expect(rejection("https://drive.google.com/file/d/1abc/view?usp=sharing")).toBe("linkDrive");
   });
 
   it("lo que no es un link se rechaza con un mensaje", () => {
-    expect(() => resolveLink("")).toThrow(LinkError);
-    expect(() => resolveLink("hola que tal")).toThrow(LinkError);
-    expect(() => resolveLink("ftp://ejemplo.com/tomo.cbz")).toThrow(LinkError);
+    expect(rejection("")).toBe("linkEmpty");
+    expect(rejection("hola que tal")).toBe("linkInvalid");
+    expect(rejection("ftp://ejemplo.com/tomo.cbz")).toBe("linkInvalid");
   });
 });
 

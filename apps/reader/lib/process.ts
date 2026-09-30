@@ -1,4 +1,5 @@
 import { zipSync } from "fflate";
+import type { Note } from "./notes";
 // Solo el tipo: así quien únicamente empaqueta no se trae los modelos ni el runtime.
 import type { Detector, Detection } from "./detector";
 import { insidePolygon, lift, type Sprite } from "./dialogue";
@@ -46,7 +47,7 @@ export type ProcessedPage = {
   balloons: number;
 };
 
-export type PageReporter = (detail: string) => void;
+export type PageReporter = (note: Note) => void;
 
 const iou = (a: Detection["bbox"], b: Detection["bbox"]) => {
   const ix = Math.max(0, Math.min(a.x + a.w, b.x + b.w) - Math.max(a.x, b.x));
@@ -137,7 +138,7 @@ export async function processPage(
   const ctx = canvas.getContext("2d", { willReadFrequently: true })!;
   ctx.drawImage(bitmap, 0, 0);
 
-  report?.("buscando viñetas");
+  report?.({ key: "findingPanels" });
   const dets = await detector.detect(ctx.getImageData(0, 0, width, height));
 
   let panels = dedupe(
@@ -163,7 +164,7 @@ export async function processPage(
     ];
   }
 
-  report?.(`${panels.length} viñetas · levantando el diálogo`);
+  report?.({ key: "liftingDialogue", n: panels.length });
 
   // Se levanta todo el texto de la página antes de repartirlo: hacerlo por viñeta deja
   // sin levantar los globos que quedan a caballo de un borde diagonal.

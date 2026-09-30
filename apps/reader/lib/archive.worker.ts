@@ -1,6 +1,7 @@
 /// <reference lib="webworker" />
 import { unzip, type UnzipFileInfo } from "fflate";
 import { isPage, sortPages } from "./entries";
+import { ProblemError, problemOf } from "./notes";
 
 /**
  * Worker de archivo: mantiene el CBZ comprimido en memoria y **infla una entrada a la vez**,
@@ -38,7 +39,7 @@ self.onmessage = async (ev: MessageEvent<Req>) => {
         found = [...loose.keys()];
       }
       entries = sortPages(found.filter(isPage));
-      if (entries.length === 0) throw new Error("El archivo no contiene imágenes");
+      if (entries.length === 0) throw new ProblemError({ code: "noImages" });
       // Un `.cbza` trae manifest; un CBZ común, no. Es lo que decide el modo de lectura.
       self.postMessage({ id: msg.id, ok: true, entries, all: found });
       return;
@@ -59,7 +60,8 @@ self.onmessage = async (ev: MessageEvent<Req>) => {
       return;
     }
   } catch (err) {
-    self.postMessage({ id: msg.id, ok: false, error: (err as Error).message });
+    // El error cruza al hilo principal como dato: una instancia no sobrevive el viaje.
+    self.postMessage({ id: msg.id, ok: false, problem: problemOf(err) });
   }
 };
 

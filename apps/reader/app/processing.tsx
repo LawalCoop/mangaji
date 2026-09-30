@@ -1,6 +1,8 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { etaText, noteText, useI18n, type Messages } from "@/lib/i18n";
+import type { Note } from "@/lib/notes";
 
 /**
  * Pantalla de procesamiento.
@@ -12,8 +14,11 @@ import { useEffect, useRef, useState } from "react";
 
 export type Stage =
   | { kind: "opening" }
-  | { kind: "models"; detail: string }
-  | { kind: "page"; index: number; total: number; detail: string };
+  | { kind: "models"; note: Note }
+  | { kind: "page"; index: number; total: number; note: Note };
+
+/** Una línea del registro; `page` si pasó procesando una página en particular. */
+export type LogLine = { note: Note; page?: number };
 
 const INK = "#0B0B0C";
 const PAPER = "#F4EFE3";
@@ -23,15 +28,18 @@ const MAGENTA = "#FF2E88";
 export type ProcessingProps = {
   title: string;
   stage: Stage | null;
-  lines: string[];
+  lines: LogLine[];
   /** 0..1, o null mientras no se sabe cuántas páginas hay. */
   progress: number | null;
-  eta: string | null;
+  /** Segundos que faltan, o null mientras no hay con qué estimarlo. */
+  eta: number | null;
 };
 
 export function Processing({ title, stage, lines, progress, eta }: ProcessingProps) {
   const [tick, setTick] = useState(0);
   const logRef = useRef<HTMLDivElement>(null);
+  const { t } = useI18n();
+  const P = t.processing;
 
   // Late para que la espera no se sienta congelada cuando una página tarda.
   useEffect(() => {
@@ -74,25 +82,25 @@ export function Processing({ title, stage, lines, progress, eta }: ProcessingPro
           style={{ borderColor: INK, background: PAPER, boxShadow: "12px 12px 0 #0A0A0C" }}
         >
           <p
-            className="mb-3 font-[family-name:var(--font-display)] text-[13px] tracking-wide"
+            className="mb-3 font-[family-name:var(--display)] text-[13px] tracking-wide"
             style={{ color: "#3A3A42" }}
           >
-            PROCESANDO · {title}
+            {P.label} · {title}
           </p>
 
           <h1
-            className="font-[family-name:var(--font-display)] uppercase leading-[0.9]"
+            className="font-[family-name:var(--display)] uppercase leading-[0.9]"
             style={{
               fontSize: "clamp(2.2rem,7vw,5rem)",
               color: INK,
               textShadow: `0.04em 0 0 ${CYAN}, -0.04em 0 0 ${MAGENTA}`,
             }}
           >
-            {headline(stage)}
+            {headline(t, stage)}
           </h1>
 
           <p className="mt-4 text-[16px] font-medium sm:text-[19px]" style={{ color: "#24242A" }}>
-            {detail(stage)}
+            {detail(t, stage)}
             <span aria-hidden>{".".repeat(1 + (tick % 3))}</span>
           </p>
 
@@ -115,24 +123,23 @@ export function Processing({ title, stage, lines, progress, eta }: ProcessingPro
               })}
             </div>
             <span
-              className="w-16 text-right font-[family-name:var(--font-display)] text-2xl tabular-nums"
+              className="w-16 text-right font-[family-name:var(--display)] text-2xl tabular-nums"
               style={{ color: INK }}
             >
               {pct === null ? "··" : `${pct}%`}
             </span>
           </div>
 
-          {eta && (
+          {eta !== null && (
             <p className="mt-2 text-[13px] font-medium" style={{ color: "#5A5A62" }}>
-              queda {eta}
+              {P.remaining(etaText(t, eta))}
             </p>
           )}
 
           {/* Desde el celular pesa: mejor saberlo antes que descubrirlo en la factura. */}
           {stage?.kind === "models" && (
             <p className="mt-3 text-[13px] font-medium leading-snug" style={{ color: "#5A5A62" }}>
-              La primera vez se bajan los detectores, unos 80 MB. Después el navegador los
-              reutiliza. Si estás con datos, conviene wifi.
+              {P.firstTime}
             </p>
           )}
         </section>
@@ -146,38 +153,41 @@ export function Processing({ title, stage, lines, progress, eta }: ProcessingPro
           <pre className="whitespace-pre-wrap text-[12px] leading-relaxed sm:text-[13px]">
             {lines.map((line, i) => (
               <span key={i} className="block" style={{ color: i === lines.length - 1 ? PAPER : "#6E6E78" }}>
-                <span style={{ color: i === lines.length - 1 ? CYAN : "#3A3A42" }}>›</span> {line}
+                <span style={{ color: i === lines.length - 1 ? CYAN : "#3A3A42" }}>›</span>{" "}
+                {line.page === undefined
+                  ? noteText(t, line.note)
+                  : P.logPage(line.page, noteText(t, line.note))}
               </span>
             ))}
           </pre>
         </section>
 
         <p className="text-center text-[12px] font-medium" style={{ color: "#5A5A62" }}>
-          Todo esto pasa en tu navegador. El archivo no sale de tu máquina.
+          {P.footer}
         </p>
       </div>
     </div>
   );
 }
 
-function headline(stage: Stage | null): string {
+function headline(t: Messages, stage: Stage | null): string {
   switch (stage?.kind) {
     case "models":
-      return "Cargando";
+      return t.processing.headlineModels;
     case "page":
-      return "Leyendo la página";
+      return t.processing.headlinePage;
     default:
-      return "Abriendo";
+      return t.processing.headlineOpening;
   }
 }
 
-function detail(stage: Stage | null): string {
+function detail(t: Messages, stage: Stage | null): string {
   switch (stage?.kind) {
     case "models":
-      return stage.detail;
+      return noteText(t, stage.note);
     case "page":
-      return `Página ${stage.index + 1} de ${stage.total} · ${stage.detail}`;
+      return `${t.processing.pageOf(stage.index + 1, stage.total)} · ${noteText(t, stage.note)}`;
     default:
-      return "Descomprimiendo";
+      return t.processing.unpacking;
   }
 }
