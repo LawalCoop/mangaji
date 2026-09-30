@@ -350,6 +350,31 @@ describe("borrado del diálogo", () => {
     expect(measured!.alpha[4 * w + 36]).toBeLessThan(40);
   });
 
+  it("en un globo de color con cielo oscuro en la caja, levanta la letra clara", () => {
+    // Globo rosa con letra blanca, y en una esquina de la caja un pedazo de cielo con
+    // estrellas. Por brillo el rosa es papel y el cielo pasaba por letras.
+    const w = 40;
+    const h = 40;
+    const pink = [218, 147, 170];
+    const px = new Uint8ClampedArray(w * h * 4);
+    for (let p = 0; p < w * h; p++) px.set([...pink, 255], p * 4);
+    for (let y = 0; y < 12; y++) {
+      for (let x = 0; x < 10; x++) px.set((x + y) % 4 ? [40, 40, 90, 255] : [230, 230, 240, 255], (y * w + x) * 4);
+    }
+    for (const [x0, y0] of [
+      [14, 14],
+      [24, 14],
+      [14, 26],
+      [24, 26],
+    ]) {
+      for (let y = y0; y < y0 + 8; y++) for (let x = x0; x < x0 + 4; x++) px.set([255, 255, 255, 255], (y * w + x) * 4);
+    }
+    const measured = inkOf(px, w, h, { x: 2, y: 4, w: 36, h: 34 });
+    expect(measured).not.toBeNull();
+    expect(measured!.alpha[16 * w + 15]).toBeGreaterThan(200);
+    expect(measured!.paper).toEqual(pink);
+  });
+
   it("el sprite se lleva la tinta original, no el papel que quedó en su lugar", () => {
     const w = 40;
     const h = 40;

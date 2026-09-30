@@ -399,15 +399,51 @@ export function inkOf(
   h: number,
   seed: Rect,
 ): { alpha: Uint8Array; paper: number | Rgb } | null {
-  // Primero por brillo, que es lo de siempre y lo que mejor anda: ignora el tono, así que
-  // letra oscura sobre un degradé de blanco a rojo sigue siendo letra sobre papel. Medida por
-  // color, en ese degradé todo se aparta del "fondo" y parece tinta.
-  const byLight = inkByLight(px, w, h, seed);
-  if (byLight && readable(byLight.alpha, w, seed)) return byLight;
-  // Si por brillo no aparece texto, puede ser letra clara sobre un cuadro de color.
-  const byColor = inkByColor(px, w, h, seed);
-  if (byColor && readable(byColor.alpha, w, seed)) return byColor;
+  // El orden importa, porque cualquiera de las dos puede dar un falso positivo. Por brillo,
+  // un globo rosa cuenta como papel y los pedazos de cielo que entran en la caja pasan por
+  // letras, mientras la letra blanca queda sin ver. Por color, un degradé de blanco a rojo
+  // se aparta entero del "fondo" y parece tinta. Decide el borde de la caja: si es casi todo
+  // de un mismo color que no es papel, es un cuadro de color y va primero por color.
+  const byLight = () => inkByLight(px, w, h, seed);
+  const byColor = () => inkByColor(px, w, h, seed);
+  const order = isColoredBox(px, w, seed) ? [byColor, byLight] : [byLight, byColor];
+  for (const measure of order) {
+    const found = measure();
+    if (found && readable(found.alpha, w, seed)) return found;
+  }
   return null;
+}
+
+/** Qué parte del borde tiene que ser del mismo color para tomarlo como un cuadro liso. */
+const FLAT_RING = 0.6;
+
+/** ¿El borde de la caja es casi todo de un mismo color, y ese color no es papel? */
+function isColoredBox(px: Uint8ClampedArray, w: number, seed: Rect): boolean {
+  const bg = backdrop(px, w, seed);
+  const paperLike = Math.min(...bg) >= PAPER_LEVEL - 15 && Math.max(...bg) - Math.min(...bg) <= 40;
+  if (paperLike) return false;
+  let near = 0;
+  let total = 0;
+  forRing(seed, (x, y) => {
+    const i = (y * w + x) * 4;
+    total++;
+    if (Math.hypot(px[i] - bg[0], px[i + 1] - bg[1], px[i + 2] - bg[2]) < COLOR_INK_FROM) near++;
+  });
+  return total > 0 && near / total >= FLAT_RING;
+}
+
+/** Recorre el borde de la caja, cada píxel una vez. */
+function forRing(seed: Rect, visit: (x: number, y: number) => void): void {
+  const x1 = seed.x + seed.w - 1;
+  const y1 = seed.y + seed.h - 1;
+  for (let x = seed.x; x <= x1; x++) {
+    visit(x, seed.y);
+    if (y1 !== seed.y) visit(x, y1);
+  }
+  for (let y = seed.y + 1; y < y1; y++) {
+    visit(seed.x, y);
+    if (x1 !== seed.x) visit(x1, y);
+  }
 }
 
 /** ¿Hay tinta, y está repartida como letras? */
@@ -469,16 +505,7 @@ function backdrop(px: Uint8ClampedArray, w: number, seed: Rect): Rgb {
     const i = (y * w + x) * 4;
     for (let c = 0; c < 3; c++) ring[c].push(px[i + c]);
   };
-  const x1 = seed.x + seed.w - 1;
-  const y1 = seed.y + seed.h - 1;
-  for (let x = seed.x; x <= x1; x++) {
-    take(x, seed.y);
-    take(x, y1);
-  }
-  for (let y = seed.y + 1; y < y1; y++) {
-    take(seed.x, y);
-    take(x1, y);
-  }
+  forRing(seed, take);
   const median = (values: number[]) => values.sort((m, n) => m - n)[values.length >> 1] ?? 255;
   return [median(ring[0]), median(ring[1]), median(ring[2])];
 }
