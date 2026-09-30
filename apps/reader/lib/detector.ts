@@ -2,6 +2,7 @@ import type * as Ort from "onnxruntime-web";
 import { boundsOf, convexHull, largestComponent, open, polygonArea, resizeToPlanes, simplify, traceContour, type Point } from "./vision";
 import { asset } from "./base";
 import type { Note } from "./notes";
+import { RESCUE_CONF } from "./panels";
 
 /**
  * Detección de viñetas, globos y texto en el navegador.
@@ -33,8 +34,11 @@ const CLASSES: DetectionClass[] = ["frame", "text", "balloon"];
  * `text` va mucho más bajo a propósito: los modelos se entrenaron sobre japonés vertical y
  * con diálogo latino horizontal les baja la confianza, justo en los globos con más texto.
  * Es seguro porque el texto solo se levanta del arte si su fondo es papel.
+ *
+ * `frame` también va bajo, pero no porque todas pasen: las dudosas llegan hasta
+ * `choosePanels` (lib/panels.ts), que solo rescata las que cubren una zona huérfana.
  */
-const CONF: Record<DetectionClass, number> = { frame: 0.25, balloon: 0.25, text: 0.05 };
+const CONF: Record<DetectionClass, number> = { frame: RESCUE_CONF, balloon: 0.25, text: 0.05 };
 const TEXT_MODEL_CONF = 0.12;
 /** Dos bloques de texto que se solapan más que esto son el mismo, visto por ambos modelos. */
 const TEXT_MERGE_IOU = 0.4;

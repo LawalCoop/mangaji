@@ -1,5 +1,6 @@
 import { zipSync } from "fflate";
 import type { Note } from "./notes";
+import { choosePanels, dedupe } from "./panels";
 // Solo el tipo: así quien únicamente empaqueta no se trae los modelos ni el runtime.
 import type { Detector, Detection } from "./detector";
 import { insidePolygon, lift, type Sprite } from "./dialogue";
@@ -19,14 +20,18 @@ import { polygonArea, type Point } from "./vision";
 const MIN_PANEL_AREA = 0.02;
 /** Con esta fracción dentro de una viñeta, el globo también le pertenece. */
 const SHARED_BALLOON = 0.25;
-/** Dos detecciones que se solapan más que esto son la misma, vista dos veces. */
-const DEDUPE_IOU = 0.6;
 
 const ENTER_MS = 450;
-const REVEAL_MS = 420;
+const REVEAL_MS = 300;
 const TAIL_MS = 600;
-const READ_MS = { min: 650, max: 2800 };
-const READ_SCALE = 240_000;
+/**
+ * Cuánto se deja leer cada globo antes del siguiente, según cuánto texto tiene.
+ *
+ * Antes iba de 0,65 a 2,8 s y entre dos globos de la misma viñeta pasaba 1,5 s en el caso
+ * típico: con el dedo, esperando, se sentía lento. Se lee más rápido de lo que se escribe.
+ */
+const READ_MS = { min: 250, max: 1600 };
+const READ_SCALE = 160_000;
 
 /**
  * Una página ya procesada, lista para leerse.
@@ -49,22 +54,6 @@ export type ProcessedPage = {
 
 export type PageReporter = (note: Note) => void;
 
-const iou = (a: Detection["bbox"], b: Detection["bbox"]) => {
-  const ix = Math.max(0, Math.min(a.x + a.w, b.x + b.w) - Math.max(a.x, b.x));
-  const iy = Math.max(0, Math.min(a.y + a.h, b.y + b.h) - Math.max(a.y, b.y));
-  const inter = ix * iy;
-  const union = a.w * a.h + b.w * b.h - inter;
-  return union > 0 ? inter / union : 0;
-};
-
-/** Se queda con la detección más confiable de cada grupo solapado. */
-function dedupe(dets: Detection[]): Detection[] {
-  const kept: Detection[] = [];
-  for (const det of [...dets].sort((a, b) => b.conf - a.conf)) {
-    if (kept.every((k) => iou(det.bbox, k.bbox) < DEDUPE_IOU)) kept.push(det);
-  }
-  return kept;
-}
 
 const readMs = (ink: number) =>
   Math.round(Math.min(Math.max(READ_MS.min + ink * READ_SCALE, READ_MS.min), READ_MS.max));
@@ -141,8 +130,9 @@ export async function processPage(
   report?.({ key: "findingPanels" });
   const dets = await detector.detect(ctx.getImageData(0, 0, width, height));
 
-  let panels = dedupe(
+  let panels = choosePanels(
     dets.filter((d) => d.cls === "frame" && polygonArea(d.polygon) / pageArea >= MIN_PANEL_AREA),
+    pageArea,
   );
   const balloons = dedupe(dets.filter((d) => d.cls === "balloon"));
   const texts = dets.filter((d) => d.cls === "text");
