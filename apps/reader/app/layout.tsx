@@ -60,7 +60,7 @@ export const viewport: Viewport = {
  * pocos, que es lo único que las páginas escriben.
  */
 const KANA_URL =
-  "https://fonts.googleapis.com/css2?family=Zen+Kaku+Gothic+New:wght@700;900&text=%E3%83%89%E3%82%A9%E3%83%B3%E6%BC%AB%E7%94%BB%E5%85%90%E7%B5%82%E4%BB%95%E7%B5%84%E3%81%BF&display=swap";
+  "https://fonts.googleapis.com/css2?family=Zen+Kaku+Gothic+New:wght@700;900&text=%E3%83%89%E3%82%A9%E3%83%B3%E6%BC%AB%E7%94%BB%E5%85%90%E7%B5%82%E4%BB%95%E7%B5%84%E3%81%BF%E3%82%B4%E7%AC%AC%E4%B8%80%E8%A9%B1%E3%81%A4%E3%81%A5%E3%81%8F&display=swap";
 
 export default function RootLayout({ children }: LayoutProps<"/">) {
   return (

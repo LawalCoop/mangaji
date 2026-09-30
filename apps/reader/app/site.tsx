@@ -128,7 +128,7 @@ export function SiteFooter() {
 
   return (
     <footer
-      className="panel grid gap-x-[18px] py-2 md:grid-cols-3"
+      className="panel relative grid gap-x-[18px] py-2 md:grid-cols-3"
       style={{ ...screenPanel, color: "#B4B4BC" }}
     >
       {/* Cada columna arranca con un renglón de la misma altura: logo o título, alineados. */}
@@ -176,6 +176,14 @@ export function SiteFooter() {
           </a>
         </nav>
       </div>
+      {/* Guiño: el sello de "fin" con que cierra un tomo, estampado en rojo. */}
+      <span
+        aria-hidden
+        className="pointer-events-none absolute right-5 bottom-4 flex h-11 w-11 select-none items-center justify-center border-[3px] font-[family-name:var(--font-kana)] text-[22px] font-black leading-none"
+        style={{ borderColor: "#D6204E", color: "#D6204E", transform: "rotate(-9deg)", opacity: 0.85 }}
+      >
+        終
+      </span>
     </footer>
   );
 }

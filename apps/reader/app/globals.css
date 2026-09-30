@@ -125,3 +125,31 @@ body {
     transform: translate(2px, 2px);
   }
 }
+
+/* Guiños de la portada. */
+
+/* Destellos del botón de carga: titilan mientras se lo señala. */
+@keyframes kira {
+  0%,
+  100% {
+    transform: scale(0.6) rotate(0deg);
+  }
+  50% {
+    transform: scale(1.15) rotate(20deg);
+  }
+}
+.group:hover .kira {
+  animation: kira 0.9s ease-in-out infinite;
+}
+
+/* "Continuará": una etiqueta de papel con punta de flecha. */
+.tsuzuku {
+  background: #f4efe3;
+  clip-path: polygon(0 0, calc(100% - 22px) 0, 100% 50%, calc(100% - 22px) 100%, 0 100%);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .group:hover .kira {
+    animation: none;
+  }
+}

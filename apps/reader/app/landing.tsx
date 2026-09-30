@@ -86,6 +86,28 @@ export function Landing({ status, message, onFile, onUrl, download }: Props) {
             className="panel @container relative flex flex-col justify-center px-6 py-8 max-lg:order-1 sm:px-10 sm:py-12"
             style={panel}
           >
+            {/* Guiño: el encabezado de capítulo, en vertical como en el tomo impreso. */}
+            <span
+              aria-hidden
+              className="absolute top-0 right-6 px-2 py-3 font-[family-name:var(--font-kana)] text-[15px] font-black tracking-[0.3em] max-sm:hidden sm:right-10"
+              style={{ writingMode: "vertical-rl", background: INK, color: PAPER }}
+            >
+              第一話
+            </span>
+
+            {/* Guiño: el aura amenazante, en el rincón que deja libre el texto. */}
+            <span
+              aria-hidden
+              className="pointer-events-none absolute right-8 bottom-6 flex select-none gap-1 font-[family-name:var(--font-kana)] font-black leading-none max-md:hidden"
+              style={{ fontSize: "clamp(2rem, 3.4vw, 3.4rem)", color: PAPER, WebkitTextStroke: `2.5px ${MAGENTA}`, transform: "rotate(-8deg)" }}
+            >
+              {["ゴ", "ゴ", "ゴ", "ゴ"].map((g, i) => (
+                <span key={i} style={{ transform: `translateY(${i % 2 ? -0.25 : 0.1}em)` }}>
+                  {g}
+                </span>
+              ))}
+            </span>
+
             <p className="text-[15px] font-medium sm:text-[18px]" style={{ color: "#3A3A42" }}>
               {L.tagline}
             </p>
@@ -204,6 +226,22 @@ export function Landing({ status, message, onFile, onUrl, download }: Props) {
                 </p>
               </div>
 
+              {/* Guiño: destellos (kira-kira) alrededor del botón al señalarlo. */}
+              <div className="group relative">
+                {[
+                  { top: "-18px", left: "-16px", size: 22, delay: "0ms", color: CYAN },
+                  { top: "-10px", right: "-20px", size: 16, delay: "120ms", color: MAGENTA },
+                  { bottom: "-16px", right: "18%", size: 13, delay: "240ms", color: CYAN },
+                ].map(({ size, delay, color, ...pos }, i) => (
+                  <span
+                    key={i}
+                    aria-hidden
+                    className="kira pointer-events-none absolute leading-none opacity-0 transition-opacity duration-200 group-hover:opacity-100"
+                    style={{ ...pos, fontSize: size, color, animationDelay: delay }}
+                  >
+                    ✦
+                  </span>
+                ))}
               <button
                 type="button"
                 onClick={() => {
@@ -227,6 +265,7 @@ export function Landing({ status, message, onFile, onUrl, download }: Props) {
                   {L.choose}
                 </span>
               </button>
+              </div>
               <input
                 ref={input}
                 type="file"
@@ -360,8 +399,12 @@ export function Landing({ status, message, onFile, onUrl, download }: Props) {
         <div className="flex justify-end max-lg:order-4">
           <Link
             href="/como-funciona/"
-            className="inline-flex items-center gap-3 text-[17px] font-bold text-[#F4EFE3] underline decoration-[#00D9F5] decoration-[3px] underline-offset-[6px] transition-colors hover:text-white sm:text-[19px]"
+            className="tsuzuku group inline-flex items-center gap-4 py-3 pr-10 pl-5 text-[16px] font-bold text-[#0B0B0C] transition-transform hover:translate-x-1 focus-visible:outline focus-visible:outline-3 focus-visible:outline-offset-4 focus-visible:outline-[#00D9F5] sm:text-[18px]"
           >
+            {/* Guiño: la flecha de "continuará" que cierra un capítulo. */}
+            <span aria-hidden className="font-[family-name:var(--font-kana)] text-[15px] font-black tracking-[0.15em] text-[#FF2E88]">
+              つづく
+            </span>
             {t.landing.howLink}
           </Link>
         </div>
