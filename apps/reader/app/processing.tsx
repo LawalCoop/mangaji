@@ -110,10 +110,12 @@ export function Processing({ title, stage, lines, progress, eta }: ProcessingPro
               {Array.from({ length: 28 }, (_, i) => {
                 const filled = pct !== null && (i + 1) / 28 <= progress!;
                 const edge = pct !== null && Math.abs((i + 0.5) / 28 - progress!) < 1 / 28;
+                // El tramo en curso titila, como un cursor: quieto se leía como un color
+                // puesto porque sí, no como "acá se está trabajando".
                 return (
                   <span
                     key={i}
-                    className="flex-1"
+                    className={`flex-1 ${!filled && edge ? "segment-live" : ""}`}
                     style={{
                       border: `2px solid ${INK}`,
                       background: filled ? INK : edge ? CYAN : "transparent",

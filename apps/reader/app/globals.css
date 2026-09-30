@@ -153,3 +153,22 @@ body {
     animation: none;
   }
 }
+
+/* Procesamiento: el tramo en curso de la barra titila, como un cursor. */
+@keyframes segment-live {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.25;
+  }
+}
+.segment-live {
+  animation: segment-live 1.1s ease-in-out infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .segment-live {
+    animation: none;
+  }
+}
