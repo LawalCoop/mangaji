@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { erase, inkOf, spriteOf } from "./dialogue";
+import { edgeInk, erase, inkOf, spriteOf } from "./dialogue";
 
 /**
  * Un bloque de papel con letras encima, como el interior de un globo.
@@ -507,5 +507,17 @@ describe("borrado del diálogo", () => {
         expect(px[i]).toBe(before[i]);
       }
     }
+  });
+});
+
+describe("dibujo que sigue fuera de la caja", () => {
+  it("mide cuánta tinta toca el borde", () => {
+    const w = 40;
+    const h = 40;
+    const alpha = new Uint8Array(w * h);
+    // Una letra adentro y una línea de velocidad que cruza la caja entera.
+    for (let y = 10; y < 20; y++) for (let x = 10; x < 14; x++) alpha[y * w + x] = 255;
+    for (let x = 0; x < w; x++) for (let y = 30; y < 34; y++) alpha[y * w + x] = 255;
+    expect(edgeInk(alpha, w, h)).toBeCloseTo(160 / 200, 2);
   });
 });

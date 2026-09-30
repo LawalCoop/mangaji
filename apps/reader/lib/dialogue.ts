@@ -29,6 +29,8 @@ const MAX_SPECK_SHARE = 0.08;
 /** Con esta fracción de puntos entre las manchas, y esta de la tinta en ellos, es trama. */
 const MAX_DOT_SHARE = 0.5;
 const MIN_DOT_INK = 0.25;
+/** Fracción de la tinta de un texto suelto que puede tocar el borde de su caja. */
+const MAX_EDGE_INK = 0.4;
 /** Techo de tamaño de un bloque, como fracción de la página. */
 export const MAX_TEXT_AREA_RATIO = 0.04;
 
@@ -428,6 +430,14 @@ export async function lift(
   if (!measured) return null;
   const { alpha, paper } = measured;
 
+  // Sin globo que lo contenga, un dibujo también puede pasar por texto: trama, líneas de
+  // velocidad, llamas punteadas. Lo que lo delata es que sigue más allá de la caja. En los
+  // textos reales a lo sumo el 30 % de la tinta toca el borde de la caja; en esos dibujos,
+  // más de la mitad.
+  // Solo con tinta oscura sobre papel: en un recuadro de color lo que sigue de largo puede
+  // ser el mismo recuadro, o el blanco de la página alrededor.
+  if (!hosts.length && typeof paper === "number" && edgeInk(alpha, cw, ch) > MAX_EDGE_INK) return null;
+
   // Los colores de antes de borrar, que son los que se lleva el sprite: `erase` los pisa con
   // el papel, y leerlos después dejaba el diálogo escrito en blanco sobre el globo blanco.
   const before = new Uint8ClampedArray(px);
@@ -652,4 +662,24 @@ function contains(polygon: Point[], px: number, py: number): boolean {
     if (yi > py !== yj > py && px < ((xj - xi) * (py - yi)) / (yj - yi) + xi) inside = !inside;
   }
   return inside;
+}
+
+/** Qué fracción de la tinta está en manchas que tocan el borde del bloque. */
+export function edgeInk(alpha: Uint8Array, w: number, h: number): number {
+  const ink = new Uint8Array(w * h);
+  let total = 0;
+  for (let i = 0; i < alpha.length; i++) {
+    if (alpha[i] > 60) {
+      ink[i] = 1;
+      total++;
+    }
+  }
+  if (!total) return 0;
+  const { labels, stats } = components(ink, w, h);
+  const touching = new Uint8Array(stats.length + 1);
+  for (let x = 0; x < w; x++) touching[labels[x]] = touching[labels[(h - 1) * w + x]] = 1;
+  for (let y = 0; y < h; y++) touching[labels[y * w]] = touching[labels[y * w + w - 1]] = 1;
+  let edge = 0;
+  for (const st of stats) if (touching[st.label]) edge += st.area;
+  return edge / total;
 }
