@@ -50,6 +50,8 @@ function paperColor(bitmap: ImageBitmap): number {
   const [r, g, b] = edge.map(paper);
   return (r << 16) | (g << 8) | b;
 }
+/** A qué fracción de la resolución se arman el desenfoque y la máscara del foco. */
+const FOCUS_SCALE = 4;
 /**
  * Cuánto se atenúa el diálogo de las viñetas que no son la activa.
  *
@@ -101,6 +103,7 @@ export class Stage {
   #focusCanvas: HTMLCanvasElement | null = null;
   #sharpCanvas: HTMLCanvasElement | null = null;
   #maskCanvas: HTMLCanvasElement | null = null;
+  #smallCanvas: HTMLCanvasElement | null = null;
   #focusTexture: Texture | null = null;
   #focusKey = "";
 
@@ -389,12 +392,25 @@ export class Stage {
     const focus = this.#ensureCanvas("focus", width, height);
     const sharp = this.#ensureCanvas("sharp", width, height);
 
+    // El fondo desenfocado se arma a un cuarto de resolución y se estira: está borroso de
+    // todos modos, así que se ve igual, y un desenfoque sobre la página entera —varios
+    // megapíxeles— era lo más caro de cada cambio de viñeta.
+    const sw = Math.max(1, Math.round(width / FOCUS_SCALE));
+    const sh = Math.max(1, Math.round(height / FOCUS_SCALE));
+    const small = this.#ensureCanvas("focus-small", sw, sh);
+    const smx = small.getContext("2d")!;
+    smx.setTransform(1, 0, 0, 1, 0, 0);
+    smx.clearRect(0, 0, sw, sh);
+    smx.filter = `blur(${this.focusBlur / FOCUS_SCALE}px)`;
+    smx.drawImage(bitmap, 0, 0, sw, sh);
+    smx.filter = "none";
+
     const fx = focus.getContext("2d")!;
     fx.setTransform(1, 0, 0, 1, 0, 0);
     fx.clearRect(0, 0, width, height);
-    fx.filter = `blur(${this.focusBlur}px)`;
-    fx.drawImage(bitmap, 0, 0);
-    fx.filter = "none";
+    fx.imageSmoothingEnabled = true;
+    fx.imageSmoothingQuality = "high";
+    fx.drawImage(small, 0, 0, width, height);
     fx.fillStyle = `rgba(0,0,0,${this.focusStrength})`;
     fx.fillRect(0, 0, width, height);
 
@@ -410,10 +426,11 @@ export class Stage {
     // Con `destination-in` cada operación de dibujo recorta, así que rellenar y después
     // trazar dejaba solo el anillo del trazo: la viñeta salía nítida en los bordes y
     // borrosa en el centro, justo al revés.
-    const mask = this.#ensureCanvas("mask", width, height);
+    // La máscara también va a un cuarto: su borde es un desvanecido, y estirado sigue igual.
+    const mask = this.#ensureCanvas("mask", sw, sh);
     const mx = mask.getContext("2d")!;
-    const feather = this.focusFeather;
-    mx.setTransform(1, 0, 0, 1, 0, 0);
+    const feather = this.focusFeather / FOCUS_SCALE;
+    mx.setTransform(1 / FOCUS_SCALE, 0, 0, 1 / FOCUS_SCALE, 0, 0);
     mx.globalCompositeOperation = "source-over";
     mx.clearRect(0, 0, width, height);
     // Trazar con grosor además de rellenar dilata la silueta, y así el desvanecido cae por
@@ -422,7 +439,7 @@ export class Stage {
     mx.fillStyle = "#fff";
     mx.strokeStyle = "#fff";
     mx.lineJoin = "round";
-    mx.lineWidth = feather;
+    mx.lineWidth = feather * FOCUS_SCALE;
     mx.beginPath();
     frame.polygon!.forEach(([x, y], i) => (i === 0 ? mx.moveTo(x, y) : mx.lineTo(x, y)));
     mx.closePath();
@@ -431,7 +448,8 @@ export class Stage {
     mx.filter = "none";
 
     sx.globalCompositeOperation = "destination-in";
-    sx.drawImage(mask, 0, 0);
+    sx.imageSmoothingEnabled = true;
+    sx.drawImage(mask, 0, 0, width, height);
     sx.globalCompositeOperation = "source-over";
 
     fx.drawImage(sharp, 0, 0);
@@ -443,12 +461,18 @@ export class Stage {
   }
 
   #ensureCanvas(
-    which: "focus" | "sharp" | "mask",
+    which: "focus" | "focus-small" | "sharp" | "mask",
     width: number,
     height: number,
   ): HTMLCanvasElement {
     const current =
-      which === "focus" ? this.#focusCanvas : which === "sharp" ? this.#sharpCanvas : this.#maskCanvas;
+      which === "focus"
+        ? this.#focusCanvas
+        : which === "focus-small"
+          ? this.#smallCanvas
+          : which === "sharp"
+            ? this.#sharpCanvas
+            : this.#maskCanvas;
     if (current && current.width === width && current.height === height) return current;
 
     const canvas = document.createElement("canvas");
@@ -459,6 +483,8 @@ export class Stage {
       // La textura queda ligada al lienzo: si el lienzo cambia, hay que rehacerla.
       this.#focusTexture?.destroy(true);
       this.#focusTexture = null;
+    } else if (which === "focus-small") {
+      this.#smallCanvas = canvas;
     } else if (which === "sharp") {
       this.#sharpCanvas = canvas;
     } else {

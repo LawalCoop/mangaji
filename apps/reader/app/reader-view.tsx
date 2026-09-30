@@ -508,6 +508,9 @@ export default function ReaderView() {
         }
 
         if (msg.kind === "models") {
+          // Con el lector abierto la pantalla de carga ya no se ve: actualizarla era
+          // trabajo de React por cada página, justo mientras se lee.
+          if (mounted) return;
           setStage({ kind: "models", note: msg.note });
           setLines((l) => [...l, { note: msg.note }]);
           if (msg.note.key === "loadingPanels") advance(PREP.downloaded, PREP.panelsReady);
@@ -516,6 +519,7 @@ export default function ReaderView() {
         }
 
         if (msg.kind === "progress") {
+          if (mounted) return;
           setStage({ kind: "page", index: msg.index, total, note: msg.note });
           setLines((l) => [...l, { note: msg.note, page: msg.index + 1 }]);
           if (msg.index === 0) {
@@ -577,6 +581,12 @@ export default function ReaderView() {
           await settled;
           settle.delete(index);
           if (failed) throw new Error(failed);
+          // Mientras dura la apertura no se procesa: la inferencia compite con la animación
+          // por la placa de video —o por todos los núcleos, sin GPU— y la tapa entraba a
+          // tirones. Después sigue, con la lectura ya andando.
+          if (index === 0 && !window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
+            await new Promise((resolve) => setTimeout(resolve, OPENING.ms));
+          }
         }
       } finally {
         window.clearInterval(creep);

@@ -66,7 +66,9 @@ function configure(ort: typeof Ort): void {
   ort.env.wasm.wasmPaths = asset("/ort/");
   // Los hilos de WebAssembly necesitan memoria compartida, y el navegador solo la habilita
   // en páginas aisladas. Pedir doce sin eso no los da y encima avisa por consola.
-  ort.env.wasm.numThreads = crossOriginIsolated ? (navigator.hardwareConcurrency ?? 4) : 1;
+  // Un núcleo queda libre para el hilo que dibuja: con todos ocupados en la inferencia, la
+  // lectura iba a tirones mientras se procesaba el resto del tomo.
+  ort.env.wasm.numThreads = crossOriginIsolated ? Math.max(1, (navigator.hardwareConcurrency ?? 4) - 1) : 1;
   ort.env.logLevel = "error";
   global[FLAG] = true;
 }
