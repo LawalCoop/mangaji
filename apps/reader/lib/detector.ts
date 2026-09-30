@@ -161,7 +161,13 @@ export class Detector {
       const invertedOut = await this.#text.run({
         [this.#text.inputNames[0]]: new this.#ort.Tensor("float32", inverted, [1, 3, SIZE, SIZE]),
       });
-      fromText = mergeText(fromText, this.#decodeBoxes(invertedOut, scale, image.width, image.height));
+      // Solo lo que de verdad es letra clara sobre fondo oscuro. En negativo, una trama de
+      // puntos sobre blanco —la letra de una onomatopeya— también parece texto, y se borraba
+      // dejando un rectángulo blanco en el dibujo.
+      const light = this.#decodeBoxes(invertedOut, scale, image.width, image.height).filter((d) =>
+        onDark(image, d.bbox),
+      );
+      fromText = mergeText(fromText, light);
     }
 
     return mergeText(fromPanels, fromText).sort((a, b) => b.conf - a.conf);
@@ -466,4 +472,35 @@ function darkShare(image: ImageData): number {
     }
   }
   return total ? solid / total : 0;
+}
+
+/** A partir de este brillo, el borde de una caja no es fondo oscuro. */
+const DARK_BACKDROP = 90;
+
+/**
+ * ¿La caja está sobre fondo oscuro? Se mira la mediana del brillo de su borde, que cae casi
+ * todo en el fondo, entre letra y letra.
+ */
+export function onDark(image: Pick<ImageData, "data" | "width" | "height">, box: Detection["bbox"]): boolean {
+  const { data, width, height } = image;
+  const x0 = Math.max(0, Math.floor(box.x));
+  const y0 = Math.max(0, Math.floor(box.y));
+  const x1 = Math.min(width - 1, Math.ceil(box.x + box.w) - 1);
+  const y1 = Math.min(height - 1, Math.ceil(box.y + box.h) - 1);
+  if (x1 <= x0 || y1 <= y0) return false;
+  const levels: number[] = [];
+  const take = (x: number, y: number) => {
+    const i = (y * width + x) * 4;
+    levels.push(Math.max(data[i], data[i + 1], data[i + 2]));
+  };
+  for (let x = x0; x <= x1; x++) {
+    take(x, y0);
+    take(x, y1);
+  }
+  for (let y = y0 + 1; y < y1; y++) {
+    take(x0, y);
+    take(x1, y);
+  }
+  levels.sort((a, b) => a - b);
+  return levels[levels.length >> 1] < DARK_BACKDROP;
 }

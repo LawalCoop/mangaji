@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { maskToPolygon } from "./detector";
+import { maskToPolygon, onDark } from "./detector";
 
 /** Generador determinista: los casos tienen que ser los mismos en cada corrida. */
 function lcg(seed: number) {
@@ -58,5 +58,30 @@ describe("máscara a polígono", () => {
   it("una caja sin nada por encima del umbral no da polígono", () => {
     const small = new Float32Array(sw * sh);
     expect(maskToPolygon(small, sw, sh, width, height, { x1: 10, y1: 10, x2: 20, y2: 20 })).toBeNull();
+  });
+});
+
+
+function flatPage(w: number, h: number, level: (x: number, y: number) => number) {
+  const data = new Uint8ClampedArray(w * h * 4);
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      const v = level(x, y);
+      data.set([v, v, v, 255], (y * w + x) * 4);
+    }
+  }
+  return { data, width: w, height: h };
+}
+
+describe("texto de la pasada invertida", () => {
+  it("acepta letra clara sobre una mancha negra", () => {
+    const img = flatPage(60, 60, (x, y) => (x > 20 && x < 30 && y > 20 && y < 40 ? 255 : 0));
+    expect(onDark(img, { x: 10, y: 10, w: 40, h: 40 })).toBe(true);
+  });
+
+  it("descarta una trama de puntos sobre blanco", () => {
+    // En negativo parece texto, pero el fondo es claro: es dibujo.
+    const img = flatPage(60, 60, (x, y) => (x % 3 === 0 && y % 3 === 0 ? 0 : 255));
+    expect(onDark(img, { x: 10, y: 10, w: 40, h: 40 })).toBe(false);
   });
 });

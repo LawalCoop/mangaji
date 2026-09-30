@@ -375,6 +375,30 @@ describe("borrado del diálogo", () => {
     expect(measured!.paper).toEqual(pink);
   });
 
+  it("dentro de un globo grande no borra la trama lejos del texto", () => {
+    // Un globo en estallido que abarca media viñeta: los puntos de una trama dentro de él
+    // pasaban por letras y se borraban en bloque.
+    const w = 80;
+    const h = 80;
+    const { px, alpha } = block(w, h, [[40, 56, 5, 10]]);
+    for (let y = 4; y < 30; y += 4) {
+      for (let x = 4; x < 60; x += 4) {
+        const i = (y * w + x) * 4;
+        px[i] = px[i + 1] = px[i + 2] = 20;
+        alpha[y * w + x] = 235;
+      }
+    }
+    const inside = new Uint8Array(w * h).fill(1);
+    const seed = { x: 34, y: 50, w: 18, h: 22 };
+
+    erase(px, alpha, w, h, 255, inside, seed);
+
+    // La letra se fue…
+    expect(px[(60 * w + 42) * 4]).toBeGreaterThan(245);
+    // …y la trama de arriba sigue.
+    expect(px[(8 * w + 8) * 4]).toBeLessThan(60);
+  });
+
   it("el sprite se lleva la tinta original, no el papel que quedó en su lugar", () => {
     const w = 40;
     const h = 40;

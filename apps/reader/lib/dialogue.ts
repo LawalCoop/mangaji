@@ -94,6 +94,12 @@ const ERASE_GAIN = 8;
 const INSET = 3;
 /** Qué parte de una mancha tiene que caer dentro del globo para borrarse. */
 const INSIDE_SHARE = 0.5;
+/** Hasta dónde, fuera de la caja del detector, se sigue buscando letras: fracción de la caja. */
+const NEAR_SEED = 0.5;
+/** Una mancha más chica que esto, en píxeles, es un punto de trama y no una letra. */
+const MIN_LETTER_AREA = 12;
+/** Y tampoco una mucho más chica que la letra típica del texto. */
+const LETTER_SHARE = 0.3;
 
 /**
  * Borra la tinta reemplazándola por lo que la rodea, difuminado.
@@ -180,9 +186,33 @@ export function erase(
     // Adentro del globo no hace falta que la caja la haya tocado: el modelo corta seguido la
     // caja —más con dos globos encimados, que ve como uno— y las letras de afuera quedaban a
     // la vista. Lo que está en el globo y tiene forma de letra se va con el resto.
+    //
+    // Pero solo cerca de la caja, y solo lo que tiene tamaño de letra: un globo grande —un
+    // estallido— puede abarcar media viñeta, y los puntos de una trama dentro de él pasaban
+    // por letras sueltas y se borraban en bloque, dejando un rectángulo blanco en el dibujo.
+    const near = new Uint8Array(stats.length + 1);
+    if (seed) {
+      const padX = Math.round(seed.w * NEAR_SEED);
+      const padY = Math.round(seed.h * NEAR_SEED);
+      const x0 = Math.max(0, seed.x - padX);
+      const y0 = Math.max(0, seed.y - padY);
+      const x1 = Math.min(w, seed.x + seed.w + padX);
+      const y1 = Math.min(h, seed.y + seed.h + padY);
+      for (let y = y0; y < y1; y++) for (let x = x0; x < x1; x++) near[labels[y * w + x]] = 1;
+    } else {
+      near.fill(1);
+    }
+    // El tamaño de letra se toma de las que la caja sí tocó: los puntos de una trama son
+    // mucho más chicos, a cualquier resolución.
+    const letterAreas = stats
+      .filter((st) => touched[st.label] && contacts[st.label] / border <= EDGE_SHARE && st.area >= 6)
+      .map((st) => st.area)
+      .sort((a, b) => a - b);
+    const typical = letterAreas.length ? letterAreas[letterAreas.length >> 1] : 0;
+    const minArea = Math.max(MIN_LETTER_AREA, typical * LETTER_SHARE);
     for (const stat of stats) {
       const label = stat.label;
-      const reached = touched[label] || within[label] > 0;
+      const reached = touched[label] || (within[label] > 0 && near[label] && stat.area >= minArea);
       const letter = contacts[label] / border <= EDGE_SHARE && within[label] >= stat.area * INSIDE_SHARE;
       isLetter[label] = reached && letter ? 1 : 0;
     }
