@@ -23,25 +23,6 @@ export interface ArchiveSource {
 
 type Pending = { resolve: (v: unknown) => void; reject: (e: Error) => void };
 
-/**
- * Reempaqueta un CBR como ZIP en memoria.
- *
- * Así el resto del lector no se entera del formato: descomprimir RAR pasa una sola vez, al
- * abrir, y de ahí en más todo funciona igual. Se guarda sin comprimir porque las páginas ya
- * son JPG o PNG y volver a comprimirlas no ahorra nada.
- */
-async function rezip(file: File): Promise<Blob> {
-  const [{ readRar }, { zipSync }] = await Promise.all([import("./rar"), import("fflate")]);
-  const pages = await readRar(file);
-  if (!pages.length) throw new Error("El CBR no contiene imágenes");
-
-  const files: Record<string, Uint8Array> = {};
-  for (const page of pages) {
-    files[page.name] = new Uint8Array(await page.file.arrayBuffer());
-  }
-  return new Blob([zipSync(files, { level: 0 }) as unknown as BlobPart]);
-}
-
 /** Cuántas páginas decodificadas se mantienen vivas alrededor de la actual. */
 const CACHE_LIMIT = 5;
 
@@ -73,14 +54,21 @@ export class CbzSource implements ArchiveSource {
     });
     const source = new CbzSource(worker);
 
-    // Un CBR es un RAR y el worker solo entiende ZIP: se convierte antes, una sola vez.
-    const { isRar } = await import("./rar");
-    const input = (await isRar(file)) ? await rezip(file as File) : file;
-    const buffer = await input.arrayBuffer();
-    const { entries, all } = (await source.#send({ kind: "open", buffer }, [buffer])) as {
-      entries: string[];
-      all: string[];
-    };
+    // Un CBR es un RAR: libarchive lo descomprime acá y al worker le llegan las páginas
+    // sueltas. Antes se reempaquetaba como ZIP para que el worker hablara un solo formato,
+    // y eso eran tres o cuatro copias del tomo en memoria a la vez —lo que en un celular
+    // termina con la pestaña cerrada—. Las páginas viajan como `Blob`, sin copiar bytes.
+    const { isRar, readRar } = await import("./rar");
+    const opened = (await isRar(file))
+      ? await readRar(file as File).then((pages) => {
+          if (!pages.length) throw new Error("El CBR no contiene imágenes");
+          return source.#send({
+            kind: "openFiles",
+            files: pages.map((p) => ({ name: p.name, blob: p.file })),
+          });
+        })
+      : await file.arrayBuffer().then((buffer) => source.#send({ kind: "open", buffer }, [buffer]));
+    const { entries, all } = opened as { entries: string[]; all: string[] };
     source.#entries = entries;
     source.#all = new Set(all);
     return source;

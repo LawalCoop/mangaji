@@ -7,14 +7,20 @@ import { isPage, sortPages } from "./entries";
  * bajo demanda. Un tomo entero descomprimido serían cientos de MB; así solo vive el zip
  * original más las páginas que el reader tenga en vuelo.
  *
+ * Un CBR llega distinto: libarchive ya lo descomprimió y lo que se recibe son las páginas
+ * sueltas, como `Blob`. Pasar un `Blob` a un worker no copia los bytes, así que el tomo vive
+ * una sola vez en memoria y cada página se lee recién cuando se pide.
+ *
  * La decodificación a ImageBitmap también pasa acá, para no bloquear el hilo principal.
  */
 
 let archive: Uint8Array | null = null;
+let loose: Map<string, Blob> | null = null;
 let entries: string[] = [];
 
 type Req =
   | { id: number; kind: "open"; buffer: ArrayBuffer }
+  | { id: number; kind: "openFiles"; files: { name: string; blob: Blob }[] }
   | { id: number; kind: "bitmap"; index: number }
   | { id: number; kind: "bitmapOf"; name: string }
   | { id: number; kind: "text"; name: string };
@@ -22,9 +28,15 @@ type Req =
 self.onmessage = async (ev: MessageEvent<Req>) => {
   const msg = ev.data;
   try {
-    if (msg.kind === "open") {
-      archive = new Uint8Array(msg.buffer);
-      const found = await listAll(archive);
+    if (msg.kind === "open" || msg.kind === "openFiles") {
+      let found: string[];
+      if (msg.kind === "open") {
+        archive = new Uint8Array(msg.buffer);
+        found = await listAll(archive);
+      } else {
+        loose = new Map(msg.files.map((f) => [f.name, f.blob]));
+        found = [...loose.keys()];
+      }
       entries = sortPages(found.filter(isPage));
       if (entries.length === 0) throw new Error("El archivo no contiene imágenes");
       // Un `.cbza` trae manifest; un CBZ común, no. Es lo que decide el modo de lectura.
@@ -33,19 +45,16 @@ self.onmessage = async (ev: MessageEvent<Req>) => {
     }
 
     if (msg.kind === "text") {
-      if (!archive) throw new Error("No hay archivo abierto");
-      const bytes = await inflateOne(archive, msg.name);
-      self.postMessage({ id: msg.id, ok: true, text: new TextDecoder().decode(bytes) });
+      const text = await (await read(msg.name)).text();
+      self.postMessage({ id: msg.id, ok: true, text });
       return;
     }
 
     if (msg.kind === "bitmap" || msg.kind === "bitmapOf") {
-      if (!archive) throw new Error("No hay archivo abierto");
       const name = msg.kind === "bitmapOf" ? msg.name : entries[msg.index];
       if (!name) throw new Error("Entrada inexistente");
-      const bytes = await inflateOne(archive, name);
       // El tipo lo infiere el decodificador; no hace falta acertar el mime exacto.
-      const bitmap = await createImageBitmap(new Blob([bytes as BlobPart]));
+      const bitmap = await createImageBitmap(await read(name));
       self.postMessage({ id: msg.id, ok: true, bitmap }, { transfer: [bitmap] });
       return;
     }
@@ -53,6 +62,17 @@ self.onmessage = async (ev: MessageEvent<Req>) => {
     self.postMessage({ id: msg.id, ok: false, error: (err as Error).message });
   }
 };
+
+/** Una entrada del archivo abierto, lista para decodificar. */
+async function read(name: string): Promise<Blob> {
+  if (loose) {
+    const blob = loose.get(name);
+    if (!blob) throw new Error(`Entrada inexistente: ${name}`);
+    return blob;
+  }
+  if (!archive) throw new Error("No hay archivo abierto");
+  return new Blob([(await inflateOne(archive, name)) as BlobPart]);
+}
 
 /**
  * Lista el contenido sin descomprimir nada: el filtro de fflate se invoca con cada entrada

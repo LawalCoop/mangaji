@@ -4,8 +4,7 @@ import { asset } from "./base";
 /**
  * Lectura de CBR, que es un RAR.
  *
- * El resto del lector trabaja sobre ZIP, que se descomprime con `fflate` en unas pocas
- * líneas. RAR no: el formato es cerrado y no hay implementación razonable en JavaScript
+ * Un ZIP se descomprime con `fflate` en unas pocas líneas. RAR no: el formato es cerrado y no hay implementación razonable en JavaScript
  * puro, así que se usa libarchive compilado a WebAssembly —un mega, contra los cincuenta de
  * los modelos—.
  *
