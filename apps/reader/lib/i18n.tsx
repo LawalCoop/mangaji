@@ -787,13 +787,11 @@ export function I18nProvider({
     } catch {
       // Sin almacenamiento: vale para esta visita.
     }
-    // Un `?lang=` en la dirección le gana a lo guardado: se saca para que al recargar
-    // quede lo que se acaba de elegir.
+    // El idioma elegido queda en la dirección: así el link que se comparte abre en ese
+    // idioma, y al recargar se mantiene (el `?lang=` le gana a lo guardado).
     const url = new URL(window.location.href);
-    if (url.searchParams.has("lang")) {
-      url.searchParams.delete("lang");
-      window.history.replaceState(window.history.state, "", url);
-    }
+    url.searchParams.set("lang", next);
+    window.history.replaceState(window.history.state, "", url);
   }, []);
 
   const value = useMemo(() => ({ lang, t: MESSAGES[lang], setLang }), [lang, setLang]);
