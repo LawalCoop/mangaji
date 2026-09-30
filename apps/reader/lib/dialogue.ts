@@ -165,16 +165,22 @@ export function erase(
     // —un pasillo, un cielo tramado—, forma una sola mancha con todo ese gris; la caja la
     // roza y se blanqueaba el rectángulo entero, que al revelarse el texto volvía a medias
     // y se veía como un cuadro claro alrededor del globo.
+    //
+    // Y solo adentro de la silueta del globo, que ya viene metida unos píxeles: un tramo del
+    // contorno que cae entero dentro de la región no roza su borde y pasaba por letra, así
+    // que el globo quedaba recortado donde el texto le quedaba cerca.
     for (let p = 0; p < count; p++) {
-      cover[p] = labels[p] && isLetter[labels[p]] ? Math.min(1, (alpha[p] / 255) * ERASE_GAIN) : 0;
+      cover[p] =
+        inside[p] && labels[p] && isLetter[labels[p]] ? Math.min(1, (alpha[p] / 255) * ERASE_GAIN) : 0;
     }
   } else {
     for (let p = 0; p < count; p++) cover[p] = labels[p] && isLetter[labels[p]] ? 1 : 0;
   }
 
   // El trazo se agranda un poco antes de taparlo, para alcanzar su halo.
+  // Dentro de un globo el halo tampoco puede salirse de su silueta: el contorno queda cerca.
   boxBlur(cover, w, h, SPREAD);
-  for (let p = 0; p < count; p++) cover[p] = Math.min(1, cover[p] * 3);
+  for (let p = 0; p < count; p++) cover[p] = inside && !inside[p] ? 0 : Math.min(1, cover[p] * 3);
 
   // Un bloque cuyo fondo es papel es el interior de un globo, y ahí el hueco se tapa con
   // papel liso. Tomar el promedio de alrededor parece más fino pero es justo lo que ensucia:

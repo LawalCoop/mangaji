@@ -192,6 +192,28 @@ describe("borrado del diálogo", () => {
     expect(px[(8 * w + 20) * 4]).toBeLessThan(60);
   });
 
+  it("dentro del globo no se come el contorno que queda cerca del texto", () => {
+    const w = 40;
+    const h = 40;
+    // Un tramo del contorno del globo dentro de la región, sin tocar su borde: por forma
+    // pasaba por letra y el globo quedaba recortado.
+    const { px, alpha } = block(w, h, [
+      [16, 14, 5, 10],
+      [30, 6, 2, 24],
+    ]);
+    // La silueta del globo, ya metida hacia adentro: el contorno queda afuera.
+    const inside = new Uint8Array(w * h);
+    for (let y = 0; y < h; y++) for (let x = 0; x < 27; x++) inside[y * w + x] = 1;
+    const seed = { x: 6, y: 4, w: 28, h: 30 };
+
+    erase(px, alpha, w, h, 255, inside, seed);
+
+    // La letra se fue…
+    expect(px[(18 * w + 18) * 4]).toBeGreaterThan(245);
+    // …y el contorno sigue entero.
+    for (let y = 6; y < 30; y++) expect(px[(y * w + 30) * 4]).toBeLessThan(60);
+  });
+
   it("el sprite se lleva la tinta original, no el papel que quedó en su lugar", () => {
     const w = 40;
     const h = 40;
