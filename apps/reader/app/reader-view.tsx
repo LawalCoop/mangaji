@@ -75,9 +75,11 @@ type Status =
 const ETA_WINDOW = 5;
 
 function formatEta(seconds: number): string {
-  if (seconds < 60) return `${Math.max(1, Math.round(seconds))} s`;
-  const min = Math.floor(seconds / 60);
-  const rest = Math.round(seconds % 60);
+  // Se redondea el total antes de partirlo: redondear los segundos sueltos daba "2 min 60 s".
+  const total = Math.max(1, Math.round(seconds));
+  if (total < 60) return `${total} s`;
+  const min = Math.floor(total / 60);
+  const rest = total % 60;
   return rest ? `${min} min ${rest} s` : `${min} min`;
 }
 
