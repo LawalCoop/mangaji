@@ -40,12 +40,16 @@ const OPENING = { ms: 2600, zoom: 2.3, curtain: 1100 };
  * caché del navegador, ese tramo se cruza en un instante.
  */
 const PREP = {
-  unpacked: 0.05,
+  /** Descomprimir: entre estos dos, según el tamaño del archivo. */
+  unpackedMin: 0.04,
+  unpackedMax: 0.25,
   downloaded: 0.7,
   panelsReady: 0.84,
   modelsReady: 0.9,
   lifting: 0.96,
 };
+/** Cuántos bytes de archivo suman un punto entero de progreso al tramo de descomprimir. */
+const UNPACK_BYTES_PER_SHARE = 700 * 1024 * 1024;
 /**
  * Hay pasos que no informan cuánto llevan —preparar un detector puede tardar varios
  * segundos—. Mientras duran, la barra se acerca sola al final del tramo, cada vez más
@@ -475,10 +479,21 @@ export default function ReaderView() {
         setProgress((p) => (p === null || p >= ceiling ? p : p + (ceiling - p) * CREEP.share));
       }, CREEP.everyMs);
 
-      const cbz = await CbzSource.open(file);
+      // Descomprimir no informa avance —libarchive extrae el RAR entero y avisa al final—,
+      // así que la barra se acerca sola al final de este tramo mientras dura. El tramo pesa
+      // según el tamaño: un tomo de 150 MB tarda bastante más que un capítulo de 10.
+      const unpacked = Math.min(PREP.unpackedMax, PREP.unpackedMin + file.size / UNPACK_BYTES_PER_SHARE);
+      advance(0, unpacked * 0.95);
+      let cbz: CbzSource;
+      try {
+        cbz = await CbzSource.open(file);
+      } catch (err) {
+        window.clearInterval(creep);
+        throw err;
+      }
       const total = cbz.pageCount;
       setLines((l) => [...l, { note: { key: "pageCount", n: total } }]);
-      advance(PREP.unpacked);
+      advance(unpacked);
 
       const live = new LiveSource();
       liveRef.current = live;
@@ -503,7 +518,7 @@ export default function ReaderView() {
         const msg = ev.data;
 
         if (msg.kind === "download") {
-          advance(PREP.unpacked + (PREP.downloaded - PREP.unpacked) * msg.fraction);
+          advance(unpacked + (PREP.downloaded - unpacked) * msg.fraction);
           return;
         }
 
