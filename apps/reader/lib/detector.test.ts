@@ -79,6 +79,12 @@ describe("texto de la pasada invertida", () => {
     expect(onDark(img, { x: 10, y: 10, w: 40, h: 40 })).toBe(true);
   });
 
+  it("descarta un cielo negro salpicado de manchas claras", () => {
+    // El borde cae en lo negro, pero la mitad de la caja es claro: rocas, no letras.
+    const img = flatPage(60, 60, (x, y) => (x % 5 < 4 && x > 12 && x < 48 && y > 12 && y < 48 ? 255 : 0));
+    expect(onDark(img, { x: 10, y: 10, w: 40, h: 40 })).toBe(false);
+  });
+
   it("descarta una trama de puntos sobre blanco", () => {
     // En negativo parece texto, pero el fondo es claro: es dibujo.
     const img = flatPage(60, 60, (x, y) => (x % 3 === 0 && y % 3 === 0 ? 0 : 255));

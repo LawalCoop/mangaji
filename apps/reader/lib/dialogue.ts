@@ -412,7 +412,7 @@ export async function lift(
     w: Math.min(Math.ceil(w), cw),
     h: Math.min(Math.ceil(h), ch),
   };
-  const measured = inkOf(px, cw, ch, seed);
+  const measured = inkOf(px, cw, ch, seed, text.light);
   if (!measured) return null;
   const { alpha, paper } = measured;
 
@@ -456,7 +456,15 @@ export function inkOf(
   w: number,
   h: number,
   seed: Rect,
+  light = false,
 ): { alpha: Uint8Array; paper: number | Rgb } | null {
+  // Letra clara sobre fondo oscuro —lo que encontró la pasada en negativo— se mide solo por
+  // color. Por brillo se leía al revés: el fondo negro pasaba por letras y se tapaba de
+  // blanco, dejando un rectángulo blanco en el dibujo.
+  if (light) {
+    const byColor = inkByColor(px, w, h, seed);
+    return byColor && readable(byColor.alpha, w, seed) ? byColor : null;
+  }
   // El orden importa, porque cualquiera de las dos puede dar un falso positivo. Por brillo,
   // un globo rosa cuenta como papel y los pedazos de cielo que entran en la caja pasan por
   // letras, mientras la letra blanca queda sin ver. Por color, un degradé de blanco a rojo

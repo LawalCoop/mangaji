@@ -23,6 +23,8 @@ export type Detection = {
   conf: number;
   bbox: { x: number; y: number; w: number; h: number };
   polygon: Point[];
+  /** Texto hallado en la página invertida: letra clara sobre fondo oscuro. */
+  light?: boolean;
 };
 
 const SIZE = 1280;
@@ -168,9 +170,9 @@ export class Detector {
       // dejando un rectángulo blanco en el dibujo.
       // Con un umbral más bajo que el de la pasada normal: el filtro de fondo oscuro ya es
       // exigente, y la confianza en negativo sale más justa.
-      const light = this.#decodeBoxes(invertedOut, scale, image.width, image.height, INVERTED_TEXT_CONF).filter(
-        (d) => onDark(image, d.bbox),
-      );
+      const light = this.#decodeBoxes(invertedOut, scale, image.width, image.height, INVERTED_TEXT_CONF)
+        .filter((d) => onDark(image, d.bbox))
+        .map((d) => ({ ...d, light: true }));
       fromText = mergeText(fromText, light);
     }
 
@@ -481,6 +483,8 @@ function darkShare(image: ImageData): number {
 
 /** A partir de este brillo, el borde de una caja no es fondo oscuro. */
 const DARK_BACKDROP = 90;
+/** Qué parte de la caja tiene que ser oscura. */
+const DARK_FILL = 0.55;
 
 /**
  * ¿La caja está sobre fondo oscuro? Se mira la mediana del brillo de su borde, que cae casi
@@ -507,5 +511,19 @@ export function onDark(image: Pick<ImageData, "data" | "width" | "height">, box:
     take(x1, y);
   }
   levels.sort((a, b) => a - b);
-  return levels[levels.length >> 1] < DARK_BACKDROP;
+  if (levels[levels.length >> 1] >= DARK_BACKDROP) return false;
+
+  // Y la caja tiene que ser mayormente oscura: en un estallido negro con letra blanca, el
+  // 64 %; en un cielo negro salpicado de rocas blancas, que el modelo en negativo también
+  // toma por texto, menos de la mitad.
+  let dark = 0;
+  let total = 0;
+  for (let y = y0; y <= y1; y += 2) {
+    for (let x = x0; x <= x1; x += 2) {
+      const i = (y * width + x) * 4;
+      total++;
+      if (Math.max(data[i], data[i + 1], data[i + 2]) < 60) dark++;
+    }
+  }
+  return dark / total >= DARK_FILL;
 }
