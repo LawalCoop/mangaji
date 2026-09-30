@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { Director, frameDuration } from "./director";
+import { framed } from "./frame-sources";
 import type { Frame, FrameSource } from "./types";
 
 /** Fuente de prueba: `beats` por frame para simular lo que traerán v2 y v4. */
@@ -195,5 +196,17 @@ describe("frameDuration", () => {
   it("usa el valor por defecto cuando no hay beats", () => {
     const frame: Frame = { id: "f", page: 0, rect: { x: 0, y: 0, w: 1, h: 1 }, beats: [] };
     expect(frameDuration(frame, 4000)).toBe(4000);
+  });
+});
+
+describe("encuadre", () => {
+  it("abarca los globos que se salen de la viñeta", () => {
+    // Un globo que sobresale por arriba y a la izquierda quedaba cortado.
+    expect(framed([100, 100, 400, 300], [[60, 40, 120, 90], [300, 150, 80, 60]])).toEqual({
+      x: 60,
+      y: 40,
+      w: 440,
+      h: 360,
+    });
   });
 });

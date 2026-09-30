@@ -1,5 +1,5 @@
 import type { Manifest } from "@mangaji/format";
-import type { Frame, FrameSource } from "./types";
+import type { Frame, FrameSource, Rect } from "./types";
 
 /**
  * v1: un encuadre por página. El caso degenerado del que salen todos los demás.
@@ -61,11 +61,10 @@ export class PanelFrameSource implements FrameSource {
   append(page: Manifest["pages"][number], pageIndex: number): void {
     this.#pages = Math.max(this.#pages, pageIndex + 1);
     for (const panel of page.panels) {
-      const [x, y, w, h] = panel.bbox;
       this.#frames.push({
         id: panel.id,
         page: pageIndex,
-        rect: { x, y, w, h },
+        rect: framed(panel.bbox, panel.balloons.map((b) => b.bbox)),
         polygon: panel.polygon as [number, number][],
         beats: panel.beats,
         layers: panel.balloons.map((balloon) => {
@@ -105,4 +104,23 @@ export class PanelFrameSource implements FrameSource {
     const total = Math.max(this.#expected, this.#pages);
     return `${frame.page + 1}/${total} · viñeta ${i + 1}/${this.length}`;
   }
+}
+
+/**
+ * Lo que encuadra la cámara: la viñeta y sus globos.
+ *
+ * Los globos se salen seguido de la viñeta —pisan el borde, o la calle— y encuadrando solo
+ * la viñeta quedaban cortados, sin poder leerse.
+ */
+export function framed(panel: number[], balloons: number[][]): Rect {
+  let [x0, y0] = panel;
+  let x1 = panel[0] + panel[2];
+  let y1 = panel[1] + panel[3];
+  for (const [x, y, w, h] of balloons) {
+    x0 = Math.min(x0, x);
+    y0 = Math.min(y0, y);
+    x1 = Math.max(x1, x + w);
+    y1 = Math.max(y1, y + h);
+  }
+  return { x: x0, y: y0, w: x1 - x0, h: y1 - y0 };
 }
