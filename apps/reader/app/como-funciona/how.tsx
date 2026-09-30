@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { I18nProvider, useI18n, type Messages } from "@/lib/i18n";
+import { DocumentTitle, useI18n } from "@/lib/i18n";
 import { CYAN, INK, MAGENTA, PAPER, SiteFooter, SiteHeader, TONE, panel, screenPanel } from "../site";
 import {
   DetectScene,
@@ -22,8 +22,6 @@ import {
  * Los cuadros alternan de lado, como las viñetas de una página.
  */
 
-/** Estable: el proveedor lo usa en un efecto y una función nueva por render lo reiniciaría. */
-const pageTitle = (t: Messages) => t.how.title;
 
 /**
  * El tamaño con el que el titular llenaría todo el ancho del cuadro, por idioma, medido con
@@ -36,9 +34,10 @@ const SCENES = [OpenScene, PrepareScene, DetectScene, PolygonScene, OrderScene, 
 
 export default function HowPage() {
   return (
-    <I18nProvider title={pageTitle}>
+    <>
+      <DocumentTitle page="how" />
       <How />
-    </I18nProvider>
+    </>
   );
 }
 

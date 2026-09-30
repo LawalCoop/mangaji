@@ -750,14 +750,12 @@ type I18n = { lang: Lang; t: Messages; setLang: (lang: Lang) => void };
 
 const I18nContext = createContext<I18n>({ lang: "es", t: es, setLang: () => {} });
 
-export function I18nProvider({
-  children,
-  title = (t) => t.meta.title,
-}: {
-  children: React.ReactNode;
-  /** El título de la pestaña de esta página, en cada idioma. */
-  title?: (t: Messages) => string;
-}) {
+/**
+ * El idioma del sitio. Vive en el layout, no en cada página: así sobrevive a la navegación
+ * entre páginas. Cuando cada página tenía el suyo, al cambiar de página arrancaba otra vez
+ * en español y se veía el cambio.
+ */
+export function I18nProvider({ children }: { children: React.ReactNode }) {
   // Se arranca en español, que es lo que trae el HTML estático, y se ajusta al montar: así
   // el primer render coincide con el del servidor.
   const [lang, setLangState] = useState<Lang>("es");
@@ -767,18 +765,7 @@ export function I18nProvider({
   useEffect(() => {
     document.documentElement.lang = lang;
     if (lang === "ja") loadJapaneseFont();
-
-    // Next escribe el título de la metadata después de hidratar y pisaría este: se vigila
-    // el <head> y se lo repone. Cuando ya está puesto no hay cambio, así que no se encadena.
-    const wanted = title(MESSAGES[lang]);
-    const apply = () => {
-      if (document.title !== wanted) document.title = wanted;
-    };
-    apply();
-    const watch = new MutationObserver(apply);
-    watch.observe(document.head, { subtree: true, childList: true, characterData: true });
-    return () => watch.disconnect();
-  }, [lang, title]);
+  }, [lang]);
 
   const setLang = useCallback((next: Lang) => {
     setLangState(next);
@@ -796,6 +783,34 @@ export function I18nProvider({
 
   const value = useMemo(() => ({ lang, t: MESSAGES[lang], setLang }), [lang, setLang]);
   return <I18nContext.Provider value={value}>{children}</I18nContext.Provider>;
+}
+
+/** De qué página es el título de la pestaña. */
+const TITLES = {
+  home: (t: Messages) => t.meta.title,
+  how: (t: Messages) => t.how.title,
+} as const;
+
+/**
+ * El título de la pestaña de una página, en el idioma puesto.
+ *
+ * Next escribe el título de la metadata después de hidratar y al navegar, y pisaría este:
+ * se vigila el <head> y se lo repone. Cuando ya está puesto no hay cambio, así que no se
+ * encadena.
+ */
+export function DocumentTitle({ page }: { page: keyof typeof TITLES }) {
+  const { t } = useI18n();
+  useEffect(() => {
+    const wanted = TITLES[page](t);
+    const apply = () => {
+      if (document.title !== wanted) document.title = wanted;
+    };
+    apply();
+    const watch = new MutationObserver(apply);
+    watch.observe(document.head, { subtree: true, childList: true, characterData: true });
+    return () => watch.disconnect();
+  }, [page, t]);
+  return null;
 }
 
 export function useI18n(): I18n {

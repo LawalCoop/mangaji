@@ -2,6 +2,7 @@ import type { Metadata, Viewport } from "next";
 import { Anton, Zen_Kaku_Gothic_New } from "next/font/google";
 import "./globals.css";
 import { Analytics } from "./analytics";
+import { I18nProvider } from "@/lib/i18n";
 import { HOME, LAWAL_URL, SITE_URL, pageMetadata } from "@/lib/seo";
 import { asset } from "@/lib/base";
 
@@ -84,7 +85,7 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
         <link rel="stylesheet" href={KANA_URL} crossOrigin="anonymous" />
       </head>
       <body className="min-h-full flex flex-col overscroll-none font-[family-name:var(--body)]">
-        {children}
+        <I18nProvider>{children}</I18nProvider>
         <Analytics />
       </body>
     </html>
