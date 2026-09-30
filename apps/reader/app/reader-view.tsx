@@ -34,6 +34,25 @@ const TRAVEL_MS = 520;
  */
 const OPENING = { ms: 2600, zoom: 2.3, curtain: 1100 };
 
+/**
+ * Cuánto del camino hasta poder leer representa cada paso, de 0 a 1. La descarga de los
+ * detectores se lleva la mayor parte: la primera vez son unos 50 MB. Si ya están en la
+ * caché del navegador, ese tramo se cruza en un instante.
+ */
+const PREP = {
+  unpacked: 0.05,
+  downloaded: 0.7,
+  panelsReady: 0.84,
+  modelsReady: 0.9,
+  lifting: 0.96,
+};
+/**
+ * Hay pasos que no informan cuánto llevan —preparar un detector puede tardar varios
+ * segundos—. Mientras duran, la barra se acerca sola al final del tramo, cada vez más
+ * despacio y sin llegar: así no parece colgada, y tampoco promete lo que no pasó.
+ */
+const CREEP = { everyMs: 150, share: 0.05 };
+
 /** Lo que se puede abrir, por extensión. */
 const OPENABLE = new Set(["cbza", "cbz", "cbr", "zip", "rar"]);
 /** Cuánto puede moverse un dedo y seguir contando como toque. Un pulgar nunca queda quieto. */
@@ -441,12 +460,25 @@ export default function ReaderView() {
       setStatus({ kind: "processing" });
       setStage(null);
       setLines([{ note: { key: "unpacking" } }]);
-      setProgress(null);
+      setProgress(0);
       setEta(null);
+
+      // El porcentaje es de todo lo que falta para empezar a leer, no solo de las páginas:
+      // la primera vez lo que más tarda es bajar los detectores, y con la barra quieta en
+      // cero parecía colgado. Nunca retrocede, aunque los mensajes lleguen desordenados.
+      let ceiling = 0;
+      const advance = (value: number, until = value) => {
+        ceiling = Math.max(ceiling, until);
+        setProgress((p) => Math.max(p ?? 0, Math.min(1, value)));
+      };
+      const creep = window.setInterval(() => {
+        setProgress((p) => (p === null || p >= ceiling ? p : p + (ceiling - p) * CREEP.share));
+      }, CREEP.everyMs);
 
       const cbz = await CbzSource.open(file);
       const total = cbz.pageCount;
       setLines((l) => [...l, { note: { key: "pageCount", n: total } }]);
+      advance(PREP.unpacked);
 
       const live = new LiveSource();
       liveRef.current = live;
@@ -470,15 +502,26 @@ export default function ReaderView() {
       worker.onmessage = async (ev: MessageEvent<ProcessResponse>) => {
         const msg = ev.data;
 
+        if (msg.kind === "download") {
+          advance(PREP.unpacked + (PREP.downloaded - PREP.unpacked) * msg.fraction);
+          return;
+        }
+
         if (msg.kind === "models") {
           setStage({ kind: "models", note: msg.note });
           setLines((l) => [...l, { note: msg.note }]);
+          if (msg.note.key === "loadingPanels") advance(PREP.downloaded, PREP.panelsReady);
+          if (msg.note.key === "loadingDialogue") advance(PREP.panelsReady, PREP.modelsReady);
           return;
         }
 
         if (msg.kind === "progress") {
           setStage({ kind: "page", index: msg.index, total, note: msg.note });
           setLines((l) => [...l, { note: msg.note, page: msg.index + 1 }]);
+          if (msg.index === 0) {
+            if (msg.note.key === "findingPanels") advance(PREP.modelsReady, PREP.lifting);
+            else advance(PREP.lifting, 0.99);
+          }
           return;
         }
 
@@ -499,7 +542,8 @@ export default function ReaderView() {
         if (parsed.success) panelFrames.append(parsed.data, done.index);
         else console.warn(`página ${done.index + 1} inválida`, parsed.error.issues);
 
-        setProgress((done.index + 1) / total);
+        advance(1);
+        window.clearInterval(creep);
         // La estimación se hace sobre las últimas páginas y no sobre el promedio: las
         // primeras cargan modelos y salen más lentas, y arrastran la cuenta hacia arriba.
         marks[done.index] = performance.now();
@@ -535,6 +579,7 @@ export default function ReaderView() {
           if (failed) throw new Error(failed);
         }
       } finally {
+        window.clearInterval(creep);
         cbz.close();
         worker.postMessage({ kind: "close" } satisfies ProcessRequest);
         workerRef.current = null;

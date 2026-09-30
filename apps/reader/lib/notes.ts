@@ -13,6 +13,7 @@ export type Note =
   | { key: "pageCount"; n: number }
   | { key: "gpu" }
   | { key: "noGpu" }
+  | { key: "downloadingModels" }
   | { key: "loadingPanels" }
   | { key: "loadingDialogue" }
   | { key: "findingPanels" }

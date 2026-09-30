@@ -81,7 +81,13 @@ export class Detector {
   /** El backend elegido: `webgpu` es unas quince veces más rápido que `wasm`. */
   static backend: "webgpu" | "wasm" = "wasm";
 
-  static async load(onProgress?: Progress): Promise<Detector> {
+  /**
+   * Baja los modelos y arma las sesiones.
+   *
+   * `onDownload` recibe cuánto de los modelos llegó, de 0 a 1: la primera vez son unos
+   * 50 MB y es lo que más tarda antes de poder leer, así que tiene que verse avanzar.
+   */
+  static async load(onProgress?: Progress, onDownload?: (fraction: number) => void): Promise<Detector> {
     const ort = await import("onnxruntime-web");
     configure(ort);
 
@@ -99,10 +105,17 @@ export class Detector {
       logSeverityLevel: 3,
     };
 
+    // Se bajan acá y no dentro de onnxruntime, que no avisa cuánto lleva.
+    onProgress?.({ key: "downloadingModels" });
+    const [panelBytes, textBytes] = await downloadAll(
+      [asset("/models/panels.onnx"), asset("/models/text.onnx")],
+      onDownload,
+    );
+
     onProgress?.({ key: "loadingPanels" });
-    const panels = await ort.InferenceSession.create(asset("/models/panels.onnx"), options);
+    const panels = await ort.InferenceSession.create(panelBytes, options);
     onProgress?.({ key: "loadingDialogue" });
-    const text = await ort.InferenceSession.create(asset("/models/text.onnx"), options);
+    const text = await ort.InferenceSession.create(textBytes, options);
 
     return new Detector(ort, panels, text);
   }
@@ -351,4 +364,55 @@ export function maskToPolygon(
   const useHull = hull.length >= 3 && polygonArea(contour) / polygonArea(hull) >= CONVEX_RATIO;
   const simple = simplify(useHull ? hull : contour, SIMPLIFY_EPS);
   return simple.length >= 3 ? simple : null;
+}
+
+/**
+ * Baja varios archivos a la vez informando el avance conjunto, en bytes.
+ *
+ * Se piden todos juntos para conocer el tamaño total de entrada; si algún servidor no lo
+ * informa, el avance se calcula sobre lo que sí se conoce.
+ */
+async function downloadAll(urls: string[], onFraction?: (fraction: number) => void): Promise<Uint8Array[]> {
+  const responses = await Promise.all(
+    urls.map(async (url) => {
+      const res = await fetch(url);
+      if (!res.ok) throw new Error(`No se pudo bajar ${url} (${res.status})`);
+      return res;
+    }),
+  );
+  const totals = responses.map((r) => Number(r.headers.get("content-length")) || 0);
+  const total = totals.reduce((a, b) => a + b, 0);
+  const received = responses.map(() => 0);
+  const report = () => {
+    if (total > 0) onFraction?.(Math.min(1, received.reduce((a, b) => a + b, 0) / total));
+  };
+  report();
+
+  return Promise.all(
+    responses.map(async (res, i) => {
+      if (!res.body) {
+        const bytes = new Uint8Array(await res.arrayBuffer());
+        received[i] = bytes.byteLength;
+        report();
+        return bytes;
+      }
+      const chunks: Uint8Array[] = [];
+      const reader = res.body.getReader();
+      for (;;) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        chunks.push(value);
+        received[i] += value.byteLength;
+        report();
+      }
+      // Un solo bloque contiguo: es lo que espera onnxruntime.
+      const bytes = new Uint8Array(received[i]);
+      let at = 0;
+      for (const chunk of chunks) {
+        bytes.set(chunk, at);
+        at += chunk.byteLength;
+      }
+      return bytes;
+    }),
+  );
 }

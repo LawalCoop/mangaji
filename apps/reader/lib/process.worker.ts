@@ -18,6 +18,8 @@ export type ProcessRequest =
 
 export type ProcessResponse =
   | { kind: "models"; note: Note }
+  /** Cuánto de los modelos se bajó, de 0 a 1. */
+  | { kind: "download"; fraction: number }
   | { kind: "progress"; index: number; note: Note }
   | { kind: "page"; page: ProcessedPage }
   | { kind: "error"; index: number; message: string };
@@ -25,7 +27,10 @@ export type ProcessResponse =
 let loading: Promise<Detector> | null = null;
 
 function ready(): Promise<Detector> {
-  loading ??= Detector.load((note) => post({ kind: "models", note }));
+  loading ??= Detector.load(
+    (note) => post({ kind: "models", note }),
+    (fraction) => post({ kind: "download", fraction }),
+  );
   return loading;
 }
 

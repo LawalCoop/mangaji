@@ -29,7 +29,7 @@ export type ProcessingProps = {
   title: string;
   stage: Stage | null;
   lines: LogLine[];
-  /** 0..1, o null mientras no se sabe cuántas páginas hay. */
+  /** 0..1 de todo lo que falta para empezar a leer, detectores incluidos; null sin datos. */
   progress: number | null;
   /** Segundos que faltan, o null mientras no hay con qué estimarlo. */
   eta: number | null;
