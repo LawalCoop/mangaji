@@ -48,9 +48,17 @@ export const REPO_URL = "https://github.com/LawalCoop/mangaji";
 export function SiteHeader({ link }: { link: { href: string; label: string } }) {
   const { lang, t, setLang } = useI18n();
 
+  /**
+   * Una celda del lado derecho: toda la altura del encabezado, separada por la misma línea
+   * de tinta que separa los cuadros. Así los controles son viñetas del encabezado y no
+   * cajitas flotando adentro.
+   */
+  const cell =
+    "flex touch-manipulation items-center justify-center border-l-4 font-[family-name:var(--body)] text-[15px] font-bold leading-none transition-colors focus-visible:outline focus-visible:outline-3 focus-visible:-outline-offset-[7px]";
+
   return (
-    <header className="panel flex items-center justify-between gap-4 px-5 py-3 sm:px-7 sm:py-4" style={panel}>
-      <Link href="/" className="flex min-w-0 items-center gap-3 sm:gap-4">
+    <header className="panel flex items-stretch justify-between" style={panel}>
+      <Link href="/" className="flex min-w-0 items-center gap-3 px-5 py-3 sm:gap-4 sm:px-7 sm:py-4">
         <span
           className="trim-caps font-[family-name:var(--display)] leading-none"
           style={{ fontSize: "clamp(2rem,4.2vw,3.25rem)", color: INK }}
@@ -66,40 +74,42 @@ export function SiteHeader({ link }: { link: { href: string; label: string } }) 
         </span>
       </Link>
 
-      <div className="flex shrink-0 items-center gap-3">
-        {/* Con la misma caja que el selector de idioma: juntos se leen como un solo grupo de
-            controles. En el celular no entra; ahí el link está en la página y en el pie. */}
+      <nav className="flex shrink-0 items-stretch">
+        {/* En el celular no entra: ahí el link está en la página y en el pie. */}
         <Link
           href={link.href}
-          className="flex h-[42px] items-center border-[3px] px-4 font-[family-name:var(--body)] text-[14px] font-bold leading-none transition-colors hover:bg-[#0B0B0C] hover:text-[#F4EFE3] focus-visible:outline focus-visible:outline-3 focus-visible:outline-offset-2 max-sm:hidden"
+          className={`${cell} px-6 hover:bg-[#0B0B0C] hover:text-[#F4EFE3] max-sm:hidden`}
           style={{ borderColor: INK, color: INK, outlineColor: MAGENTA }}
         >
           {link.label}
         </Link>
 
-        {/* Selector de idioma: a la vista, porque quien no lee español no va a buscarlo.
-            Los tres con la misma letra y la misma caja, para que no bailen. */}
-        <div role="group" aria-label={t.language} className="flex border-[3px]" style={{ borderColor: INK }}>
-          {LANGS.map((l) => (
-            <button
-              key={l.id}
-              type="button"
-              lang={l.id}
-              title={l.name}
-              aria-pressed={lang === l.id}
-              onClick={() => setLang(l.id)}
-              className="flex h-9 min-w-11 touch-manipulation items-center justify-center px-2.5 font-[family-name:var(--body)] text-[14px] font-bold leading-none transition-colors focus-visible:outline focus-visible:outline-3 focus-visible:-outline-offset-4"
-              style={
-                lang === l.id
-                  ? { background: INK, color: PAPER, outlineColor: MAGENTA }
-                  : { background: "transparent", color: INK, outlineColor: MAGENTA }
-              }
-            >
-              {l.label}
-            </button>
-          ))}
+        {/* Selector de idioma: a la vista, porque quien no lee español no va a buscarlo. */}
+        <div role="group" aria-label={t.language} className="flex items-stretch">
+          {LANGS.map((l) => {
+            const active = lang === l.id;
+            return (
+              <button
+                key={l.id}
+                type="button"
+                lang={l.id}
+                title={l.name}
+                aria-pressed={active}
+                onClick={() => setLang(l.id)}
+                className={`${cell} min-w-14 px-4 ${active ? "" : "hover:bg-[#0B0B0C] hover:text-[#F4EFE3]"}`}
+                style={{
+                  borderColor: INK,
+                  background: active ? INK : "transparent",
+                  color: active ? PAPER : INK,
+                  outlineColor: MAGENTA,
+                }}
+              >
+                {l.label}
+              </button>
+            );
+          })}
         </div>
-      </div>
+      </nav>
     </header>
   );
 }
