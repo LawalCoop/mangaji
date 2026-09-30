@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { etaText, noteText, useI18n, type Messages } from "@/lib/i18n";
 import type { Note } from "@/lib/notes";
+import { TONE } from "./site";
 
 /**
  * Pantalla de procesamiento.
@@ -77,12 +78,44 @@ export function Processing({ title, stage, lines, progress, eta }: ProcessingPro
       />
 
       <div className="relative mx-auto flex w-full max-w-4xl flex-1 flex-col justify-center gap-5">
+        {/* Guiño: el rumor amenazante, asomando por el costado de la tarjeta. */}
+        <span
+          aria-hidden
+          className="pointer-events-none absolute top-[14%] -left-40 z-10 flex select-none flex-col font-[family-name:var(--font-kana)] font-black leading-[0.85] max-xl:hidden"
+          style={{ fontSize: "clamp(3rem, 6vw, 5.2rem)", color: "#121214", WebkitTextStroke: `3px ${MAGENTA}`, transform: "rotate(-10deg)" }}
+        >
+          {["ド", "ド", "ド", "ド"].map((g, i) => (
+            <span key={i} className="rumble" style={{ marginLeft: `${i * 0.28}em`, animationDelay: `${i * 90}ms` }}>
+              {g}
+            </span>
+          ))}
+        </span>
+
+        {/* Las tarjetas, apenas inclinadas en sentidos opuestos: viñetas pegadas en una página. */}
         <section
-          className="border-[4px] px-6 py-7 sm:px-10 sm:py-10"
+          className="relative isolate overflow-hidden border-[4px] px-6 py-7 sm:-rotate-[0.8deg] sm:px-10 sm:py-10"
           style={{ borderColor: INK, background: PAPER }}
         >
+          {/* Guiño: la trama de puntos del manga impreso, desde la esquina. */}
+          <span
+            aria-hidden
+            className="pointer-events-none absolute top-0 right-0 -z-10 h-full w-1/2"
+            style={{
+              background: TONE,
+              maskImage: "linear-gradient(225deg, black 0%, transparent 60%)",
+              WebkitMaskImage: "linear-gradient(225deg, black 0%, transparent 60%)",
+            }}
+          />
+          {/* Guiño: "en preparación", en vertical como un encabezado de capítulo. */}
+          <span
+            aria-hidden
+            className="absolute top-0 right-6 px-2 py-3 font-[family-name:var(--font-kana)] text-[14px] font-black tracking-[0.3em] sm:right-10"
+            style={{ writingMode: "vertical-rl", background: INK, color: PAPER }}
+          >
+            準備中
+          </span>
           <p
-            className="mb-3 font-[family-name:var(--display)] text-[13px] tracking-wide"
+            className="relative mb-3 font-[family-name:var(--display)] text-[13px] tracking-wide"
             style={{ color: "#3A3A42" }}
           >
             {P.label} · {title}
@@ -109,7 +142,8 @@ export function Processing({ title, stage, lines, progress, eta }: ProcessingPro
             <div className="flex h-6 flex-1 gap-[3px]">
               {Array.from({ length: 28 }, (_, i) => {
                 const filled = pct !== null && (i + 1) / 28 <= progress!;
-                const edge = pct !== null && Math.abs((i + 0.5) / 28 - progress!) < 1 / 28;
+                // Un solo tramo en curso: el que contiene el punto de avance.
+                const edge = pct !== null && i === Math.min(27, Math.floor(progress! * 28));
                 // El tramo en curso titila, como un cursor: quieto se leía como un color
                 // puesto porque sí, no como "acá se está trabajando".
                 return (
@@ -125,10 +159,17 @@ export function Processing({ title, stage, lines, progress, eta }: ProcessingPro
               })}
             </div>
             <span
-              className="w-16 text-right font-[family-name:var(--display)] text-2xl tabular-nums"
+              className="relative w-16 text-right font-[family-name:var(--display)] text-2xl tabular-nums"
               style={{ color: INK }}
             >
               {pct === null ? "··" : `${pct}%`}
+              {/* Guiño: destellos junto al porcentaje, que titilan mientras se trabaja. */}
+              <span aria-hidden className="kira-idle absolute -top-3 -right-3 text-[14px] leading-none" style={{ color: MAGENTA }}>
+                ✦
+              </span>
+              <span aria-hidden className="kira-idle absolute -bottom-2 -left-1 text-[10px] leading-none" style={{ color: CYAN, animationDelay: "450ms" }}>
+                ✦
+              </span>
             </span>
           </div>
 
@@ -149,7 +190,7 @@ export function Processing({ title, stage, lines, progress, eta }: ProcessingPro
         {/* El registro: qué fue encontrando, línea por línea. */}
         <section
           ref={logRef}
-          className="max-h-52 overflow-y-auto border-[4px] px-5 py-4"
+          className="max-h-52 overflow-y-auto border-[4px] px-5 py-4 sm:rotate-[0.5deg]"
           style={{ borderColor: INK, background: "#0F0F12" }}
         >
           <pre className="whitespace-pre-wrap text-[12px] leading-relaxed sm:text-[13px]">

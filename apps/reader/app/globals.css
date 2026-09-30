@@ -172,3 +172,29 @@ body {
     animation: none;
   }
 }
+
+/* Procesamiento: destellos que titilan solos y el rumor que tiembla. */
+.kira-idle {
+  animation: kira 1.4s ease-in-out infinite;
+}
+@keyframes rumble {
+  0%,
+  100% {
+    transform: translate(0, 0);
+  }
+  25% {
+    transform: translate(-1.5px, 1px);
+  }
+  75% {
+    transform: translate(1.5px, -1px);
+  }
+}
+.rumble {
+  animation: rumble 0.35s linear infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .kira-idle,
+  .rumble {
+    animation: none;
+  }
+}
