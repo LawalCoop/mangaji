@@ -1,4 +1,5 @@
 import type { Detection } from "./detector";
+import { insidePolygon } from "./dialogue";
 
 /**
  * Qué detecciones de viñeta se quedan.
@@ -235,4 +236,41 @@ export function fillOrphans(panels: Detection[], frames: Detection[], grid: InkG
     );
   }
   return added;
+}
+
+/** Con esta fracción dentro de una viñeta, el globo también le pertenece. */
+const SHARED_BALLOON = 0.25;
+/** Con menos que esto dentro de toda silueta, la silueta no alcanza para decidir. */
+const CLEAR_SHARE = 0.5;
+
+/**
+ * A qué viñetas pertenece un globo o un texto.
+ *
+ * Se mide contra la silueta: con bordes diagonales las cajas de dos vecinas se pisan y el
+ * globo cae en la de al lado. Pero la silueta del modelo a veces cubre solo el dibujo y deja
+ * afuera la parte blanca de la viñeta, justo donde va el texto. Sin ninguna silueta que lo
+ * contenga, el texto iba a parar a la primera viñeta de la lista —otra, a veces en la otra
+ * punta de la página— y aparecía mientras se leía esa. Entonces decide la caja de la viñeta,
+ * y si tampoco lo toca ninguna, la más cercana.
+ */
+export function ownersOf(box: Box, panels: Detection[]): number[] {
+  if (!panels.length) return [];
+  const shares = panels.map((p) => insidePolygon(p.polygon, box));
+  const top = Math.max(...shares);
+  if (top >= CLEAR_SHARE) {
+    const owners = shares.map((s, i) => (s >= SHARED_BALLOON ? i : -1)).filter((i) => i >= 0);
+    return owners;
+  }
+
+  const area = Math.max(box.w * box.h, 1);
+  const overlaps = panels.map((p) => intersection(box, p.bbox) / area);
+  const most = Math.max(...overlaps);
+  if (most > 0) return [overlaps.indexOf(most)];
+
+  const cx = box.x + box.w / 2;
+  const cy = box.y + box.h / 2;
+  const gap = panels.map(({ bbox: b }) =>
+    Math.hypot(Math.max(b.x - cx, 0, cx - (b.x + b.w)), Math.max(b.y - cy, 0, cy - (b.y + b.h))),
+  );
+  return [gap.indexOf(Math.min(...gap))];
 }

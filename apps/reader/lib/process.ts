@@ -1,9 +1,9 @@
 import { zipSync } from "fflate";
 import type { Note } from "./notes";
-import { choosePanels, dedupe, fillOrphans, inkGrid } from "./panels";
+import { choosePanels, dedupe, fillOrphans, inkGrid, ownersOf } from "./panels";
 // Solo el tipo: así quien únicamente empaqueta no se trae los modelos ni el runtime.
 import type { Detector, Detection } from "./detector";
-import { insidePolygon, lift, type Sprite } from "./dialogue";
+import { lift, type Sprite } from "./dialogue";
 
 /**
  * Hasta qué tamaño se prueba levantar el texto de un globo entero, como fracción de la
@@ -24,8 +24,6 @@ import { polygonArea, type Point } from "./vision";
 
 /** Descarta fragmentos espurios: una viñeta real nunca es tan chica. */
 const MIN_PANEL_AREA = 0.02;
-/** Con esta fracción dentro de una viñeta, el globo también le pertenece. */
-const SHARED_BALLOON = 0.25;
 
 const ENTER_MS = 450;
 const REVEAL_MS = 300;
@@ -211,16 +209,11 @@ export async function processPage(
     }
   }
 
-  // Cada grupo va a la viñeta con la que más se solapa, medido contra la silueta: con
-  // bordes diagonales las cajas de dos vecinas se pisan y el globo cae en la de al lado.
+  // Cada grupo va a la viñeta que lo contiene; ver `ownersOf`.
   const perPanel = new Map<number, { id: string; box: Detection["bbox"]; parts: Sprite[] }[]>();
   groups.forEach((group, gi) => {
     const id = `${pageId}.b${gi}`;
-    const shares = panels.map((p) => insidePolygon(p.polygon, group.box));
-    const best = shares.indexOf(Math.max(...shares));
-    const owners = shares.map((s, i) => (s >= SHARED_BALLOON ? i : -1)).filter((i) => i >= 0);
-    if (!owners.includes(best)) owners.push(best);
-    for (const owner of owners.length ? owners : [0]) {
+    for (const owner of ownersOf(group.box, panels)) {
       perPanel.set(owner, [...(perPanel.get(owner) ?? []), { id, ...group }]);
     }
   });

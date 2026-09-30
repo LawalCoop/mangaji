@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { Detection } from "./detector";
-import { choosePanels, fillOrphans, inkGrid } from "./panels";
+import { choosePanels, fillOrphans, inkGrid, ownersOf } from "./panels";
 
 const PAGE = 1000 * 1400;
 
@@ -93,5 +93,32 @@ describe("viñetas que el modelo no ve", () => {
   it("sin ninguna viñeta no hace nada: ahí ya se usa la página entera", () => {
     const grid = page([{ x: 20, y: 20, w: 560, h: 800 }]);
     expect(fillOrphans([], [], grid)).toHaveLength(0);
+  });
+});
+
+describe("a qué viñeta va cada texto", () => {
+  it("va a la viñeta cuya silueta lo contiene", () => {
+    const panels = [frame(0.9, 500, 0, 500, 1400), frame(0.9, 0, 0, 480, 300)];
+    expect(ownersOf({ x: 100, y: 100, w: 80, h: 60 }, panels)).toEqual([1]);
+  });
+
+  it("sin silueta que lo contenga, va a la viñeta cuya caja lo toca, no a la primera", () => {
+    // La viñeta de la izquierda tiene la silueta solo sobre el dibujo (x 200..480); el texto
+    // está en su parte blanca. Antes caía en la primera de la lista: la larga de la derecha.
+    const left = frame(0.8, 0, 0, 480, 300);
+    left.polygon = [
+      [200, 0],
+      [480, 0],
+      [480, 300],
+      [200, 300],
+    ];
+    left.bbox = { x: 150, y: 0, w: 330, h: 300 };
+    const panels = [frame(0.95, 500, 0, 500, 1400), left];
+    expect(ownersOf({ x: 120, y: 100, w: 70, h: 60 }, panels)).toEqual([1]);
+  });
+
+  it("si ninguna caja lo toca, va a la más cercana", () => {
+    const panels = [frame(0.95, 600, 0, 400, 1400), frame(0.8, 0, 0, 300, 300)];
+    expect(ownersOf({ x: 320, y: 100, w: 40, h: 40 }, panels)).toEqual([1]);
   });
 });
