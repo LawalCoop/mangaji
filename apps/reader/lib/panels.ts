@@ -328,9 +328,19 @@ const CLEAR_SHARE = 0.5;
  * punta de la página— y aparecía mientras se leía esa. Entonces decide la caja de la viñeta,
  * y si tampoco lo toca ninguna, la más cercana.
  */
-export function ownersOf(box: Box, panels: Detection[], focus?: Point): number[] {
+export function ownersOf(box: Box, panels: Detection[], focus?: Point, tail?: Point): number[] {
   if (!panels.length) return [];
   const shares = panels.map((p) => insidePolygon(p.polygon, box));
+
+  // La colita manda: señala a quien habla. Un globo apoyado casi entero sobre la viñeta de
+  // arriba, con la colita hacia abajo, es de la de abajo. Alcanza con que el globo la toque.
+  if (tail) {
+    const area = Math.max(box.w * box.h, 1);
+    const pointed = panels
+      .map((p, i) => i)
+      .filter((i) => containsPoint(panels[i].polygon as Point[], tail) && intersection(box, panels[i].bbox) / area > 0);
+    if (pointed.length === 1) return pointed;
+  }
   const top = Math.max(...shares);
   // Si una viñeta lo contiene casi entero, es de esa sola. Que otra también lo contenga no es
   // un globo partido sino dos viñetas encimadas —típicamente una rellenada a mano, que es un

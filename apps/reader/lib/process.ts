@@ -4,6 +4,7 @@ import { choosePanels, dedupe, fillAroundTexts, fillOrphans, inkGrid, isFolio, o
 // Solo el tipo: así quien únicamente empaqueta no se trae los modelos ni el runtime.
 import type { Detector, Detection } from "./detector";
 import { lift, type Sprite } from "./dialogue";
+import { balloonTail } from "./tail";
 
 /**
  * Hasta qué tamaño se prueba levantar el texto de un globo entero, como fracción de la
@@ -203,7 +204,10 @@ export async function processPage(
 
   // Los bloques se agrupan por globo: el modelo parte un diálogo largo en varios.
   const taken = new Set<number>();
-  const groups: { box: Detection["bbox"]; parts: Sprite[]; focus?: [number, number] }[] = [];
+  const groups: { box: Detection["bbox"]; parts: Sprite[]; focus?: [number, number]; tail?: [number, number] }[] = [];
+  // La colita se busca en la página original: el levantado ya borró el texto, pero el
+  // contorno y el papel siguen igual, y así no depende del orden.
+  const tailOf = (polygon: [number, number][]) => balloonTail(pixels.data, width, height, polygon) ?? undefined;
   for (const balloon of balloons) {
     const mine = lifted
       .map((l, i) => ({ ...l, i }))
@@ -217,7 +221,12 @@ export async function processPage(
       const y0 = Math.min(...mine.map((m) => m.det.bbox.y));
       const x1 = Math.max(...mine.map((m) => m.det.bbox.x + m.det.bbox.w));
       const y1 = Math.max(...mine.map((m) => m.det.bbox.y + m.det.bbox.h));
-      groups.push({ box: balloon.bbox, parts: mine.map((m) => m.sprite), focus: [(x0 + x1) / 2, (y0 + y1) / 2] });
+      groups.push({
+        box: balloon.bbox,
+        parts: mine.map((m) => m.sprite),
+        focus: [(x0 + x1) / 2, (y0 + y1) / 2],
+        tail: tailOf(balloon.polygon as [number, number][]),
+      });
     }
   }
   lifted.forEach((l, i) => {
@@ -225,7 +234,12 @@ export async function processPage(
   });
   for (const balloon of balloons) {
     if (!groups.some((g) => insideBox(balloon.bbox, g.box) > 0.5)) {
-      groups.push({ box: balloon.bbox, parts: [], focus: tailTip(balloon.polygon as [number, number][]) ?? undefined });
+      groups.push({
+        box: balloon.bbox,
+        parts: [],
+        focus: tailTip(balloon.polygon as [number, number][]) ?? undefined,
+        tail: tailOf(balloon.polygon as [number, number][]),
+      });
     }
   }
 
@@ -233,7 +247,7 @@ export async function processPage(
   const perPanel = new Map<number, { id: string; box: Detection["bbox"]; parts: Sprite[] }[]>();
   groups.forEach((group, gi) => {
     const id = `${pageId}.b${gi}`;
-    for (const owner of ownersOf(group.box, panels, group.focus)) {
+    for (const owner of ownersOf(group.box, panels, group.focus, group.tail)) {
       perPanel.set(owner, [...(perPanel.get(owner) ?? []), { id, ...group }]);
     }
   });

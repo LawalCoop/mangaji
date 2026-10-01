@@ -61,7 +61,7 @@ export function erode(mask: Uint8Array, w: number, h: number, r: number): Uint8A
   return morph(mask, w, h, r, true);
 }
 
-function dilate(mask: Uint8Array, w: number, h: number, r: number): Uint8Array {
+export function dilate(mask: Uint8Array, w: number, h: number, r: number): Uint8Array {
   return morph(mask, w, h, r, false);
 }
 
