@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { asset } from "@/lib/base";
 import { useI18n } from "@/lib/i18n";
 import { SAMPLE_PATH } from "@/lib/sample";
@@ -45,11 +45,28 @@ const ACCEPT = ".cbza,.cbz,.cbr,.zip,.rar,application/zip";
  */
 const HEADLINE_FIT = { es: 21.5, en: 19.2, ja: 19.2 } as const;
 
+/** En el carrusel del celular se lee de izquierda a derecha, 01 primero. */
+const MOBILE_ORDER: Record<string, string> = { "01": "max-md:order-1", "02": "max-md:order-2", "03": "max-md:order-3" };
+
 export function Landing({ status, message, onFile, onUrl, download }: Props) {
   const [over, setOver] = useState(false);
   const [link, setLink] = useState("");
   // En el celular el link va plegado: la mayoría abre un archivo o prueba el ejemplo.
   const [linkOpen, setLinkOpen] = useState(false);
+  // En el celular, una barra fija con el botón de abrir cuando el panel de carga no se ve.
+  const dropZone = useRef<HTMLElement>(null);
+  const [dockVisible, setDockVisible] = useState(false);
+  useEffect(() => {
+    const el = dropZone.current;
+    if (!el) return;
+    // Solo una vez que el panel quedó atrás, arriba: antes de llegar, el panel ya está por venir.
+    const watch = new IntersectionObserver(
+      ([entry]) => setDockVisible(!entry.isIntersecting && entry.boundingClientRect.top < 0),
+      { threshold: 0 },
+    );
+    watch.observe(el);
+    return () => watch.disconnect();
+  }, []);
   const downloading = status === "loading" && download !== null;
   const input = useRef<HTMLInputElement>(null);
   const { lang, t } = useI18n();
@@ -59,6 +76,16 @@ export function Landing({ status, message, onFile, onUrl, download }: Props) {
     if (file) onFile(file);
   };
 
+
+  /** Abre el selector de archivos. */
+  const choose = () => {
+    const el = input.current;
+    if (!el) return;
+    // En el celular, sin filtro: iOS no conoce .cbz ni .cbr y los deja en gris, sin poder
+    // elegirlos. Lo que no se pueda abrir lo avisa el lector después.
+    el.accept = matchMedia("(pointer: coarse)").matches ? "" : ACCEPT;
+    el.click();
+  };
 
   /** Probar sin tener un tomo: un episodio que el autor liberó para uso libre. */
   const sample = (compact: boolean) => (
@@ -197,7 +224,7 @@ export function Landing({ status, message, onFile, onUrl, download }: Props) {
 
           {/* La demo va sobre el negro del lector: así se ve la hoja como se va a ver. */}
           <section
-            className="panel px-5 py-5 max-lg:order-3 sm:px-7 sm:py-7"
+            className="panel px-5 py-5 max-lg:order-2 max-sm:[&_.demo-sheet]:max-w-[250px] sm:px-7 sm:py-7"
             style={screenPanel}
           >
             <ReadingDemo label={L.demoLabel} caption={L.direction} />
@@ -206,7 +233,8 @@ export function Landing({ status, message, onFile, onUrl, download }: Props) {
 
         {/* El cuadro que espera el tomo. */}
         <section
-          className="panel relative max-lg:order-2"
+          ref={dropZone}
+          className="panel relative scroll-mt-4 max-lg:order-3"
           style={{ ...panel, background: over ? CYAN : PAPER, transition: "background 160ms" }}
           onDragOver={(e) => {
             e.preventDefault();
@@ -288,14 +316,7 @@ export function Landing({ status, message, onFile, onUrl, download }: Props) {
                 ))}
               <button
                 type="button"
-                onClick={() => {
-                  const el = input.current;
-                  if (!el) return;
-                  // En el celular, sin filtro: iOS no conoce .cbz ni .cbr y los deja en gris, sin
-                  // poder elegirlos. Lo que no se pueda abrir lo avisa el lector después.
-                  el.accept = matchMedia("(pointer: coarse)").matches ? "" : ACCEPT;
-                  el.click();
-                }}
+                onClick={choose}
                 className="inline-flex min-h-16 items-center justify-center gap-3 border-[4px] px-8 transition-transform max-sm:w-full hover:-translate-y-0.5 focus-visible:outline focus-visible:outline-4 focus-visible:outline-offset-4"
                 style={{ borderColor: INK, background: INK, outlineColor: MAGENTA, boxShadow: `6px 6px 0 ${MAGENTA}` }}
               >
@@ -428,7 +449,7 @@ export function Landing({ status, message, onFile, onUrl, download }: Props) {
 
         {/* Capacidades: numeradas al revés, porque se leen de derecha a izquierda. */}
         {/* En el celular van de arriba abajo, 01 primero; en columnas, de derecha a izquierda. */}
-        <div className="flex flex-col-reverse gap-3 max-lg:order-4 sm:gap-[18px] md:grid md:grid-cols-3">
+        <div className="-mx-4 flex snap-x snap-mandatory gap-3 overflow-x-auto px-4 pb-1 max-lg:order-4 max-md:[scrollbar-width:none] max-md:flex-row sm:-mx-8 sm:px-8 md:mx-0 md:grid md:grid-cols-3 md:gap-[18px] md:overflow-visible md:px-0">
           {[
             { n: "03", ...L.features[0] },
             { n: "02", ...L.features[1] },
@@ -436,11 +457,11 @@ export function Landing({ status, message, onFile, onUrl, download }: Props) {
           ].map((cap) => (
             <section
               key={cap.n}
-              className="panel grid grid-cols-[auto_1fr] gap-x-4 gap-y-1.5 px-5 py-5 sm:flex sm:flex-col sm:gap-3 sm:px-7 sm:py-7"
+              className={`panel flex w-[78%] shrink-0 snap-center flex-col ${MOBILE_ORDER[cap.n]} gap-2 px-5 py-5 sm:w-[46%] sm:gap-3 sm:px-7 sm:py-7 md:w-auto`}
               style={{ ...panel, backgroundImage: TONE }}
             >
               <span
-                className="trim-caps row-span-2 font-[family-name:var(--display)] text-[2rem] leading-none sm:self-end sm:text-[clamp(2.6rem,4.4vw,4.25rem)]"
+                className="trim-caps self-end font-[family-name:var(--display)] text-[2.4rem] leading-none sm:text-[clamp(2.6rem,4.4vw,4.25rem)]"
                 style={{ color: INK }}
                 aria-hidden
               >
@@ -460,7 +481,7 @@ export function Landing({ status, message, onFile, onUrl, download }: Props) {
         </div>
 
         {/* Las tarjetas son el resumen; el detalle técnico está en su propia página. */}
-        <div className="flex justify-end max-lg:order-4">
+        <div className="flex justify-end max-lg:order-4 max-sm:[&>a]:w-full max-sm:[&>a]:justify-center">
           <Link
             href="/como-funciona/"
             className="tsuzuku group inline-flex items-center gap-4 py-3 pr-10 pl-5 text-[16px] font-bold text-[#0B0B0C] transition-transform hover:translate-x-1 focus-visible:outline focus-visible:outline-3 focus-visible:outline-offset-4 focus-visible:outline-[#00D9F5] sm:text-[18px]"
@@ -473,8 +494,41 @@ export function Landing({ status, message, onFile, onUrl, download }: Props) {
           </Link>
         </div>
 
-        <div className="max-lg:order-5">
+        <div className="max-lg:order-5 max-sm:pb-20">
           <SiteFooter />
+        </div>
+
+        {/* La barra del celular: el botón de abrir siempre a mano, como en una app. */}
+        <div
+          className={`fixed inset-x-0 bottom-0 z-30 flex gap-2 px-4 pt-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] transition-transform duration-300 sm:hidden ${
+            dockVisible && status !== "loading" ? "" : "pointer-events-none translate-y-full"
+          }`}
+          style={{ background: "linear-gradient(to top, #121214 70%, transparent)" }}
+          aria-hidden={!dockVisible}
+        >
+          <button
+            type="button"
+            onClick={choose}
+            tabIndex={dockVisible ? 0 : -1}
+            className="flex h-14 flex-1 items-center justify-center gap-3 border-[3px]"
+            style={{ borderColor: INK, background: INK, boxShadow: `4px 4px 0 ${MAGENTA}` }}
+          >
+            <span aria-hidden className="text-[0.85em] leading-none" style={{ color: CYAN }}>
+              ▶
+            </span>
+            <span className="trim-caps font-[family-name:var(--display)] text-[20px] leading-none" style={{ color: PAPER }}>
+              {L.choose}
+            </span>
+          </button>
+          <button
+            type="button"
+            onClick={() => onUrl(new URL(asset(SAMPLE_PATH), window.location.href).href)}
+            tabIndex={dockVisible ? 0 : -1}
+            className="flex h-14 items-center border-[3px] px-4"
+            style={{ borderColor: INK, background: PAPER, color: INK }}
+          >
+            <span className="trim-caps font-[family-name:var(--display)] text-[16px] leading-none">{L.sampleShort}</span>
+          </button>
         </div>
       </div>
     </div>

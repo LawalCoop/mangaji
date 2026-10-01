@@ -132,7 +132,7 @@ export function SiteFooter() {
       style={{ ...screenPanel, color: "#B4B4BC" }}
     >
       {/* Cada columna arranca con un renglón de la misma altura: logo o título, alineados. */}
-      <div className="flex flex-col gap-4 px-6 py-6 sm:px-7">
+      <div className="flex flex-col gap-3 px-6 py-5 sm:gap-4 sm:px-7 sm:py-6">
         <div className="flex h-8 items-center">
           <a href={LAWAL_URL} target="_blank" rel="noopener" className="block">
             {/* eslint-disable-next-line @next/next/no-img-element -- exportación estática, sin optimizador */}
@@ -145,26 +145,26 @@ export function SiteFooter() {
         </a>
       </div>
 
-      <div className="relative flex flex-col gap-4 px-6 py-6 max-md:border-t sm:px-7 md:before:absolute md:before:inset-y-6 md:before:-left-[9px] md:before:w-px md:before:bg-[#2A2A30]" style={{ borderColor: "#2A2A30" }}>
+      <div className="relative flex flex-col gap-3 px-6 py-5 max-md:border-t sm:gap-4 sm:px-7 sm:py-6 md:before:absolute md:before:inset-y-6 md:before:-left-[9px] md:before:w-px md:before:bg-[#2A2A30]" style={{ borderColor: "#2A2A30" }}>
         <div className="flex h-8 items-center">
           <h2 className={heading} style={{ color: PAPER }}>
             {L.freeTitle}
           </h2>
         </div>
-        <p className="text-[15px] leading-relaxed">{L.freeText}</p>
+        <p className="text-[14px] leading-relaxed sm:text-[15px]">{L.freeText}</p>
         {/* Si se cuentan visitas, se dice: el sitio promete no mandar nada a ningún lado. */}
         {process.env.NEXT_PUBLIC_GOATCOUNTER && (
           <p className="text-[13px] leading-relaxed text-[#8A8A94]">{t.site.stats}</p>
         )}
       </div>
 
-      <div className="relative flex flex-col gap-4 px-6 py-6 max-md:border-t sm:px-7 md:before:absolute md:before:inset-y-6 md:before:-left-[9px] md:before:w-px md:before:bg-[#2A2A30]" style={{ borderColor: "#2A2A30" }}>
+      <div className="relative flex flex-col gap-3 px-6 py-5 max-md:border-t sm:gap-4 sm:px-7 sm:py-6 md:before:absolute md:before:inset-y-6 md:before:-left-[9px] md:before:w-px md:before:bg-[#2A2A30]" style={{ borderColor: "#2A2A30" }}>
         <div className="flex h-8 items-center">
           <h2 className={heading} style={{ color: PAPER }}>
             {t.site.project}
           </h2>
         </div>
-        <nav className="flex flex-col gap-3">
+        <nav className="grid grid-cols-2 gap-x-4 gap-y-3 sm:flex sm:flex-col">
           <Link href="/como-funciona/" className={`${link} decoration-[#00D9F5]`}>
             {t.site.how}
           </Link>

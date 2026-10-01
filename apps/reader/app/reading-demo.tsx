@@ -148,7 +148,7 @@ export function ReadingDemo({ label, caption }: { label: string; caption: string
     <figure className="flex h-full flex-col justify-center gap-4">
       <div
         ref={box}
-        className="relative mx-auto w-full max-w-[360px] overflow-hidden border-[4px] lg:max-w-none"
+        className="demo-sheet relative mx-auto w-full max-w-[360px] overflow-hidden border-[4px] lg:max-w-none"
         style={{ borderColor: INK, background: "#1A1A1E", aspectRatio: `${W} / ${H}` }}
       >
         <svg viewBox={`0 0 ${W} ${H}`} className="block h-full w-full" role="img" aria-label={label}>
