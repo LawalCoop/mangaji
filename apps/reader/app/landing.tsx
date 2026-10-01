@@ -48,6 +48,8 @@ const HEADLINE_FIT = { es: 21.5, en: 19.2, ja: 19.2 } as const;
 export function Landing({ status, message, onFile, onUrl, download }: Props) {
   const [over, setOver] = useState(false);
   const [link, setLink] = useState("");
+  // En el celular el link va plegado: la mayoría abre un archivo o prueba el ejemplo.
+  const [linkOpen, setLinkOpen] = useState(false);
   const downloading = status === "loading" && download !== null;
   const input = useRef<HTMLInputElement>(null);
   const { lang, t } = useI18n();
@@ -56,6 +58,35 @@ export function Landing({ status, message, onFile, onUrl, download }: Props) {
   const take = (file: File | undefined) => {
     if (file) onFile(file);
   };
+
+
+  /** Probar sin tener un tomo: un episodio que el autor liberó para uso libre. */
+  const sample = (compact: boolean) => (
+    <div
+      className={`flex flex-col gap-2.5 ${compact ? "w-full items-center text-center" : "border-t-[3px] border-dashed pt-6"}`}
+      style={{ borderColor: `${INK}55` }}
+    >
+      {!compact && (
+        <p className="trim-caps font-[family-name:var(--display)] text-[20px] leading-none" style={{ color: INK }}>
+          {L.sampleAsk}
+        </p>
+      )}
+      <button
+        type="button"
+        disabled={status === "loading"}
+        onClick={() => onUrl(new URL(asset(SAMPLE_PATH), window.location.href).href)}
+        className={`flex h-12 items-center gap-3 border-[3px] border-[#0B0B0C] bg-white px-5 text-[#0B0B0C] transition-colors hover:bg-[#0B0B0C] hover:text-[#F4EFE3] focus-visible:outline focus-visible:outline-4 focus-visible:outline-offset-2 focus-visible:outline-[#FF2E88] disabled:opacity-40 ${compact ? "w-full justify-center" : "self-start"}`}
+      >
+        <span aria-hidden className="text-[0.8em] leading-none text-[#FF2E88]">
+          ▶
+        </span>
+        <span className="trim-caps font-[family-name:var(--display)] text-[19px] leading-none">{L.sampleTry}</span>
+      </button>
+      <p className={`leading-snug ${compact ? "text-[12.5px]" : "text-[14px]"}`} style={{ color: "#5A5A62" }}>
+        {compact ? L.sampleCreditShort : L.sampleCredit}
+      </p>
+    </div>
+  );
 
   return (
     <div className="landing relative min-h-dvh w-full overflow-hidden bg-[#121214] px-4 py-5 sm:px-8 sm:py-9">
@@ -209,7 +240,7 @@ export function Landing({ status, message, onFile, onUrl, download }: Props) {
             />
           ))}
 
-          <div className="grid gap-9 px-6 py-10 sm:px-12 sm:py-12 lg:grid-cols-2 lg:gap-0">
+          <div className="grid gap-6 px-5 py-8 sm:gap-9 sm:px-12 sm:py-12 lg:grid-cols-2 lg:gap-0">
             {/* Desde el dispositivo. */}
             <div className="flex flex-col items-center justify-center gap-5 text-center lg:border-r-[3px] lg:border-dashed lg:pr-12" style={{ borderColor: `${INK}55` }}>
               {/* Globo de diálogo: la instrucción, dicha por la página. */}
@@ -240,7 +271,7 @@ export function Landing({ status, message, onFile, onUrl, download }: Props) {
               </div>
 
               {/* Guiño: destellos (kira-kira) alrededor del botón al señalarlo. */}
-              <div className="group relative">
+              <div className="group relative max-sm:w-full">
                 {[
                   { top: "-18px", left: "-16px", size: 22, delay: "0ms", color: CYAN },
                   { top: "-10px", right: "-20px", size: 16, delay: "120ms", color: MAGENTA },
@@ -265,7 +296,7 @@ export function Landing({ status, message, onFile, onUrl, download }: Props) {
                   el.accept = matchMedia("(pointer: coarse)").matches ? "" : ACCEPT;
                   el.click();
                 }}
-                className="inline-flex min-h-16 items-center gap-3 border-[4px] px-8 transition-transform hover:-translate-y-0.5 focus-visible:outline focus-visible:outline-4 focus-visible:outline-offset-4"
+                className="inline-flex min-h-16 items-center justify-center gap-3 border-[4px] px-8 transition-transform max-sm:w-full hover:-translate-y-0.5 focus-visible:outline focus-visible:outline-4 focus-visible:outline-offset-4"
                 style={{ borderColor: INK, background: INK, outlineColor: MAGENTA, boxShadow: `6px 6px 0 ${MAGENTA}` }}
               >
                 <span aria-hidden className="text-[0.9em] leading-none" style={{ color: CYAN }}>
@@ -290,12 +321,26 @@ export function Landing({ status, message, onFile, onUrl, download }: Props) {
               <p className="max-w-[26em] text-[15px] font-medium leading-snug sm:text-[17px]" style={{ color: "#3A3A42" }}>
                 {L.formats}
               </p>
+
+              <div className="w-full lg:hidden">{sample(true)}</div>
             </div>
 
             {/* O desde un link: práctico cuando el tomo está en la nube y no en el teléfono. */}
             <div className="flex flex-col justify-center gap-4 lg:pl-12">
+              <button
+                type="button"
+                onClick={() => setLinkOpen((v) => !v)}
+                aria-expanded={linkOpen}
+                className="flex items-center justify-between border-t-[3px] border-dashed pt-5 text-left lg:hidden"
+                style={{ borderColor: `${INK}55`, color: INK }}
+              >
+                <span className="trim-caps font-[family-name:var(--display)] text-[19px] leading-none">{L.linkToggle}</span>
+                <span aria-hidden className="text-[14px] transition-transform" style={{ transform: linkOpen ? "rotate(90deg)" : "none" }}>
+                  ▶
+                </span>
+              </button>
               <form
-                className="flex w-full flex-col gap-2.5"
+                className={`w-full flex-col gap-2.5 ${linkOpen ? "flex" : "hidden lg:flex"}`}
                 onSubmit={(e) => {
                   e.preventDefault();
                   onUrl(link);
@@ -303,7 +348,7 @@ export function Landing({ status, message, onFile, onUrl, download }: Props) {
               >
                 <label
                   htmlFor="tomo-link"
-                  className="trim-caps font-[family-name:var(--display)] text-[20px] leading-none"
+                  className="trim-caps font-[family-name:var(--display)] text-[20px] leading-none max-lg:sr-only"
                   style={{ color: INK }}
                 >
                   {L.linkLabel}
@@ -338,26 +383,8 @@ export function Landing({ status, message, onFile, onUrl, download }: Props) {
                 </p>
               </form>
 
-              {/* Para probar sin tener un tomo: un episodio que el autor liberó para uso libre. */}
-              <div className="flex flex-col gap-2.5 border-t-[3px] border-dashed pt-6" style={{ borderColor: `${INK}55` }}>
-                <p className="trim-caps font-[family-name:var(--display)] text-[20px] leading-none" style={{ color: INK }}>
-                  {L.sampleAsk}
-                </p>
-                <button
-                  type="button"
-                  disabled={status === "loading"}
-                  onClick={() => onUrl(new URL(asset(SAMPLE_PATH), window.location.href).href)}
-                  className="flex h-12 items-center gap-3 self-start border-[3px] border-[#0B0B0C] bg-white px-5 text-[#0B0B0C] transition-colors hover:bg-[#0B0B0C] hover:text-[#F4EFE3] focus-visible:outline focus-visible:outline-4 focus-visible:outline-offset-2 focus-visible:outline-[#FF2E88] disabled:opacity-40"
-                >
-                  <span aria-hidden className="text-[0.8em] leading-none text-[#FF2E88]">
-                    ▶
-                  </span>
-                  <span className="trim-caps font-[family-name:var(--display)] text-[19px] leading-none">{L.sampleTry}</span>
-                </button>
-                <p className="text-[14px] leading-snug" style={{ color: "#5A5A62" }}>
-                  {L.sampleCredit}
-                </p>
-              </div>
+              {/* El ejemplo, en escritorio debajo del link; en el celular va arriba, junto al botón. */}
+              <div className="max-lg:hidden">{sample(false)}</div>
 
               {downloading && download && (
                 <div className="flex w-full flex-col gap-1.5" role="status">
@@ -384,7 +411,7 @@ export function Landing({ status, message, onFile, onUrl, download }: Props) {
             </div>
 
             <p
-              className="text-center text-[14px] font-medium leading-relaxed lg:col-span-2 lg:mx-auto lg:mt-10 lg:max-w-[46em]"
+              className="text-center text-[12.5px] font-medium leading-relaxed sm:text-[14px] lg:col-span-2 lg:mx-auto lg:mt-10 lg:max-w-[46em]"
               style={{ color: "#5A5A62" }}
               role={status === "error" ? "alert" : undefined}
             >
@@ -400,7 +427,8 @@ export function Landing({ status, message, onFile, onUrl, download }: Props) {
         </section>
 
         {/* Capacidades: numeradas al revés, porque se leen de derecha a izquierda. */}
-        <div className="grid gap-[18px] max-lg:order-4 md:grid-cols-3">
+        {/* En el celular van de arriba abajo, 01 primero; en columnas, de derecha a izquierda. */}
+        <div className="flex flex-col-reverse gap-3 max-lg:order-4 sm:gap-[18px] md:grid md:grid-cols-3">
           {[
             { n: "03", ...L.features[0] },
             { n: "02", ...L.features[1] },
@@ -408,23 +436,23 @@ export function Landing({ status, message, onFile, onUrl, download }: Props) {
           ].map((cap) => (
             <section
               key={cap.n}
-              className="panel flex flex-col gap-3 px-6 py-6 sm:px-7 sm:py-7"
+              className="panel grid grid-cols-[auto_1fr] gap-x-4 gap-y-1.5 px-5 py-5 sm:flex sm:flex-col sm:gap-3 sm:px-7 sm:py-7"
               style={{ ...panel, backgroundImage: TONE }}
             >
               <span
-                className="trim-caps self-end font-[family-name:var(--display)] leading-none"
-                style={{ fontSize: "clamp(2.6rem,4.4vw,4.25rem)", color: INK }}
+                className="trim-caps row-span-2 font-[family-name:var(--display)] text-[2rem] leading-none sm:self-end sm:text-[clamp(2.6rem,4.4vw,4.25rem)]"
+                style={{ color: INK }}
                 aria-hidden
               >
                 {cap.n}
               </span>
               <h2
-                className="mt-2 font-[family-name:var(--display)] leading-tight"
-                style={{ fontSize: "clamp(1.4rem,2.3vw,2rem)", color: INK }}
+                className="font-[family-name:var(--display)] text-[1.3rem] leading-tight sm:mt-2 sm:text-[clamp(1.4rem,2.3vw,2rem)]"
+                style={{ color: INK }}
               >
                 {cap.title}
               </h2>
-              <p className="text-[16px] font-medium leading-relaxed sm:text-[17px]" style={{ color: "#2E2E36" }}>
+              <p className="text-[15px] font-medium leading-relaxed sm:text-[17px]" style={{ color: "#2E2E36" }}>
                 {cap.text}
               </p>
             </section>

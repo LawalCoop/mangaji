@@ -57,6 +57,8 @@ const es = {
     downloadedUnknown: (got: string) => `${got} MB`,
     sampleAsk: "¿No tenés un tomo a mano?",
     sampleTry: "Probar con un ejemplo",
+    sampleCreditShort: "Episodio 1 de «Give My Regards to Black Jack», de Shuho Sato, liberado por su autor para uso libre.",
+    linkToggle: "¿Lo tenés en un link?",
     sampleCredit: "Es el episodio 1 de «Give My Regards to Black Jack» (Burakku Jakku ni Yoroshiku), de Shuho Sato. En 2012 el autor liberó la obra entera: cualquiera puede leerla, copiarla, traducirla y compartirla sin pedir permiso ni pagar nada. Él conserva sus derechos de autor.",
     rights: "Abrí solo archivos que tengas derecho a leer.",
     privacy:
@@ -280,6 +282,8 @@ const en: Messages = {
     downloadedUnknown: (got: string) => `${got} MB`,
     sampleAsk: "No volume at hand?",
     sampleTry: "Try a sample",
+    sampleCreditShort: "Episode 1 of “Give My Regards to Black Jack” by Shuho Sato, released by its author for free use.",
+    linkToggle: "Got it as a link?",
     sampleCredit: "It's episode 1 of “Give My Regards to Black Jack” (Burakku Jakku ni Yoroshiku) by Shuho Sato. In 2012 the author released the whole work: anyone can read, copy, translate and share it without asking permission or paying anything. He keeps his copyright.",
     rights: "Only open files you have the right to read.",
     privacy:
@@ -500,6 +504,8 @@ const ja: Messages = {
     downloadedUnknown: (got: string) => `${got} MB`,
     sampleAsk: "手元に単行本がない？",
     sampleTry: "サンプルで試す",
+    sampleCreditShort: "佐藤秀峰『ブラックジャックによろしく』第 1 話。作者により二次利用フリー。",
+    linkToggle: "リンクで開く？",
     sampleCredit: "佐藤秀峰『ブラックジャックによろしく』第 1 話（英語版）です。2012 年、作者は作品全体の二次利用をフリーにしました。許可や支払いなしで、誰でも読んだり、複製・翻訳・共有したりできます。著作権は作者が保持しています。",
     rights: "読む権利のあるファイルだけを開いてください。",
     privacy:
