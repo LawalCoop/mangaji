@@ -32,6 +32,8 @@ export type Frame = {
   polygon?: [number, number][];
   beats: Beat[];
   layers?: Layer[];
+  /** Tensión de la viñeta, de 0 a 1, para la cámara experimental. */
+  tension?: number;
 };
 
 /**

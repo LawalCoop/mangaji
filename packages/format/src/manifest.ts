@@ -76,6 +76,11 @@ export const Panel = z.object({
   confidence: z.number().min(0).max(1).default(1),
   balloons: z.array(Balloon).default([]),
   beats: z.array(Beat).default([]),
+  /**
+   * Cómo se lee la viñeta, para la cámara experimental: la tensión de 0 a 1, ya suavizada con
+   * las vecinas. Opcional: los `.cbza` anteriores no la traen y se leen como siempre.
+   */
+  look: z.object({ tension: z.number().min(0).max(1) }).optional(),
 });
 export type Panel = z.infer<typeof Panel>;
 

@@ -5,6 +5,7 @@ import { choosePanels, dedupe, fillAroundTexts, fillOrphans, inkGrid, isFolio, o
 import type { Detector, Detection } from "./detector";
 import { lift, type Sprite } from "./dialogue";
 import { balloonTail } from "./tail";
+import { jaggedness, smooth, tension, tilt } from "./look";
 
 /**
  * Hasta qué tamaño se prueba levantar el texto de un globo entero, como fracción de la
@@ -204,7 +205,14 @@ export async function processPage(
 
   // Los bloques se agrupan por globo: el modelo parte un diálogo largo en varios.
   const taken = new Set<number>();
-  const groups: { box: Detection["bbox"]; parts: Sprite[]; focus?: [number, number]; tail?: [number, number] }[] = [];
+  const groups: {
+    box: Detection["bbox"];
+    parts: Sprite[];
+    focus?: [number, number];
+    tail?: [number, number];
+    /** La silueta del globo, si lo hay: su forma dice si se grita o se habla. */
+    shape?: Point[];
+  }[] = [];
   // La colita se busca en la página original: el levantado ya borró el texto, pero el
   // contorno y el papel siguen igual, y así no depende del orden.
   const tailOf = (polygon: [number, number][]) => balloonTail(pixels.data, width, height, polygon) ?? undefined;
@@ -226,6 +234,7 @@ export async function processPage(
         parts: mine.map((m) => m.sprite),
         focus: [(x0 + x1) / 2, (y0 + y1) / 2],
         tail: tailOf(balloon.polygon as [number, number][]),
+        shape: balloon.polygon as Point[],
       });
     }
   }
@@ -239,12 +248,13 @@ export async function processPage(
         parts: [],
         focus: tailTip(balloon.polygon as [number, number][]) ?? undefined,
         tail: tailOf(balloon.polygon as [number, number][]),
+        shape: balloon.polygon as Point[],
       });
     }
   }
 
   // Cada grupo va a la viñeta que lo contiene; ver `ownersOf`.
-  const perPanel = new Map<number, { id: string; box: Detection["bbox"]; parts: Sprite[] }[]>();
+  const perPanel = new Map<number, { id: string; box: Detection["bbox"]; parts: Sprite[]; shape?: Point[] }[]>();
   groups.forEach((group, gi) => {
     const id = `${pageId}.b${gi}`;
     for (const owner of ownersOf(group.box, panels, group.focus, group.tail)) {
@@ -295,6 +305,8 @@ export async function processPage(
     });
 
     const look = measure(ctx, panel.polygon, pageArea);
+    const jagged = Math.max(1, ...mine.map((m) => (m.shape ? jaggedness(m.shape) : 1)));
+    const rawTension = tension({ ink: look.ink, jagged, tilt: tilt(panel.polygon as Point[]) });
     const withSprite = outBalloons.filter((b) => b.sprite);
     const beats: Record<string, unknown>[] = [{ t: 0, ms: ENTER_MS, cam: camera(look) }];
     const fx = effect(look);
@@ -315,7 +327,12 @@ export async function processPage(
       confidence: Number(panel.conf.toFixed(3)),
       balloons: outBalloons,
       beats,
+      look: { tension: rawTension },
     };
+  });
+  // La tensión se suaviza con las vecinas en orden de lectura: una escena cambia de a poco.
+  smooth(outPanels.map((p) => p.look.tension)).forEach((v, i) => {
+    outPanels[i].look.tension = Number(v.toFixed(3));
   });
 
   // El arte se guarda ya sin el diálogo, así que hay que recodificarlo.

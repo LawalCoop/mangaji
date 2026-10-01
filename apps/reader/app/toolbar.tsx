@@ -43,6 +43,9 @@ export type ToolbarProps = {
   onMood: (mood: MoodId) => void;
   onMusic: (on: boolean) => void;
   onToggleMode: () => void;
+  /** Cámara experimental, que sigue la tensión de cada escena. */
+  directed: boolean;
+  onToggleDirected: () => void;
 };
 
 /** Pista de un control deslizante, con el pulgar grande cuando se usa con el dedo. */
@@ -196,6 +199,9 @@ export function Toolbar(props: ToolbarProps) {
           <Group>
             <Button onClick={props.onToggleMode} title={T.toggleMode}>
               {props.panelMode ? T.modePanel : T.modePage}
+            </Button>
+            <Button onClick={props.onToggleDirected} active={props.directed} title={T.directedTitle}>
+              {T.directed}
             </Button>
           </Group>
         )}

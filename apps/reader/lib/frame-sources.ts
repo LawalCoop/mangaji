@@ -67,6 +67,7 @@ export class PanelFrameSource implements FrameSource {
         rect: framed(panel.bbox, panel.balloons.map((b) => b.bbox)),
         polygon: panel.polygon as [number, number][],
         beats: panel.beats,
+        tension: panel.look?.tension,
         layers: panel.balloons.map((balloon) => {
           const [bx, by, bw, bh] = balloon.bbox;
           return {

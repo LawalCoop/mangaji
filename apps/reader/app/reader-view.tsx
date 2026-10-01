@@ -3,7 +3,7 @@
 import { MANIFEST_FILENAME, Page, safeParseManifest, type CameraMove } from "@mangaji/format";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { CbzSource, type ArchiveSource } from "@/lib/archive";
-import { Camera, type Viewport } from "@/lib/camera";
+import { Camera, type Transform, type Viewport } from "@/lib/camera";
 import { Director } from "@/lib/director";
 import { PageFrameSource, PanelFrameSource } from "@/lib/frame-sources";
 import { LiveSource } from "@/lib/live-archive";
@@ -25,6 +25,33 @@ const ASSUMED_PAGE = { w: 1600, h: 2300 };
 const FIT_MARGIN = 0.94;
 /** Duración del viaje de la cámara entre viñetas de la misma página. */
 const TRAVEL_MS = 520;
+const DIRECTED_KEY = "mangaji:directed";
+
+/**
+ * La cámara experimental para una viñeta, según su tensión (0 a 1).
+ *
+ * Reglas de cine tomadas de DynamicManga: una escena tensa entra de golpe y desde cerca, con
+ * la cámara en mano; una tranquila se abre despacio; un plano ancho y calmo se recorre de
+ * derecha a izquierda, como se lee, antes de mostrarse entero. El ritmo de lectura también
+ * cambia: lo tenso se lee más rápido, lo calmo con más aire.
+ */
+function directedShot(tension: number, rect: Rect, view: Viewport) {
+  const fit = (zoom: number) => Camera.fit(rect, view, FIT_MARGIN * zoom);
+  const to = fit(1);
+  const speed = 1.45 - 0.8 * tension;
+  if (tension >= 0.55) {
+    return { from: fit(1.2), to, speed, shake: 2 + 5 * tension, pace: 0.85 };
+  }
+  if (rect.w / rect.h >= 1.8 && tension < 0.45) {
+    // Plano de ubicación: arranca en el tercio derecho y se abre a la viñeta entera.
+    const part = { x: rect.x + rect.w * 0.45, y: rect.y, w: rect.w * 0.55, h: rect.h };
+    return { from: Camera.fit(part, view, FIT_MARGIN), to, speed: speed * 1.6, shake: 0, pace: 1.1 };
+  }
+  if (tension <= 0.25) {
+    return { from: fit(0.93), to, speed: speed * 1.2, shake: 0, pace: 1.15 };
+  }
+  return { from: fit(1.07), to, speed, shake: 0, pace: 1 };
+}
 /**
  * Apertura: la primera página no aparece, se descubre.
  *
@@ -140,6 +167,31 @@ export default function ReaderView() {
   /** El mood se lee dentro del ciclo de render, que no ve el estado de React. */
   const moodRef = useRef(MOODS[DEFAULT_MOOD]);
   const musicRef = useRef<Music | null>(null);
+  /**
+   * Cámara experimental: el ritmo y el movimiento siguen la tensión de cada escena, a la
+   * DynamicManga. Se prende desde la barra y se recuerda por navegador.
+   */
+  const [directed, setDirected] = useState(false);
+  const directedRef = useRef(false);
+  useEffect(() => {
+    try {
+      const on = localStorage.getItem(DIRECTED_KEY) === "1";
+      directedRef.current = on;
+      setDirected(on);
+    } catch {
+      // Sin almacenamiento: queda apagada.
+    }
+  }, []);
+  const toggleDirected = useCallback(() => {
+    const on = !directedRef.current;
+    directedRef.current = on;
+    setDirected(on);
+    try {
+      localStorage.setItem(DIRECTED_KEY, on ? "1" : "0");
+    } catch {
+      // Sin almacenamiento: dura lo que dure la pestaña.
+    }
+  }, []);
   /** El volumen elegido sobrevive a apagar y volver a encender la música. */
   const volumeRef = useRef(0.42);
 
@@ -247,6 +299,10 @@ export default function ReaderView() {
         let shownPage = -1;
         /** La apertura ocurre una sola vez, al abrir el archivo. */
         let opening = true;
+        /** Cámara experimental: el segundo tramo del movimiento, que arranca al llegar. */
+        let queued: { left: number; to: Transform; ms: number; shake: number } | null = null;
+        /** Cámara experimental: ritmo de lectura de la viñeta actual. */
+        let readingPace = 1;
         /** Apariciones de diálogo en curso, avanzadas por el ticker. */
         const revealing = new Map<string, { elapsed: number; ms: number }>();
         /**
@@ -327,7 +383,13 @@ export default function ReaderView() {
             // El encuadre puede salirse de la hoja sin problema: el fondo toma el tono del
             // papel, así que se lee como si la página continuara.
             const cam = fresh.beats[0]?.cam;
-            const { from, to } = framing(cam, fresh.rect, stage.viewport);
+            const shot =
+              directedRef.current && fresh.tension !== undefined && !director.reducedMotion
+                ? directedShot(fresh.tension, fresh.rect, stage.viewport)
+                : null;
+            const { from, to } = shot ?? framing(cam, fresh.rect, stage.viewport);
+            readingPace = shot?.pace ?? 1;
+            queued = null;
 
             if (immediate && !director.reducedMotion && opening) {
               opening = false;
@@ -341,10 +403,19 @@ export default function ReaderView() {
             } else if (immediate || director.reducedMotion) {
               opening = false;
               stage.camera.cut(to);
+            } else if (samePage && shot) {
+              // Experimental: se viaja al arranque del plano y desde ahí se hace el movimiento.
+              const travel = TRAVEL_MS * moodRef.current.pace * Math.min(shot.speed, 1);
+              stage.camera.glide(from, travel);
+              queued = { left: travel * 0.8, to, ms: 900 * shot.speed * moodRef.current.pace, shake: shot.shake };
             } else if (samePage) {
               // Dentro de la página la cámara viaja: es lo que da la sensación de estar
               // recorriendo la hoja en vez de ver recortes sueltos.
               stage.camera.glide(to, TRAVEL_MS * moodRef.current.pace);
+            } else if (shot) {
+              stage.camera.cut(from);
+              stage.camera.glide(to, 900 * shot.speed * moodRef.current.pace);
+              if (shot.shake) stage.camera.shake(shot.shake, 500);
             } else {
               // Página nueva: se entra con el movimiento que pida el beat.
               stage.camera.cut(from);
@@ -399,7 +470,15 @@ export default function ReaderView() {
         const offTick = stage.onTick((dt) => {
           // El ritmo del mood se aplica al reloj del director: así escala todo de una vez
           // —pausas, tiempos de lectura, apariciones— en vez de retocar cada duración.
-          director.tick(dt / moodRef.current.pace);
+          director.tick(dt / (moodRef.current.pace * readingPace));
+          if (queued) {
+            queued.left -= dt;
+            if (queued.left <= 0) {
+              stage.camera.glide(queued.to, queued.ms);
+              if (queued.shake) stage.camera.shake(queued.shake, 500);
+              queued = null;
+            }
+          }
           stage.camera.update(dt);
           stage.updateFx(dt);
 
@@ -1114,6 +1193,8 @@ export default function ReaderView() {
           onMood={applyMood}
           onMusic={toggleMusic}
           onToggleMode={toggleMode}
+          directed={directed}
+          onToggleDirected={toggleDirected}
         />
       )}
     </main>
