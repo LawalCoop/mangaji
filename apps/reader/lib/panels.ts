@@ -621,8 +621,12 @@ export function tailTip(polygon: Point[]): Point | null {
 
 /** Cuánto pueden separarse un relleno y su viñeta, como fracción del alto de la hoja. */
 const FILLER_GAP = 0.02;
-/** Una fila con menos de esta fracción de tinta, cerca del borde que comparten, es una calle. */
-const GUTTER_INK = 0.04;
+/**
+ * Una fila con menos de esta fracción de tinta, cerca del borde que comparten, es una calle.
+ * No cero: una calle cruzada por rayos o líneas de velocidad tiene algo (4 % en el tomo 2 de
+ * Saint Seiya, p. 5b); un dibujo que sigue de corrido, mucho más (23 % en la p. 6a).
+ */
+const GUTTER_INK = 0.12;
 
 /**
  * Une un relleno con la viñeta que continúa.
