@@ -283,4 +283,10 @@ describe("relleno que continúa una viñeta", () => {
   it("no lo une si entre los dos hay una calle", () => {
     expect(joinFillers([filler, detected], page(true), W, H)).toHaveLength(2);
   });
+
+  it("no une una viñeta angosta con una ancha de abajo (tomo 2 de Saint Seiya, p. 5a)", () => {
+    const narrow = frame(0.86, 0, 0, 100, 300);
+    const wide = frame(0.09, 0, 300, 200, 500);
+    expect(joinFillers([wide, narrow], page(false), W, H)).toHaveLength(2);
+  });
 });

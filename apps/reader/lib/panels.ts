@@ -659,7 +659,10 @@ export function joinFillers(
   for (let joined = true; joined; ) {
     joined = false;
     outer: for (let i = 0; i < out.length; i++) {
-      if (out[i].conf >= PANEL_CONF) continue;
+      // Solo lo que se rellenó a mano, no lo que el modelo vio aunque fuera con poca
+      // confianza: eso es una viñeta propia (tomo 2 de Saint Seiya, p. 5a, donde la de abajo
+      // se unía con la de arriba a la derecha).
+      if (out[i].conf >= RESCUE_CONF) continue;
       for (let j = 0; j < out.length; j++) {
         if (i === j || out[j].conf < PANEL_CONF) continue;
         const f = out[i].bbox;
