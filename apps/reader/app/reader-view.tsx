@@ -36,6 +36,13 @@ const DIRECTED_KEY = "mangaji:directed";
 const MOTION_AHEAD = 1;
 /** Lo máximo que espera, para que un lector que avanza sin parar no frene el tomo. */
 const MOTION_WAIT_MAX = 2000;
+/**
+ * Tandas: con `pause` páginas listas por delante se deja de procesar hasta que queden
+ * `resume`, salvo que el lector esté quieto.
+ */
+const BATCH = { pause: 5, resume: 2 };
+/** Cuánto sin mover la cámara cuenta como lector quieto, que se aprovecha para procesar. */
+const IDLE_MS = 3000;
 
 /**
  * Apertura: la primera página no aparece, se descubre.
@@ -810,16 +817,28 @@ export default function ReaderView() {
           await accept(page, true);
         }
         for (let index = Math.min(saved.length, total); index < total; index++) {
-          // Con un par de páginas listas por delante, se espera a que la cámara termine de
-          // moverse: la inferencia comparte la placa con el dibujo y, en el celular, el
-          // movimiento iba a tirones. Con poco adelanto no se espera, para no dejar al
-          // lector sin páginas.
-          const reading = engine.current?.director.frame.page ?? 0;
-          if (index - reading >= MOTION_AHEAD && !engine.current?.director.waiting) {
-            const deadline = performance.now() + MOTION_WAIT_MAX;
-            while (performance.now() < Math.min(motionUntil.current, deadline)) {
-              await new Promise((resolve) => setTimeout(resolve, 80));
+          // El procesamiento comparte la placa y el procesador con el dibujo, y en el celular
+          // la lectura iba a tirones mientras corría. Se trabaja de a tandas: con varias
+          // páginas listas por delante, se espera a que el lector se acerque o se quede
+          // quieto; con pocas, solo a que la cámara termine de moverse. Si el lector ya está
+          // esperando la página siguiente, no se espera nada.
+          const waitStart = performance.now();
+          for (;;) {
+            const eng = engine.current;
+            if (!eng || eng.director.waiting) break;
+            const ahead = index - eng.director.frame.page;
+            const now = performance.now();
+            const idle = now - motionUntil.current >= IDLE_MS;
+            if (ahead >= BATCH.pause) {
+              if (idle) break;
+              // Pausado hasta que se acerque: sigue cuando quedan pocas.
+              await new Promise((resolve) => setTimeout(resolve, 200));
+              if (index - (engine.current?.director.frame.page ?? 0) <= BATCH.resume) break;
+              continue;
             }
+            if (ahead < MOTION_AHEAD || now >= motionUntil.current) break;
+            if (now - waitStart > MOTION_WAIT_MAX) break;
+            await new Promise((resolve) => setTimeout(resolve, 80));
           }
           const bitmap = await cbz.bitmap(index);
           const settled = new Promise<void>((resolve) => settle.set(index, resolve));
