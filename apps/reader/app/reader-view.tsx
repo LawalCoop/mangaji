@@ -14,7 +14,7 @@ import { DEFAULT_MOOD, MOOD_ORDER, MOODS, type MoodId } from "@/lib/mood";
 import { Music } from "@/lib/music";
 import { bookKey, forget, savedPage, savePage } from "@/lib/progress";
 import { shelf, shelvedPages } from "@/lib/shelf";
-import { directedShot, FIT_MARGIN, HOLD, type DirectedShot } from "@/lib/directed";
+import { directedShot, FIT_MARGIN, type DirectedShot, type Pan } from "@/lib/directed";
 import type { ProcessedPage } from "@/lib/process";
 import { Stage } from "@/lib/stage";
 import type { Rect } from "@/lib/types";
@@ -315,36 +315,30 @@ export default function ReaderView() {
         let shownPage = -1;
         /** La apertura ocurre una sola vez, al abrir el archivo. */
         let opening = true;
-        /**
-         * Cámara experimental: los tramos del plano en cola, uno detrás del otro. Los que
-         * esperan un globo (`on`) arrancan cuando aparece, esperando o tocando; los demás,
-         * a tiempo (`left`, en ms desde que arrancó el anterior).
-         */
-        let queued: { left: number | null; on?: string; after?: number; to: Transform; ms: number; shake: number }[] = [];
+        /** Cámara experimental: los tramos a tiempo del plano, uno detrás del otro. */
+        let queued: { left: number; to: Transform; ms: number; shake: number }[] = [];
         const steps = (shot: DirectedShot, wait: number) => {
           let prevAt = 0;
           return shot.steps.map((st, i) => {
-            const pace = moodRef.current.pace;
-            let left: number | null = null;
-            if (!st.on) {
-              const at = st.at ?? 0;
-              left = (i === 0 ? wait : 0) + (at - prevAt) * pace;
-              prevAt = at;
-            }
-            return {
-              left,
-              on: st.on,
-              after: (st.after ?? 0) * pace,
-              to: st.to,
-              ms: st.ms * pace,
-              shake: st.shake ?? (i === 0 ? shot.shake : 0),
-            };
+            const at = st.at ?? 0;
+            const left = (i === 0 ? wait : 0) + (at - prevAt) * moodRef.current.pace;
+            prevAt = at;
+            return { left, to: st.to, ms: st.ms * moodRef.current.pace, shake: i === 0 ? shot.shake : 0 };
           });
         };
-        /** Arranca los tramos que esperaban este globo, o el fin de la lectura (`HOLD`). */
-        const arm = (on: string) => {
-          for (const st of queued) if (st.on === on && st.left === null) st.left = st.after ?? 0;
+        /**
+         * Cámara experimental: el paneo en curso. Avanza parejo en cada cuadro, sin pasar un
+         * globo que todavía no apareció, y al terminar —o si se pide avanzar antes— muestra
+         * la viñeta entera.
+         */
+        let pan: (Pan & { p: number; delay: number; final: Transform; done: boolean }) | null = null;
+        const finishPan = () => {
+          if (!pan || pan.done) return false;
+          pan.done = true;
+          stage.camera.glide(pan.final, 800 * moodRef.current.pace);
+          return true;
         };
+        director.holdNext = finishPan;
         /** Cámara experimental: ritmo de lectura de la viñeta actual. */
         let readingPace = 1;
         /** Apariciones de diálogo en curso, avanzadas por el ticker. */
@@ -443,6 +437,7 @@ export default function ReaderView() {
               : framing(cam, fresh.rect, stage.viewport);
             readingPace = shot?.pace ?? 1;
             queued = [];
+            pan = null;
 
             if (immediate && !director.reducedMotion && opening) {
               opening = false;
@@ -461,6 +456,7 @@ export default function ReaderView() {
               const travel = TRAVEL_MS * moodRef.current.pace;
               stage.camera.glide(from, travel);
               queued = steps(shot, travel * 0.8);
+              if (shot.pan) pan = { ...shot.pan, p: 0, delay: travel * 0.8, final: shot.final!, done: false };
             } else if (samePage) {
               // Dentro de la página la cámara viaja: es lo que da la sensación de estar
               // recorriendo la hoja en vez de ver recortes sueltos.
@@ -468,6 +464,8 @@ export default function ReaderView() {
             } else if (shot) {
               stage.camera.cut(from);
               queued = steps(shot, 0);
+              if (shot.pan) pan = { ...shot.pan, p: 0, delay: 0, final: shot.final!, done: false };
+              if (shot.pan && shot.shake) stage.camera.shake(shot.shake, 500);
             } else {
               // Página nueva: se entra con el movimiento que pida el beat.
               stage.camera.cut(from);
@@ -498,8 +496,6 @@ export default function ReaderView() {
           }
           if (ev.type !== "beat") return;
 
-          if (ev.beat.reveal) arm(ev.beat.reveal);
-          if (ev.beat.hold !== undefined) arm(HOLD);
           if (ev.beat.reveal) {
             const id = ev.beat.reveal;
             if (director.reducedMotion || revealed.has(id)) stage.revealDialogue(id, 1);
@@ -529,8 +525,25 @@ export default function ReaderView() {
           // —pausas, tiempos de lectura, apariciones— en vez de retocar cada duración.
           director.tick(dt / (moodRef.current.pace * readingPace));
           // Los tramos de la cámara experimental, uno detrás del otro.
+          if (pan && !pan.done) {
+            if (pan.delay > 0) pan.delay -= dt;
+            else {
+              // Hasta el próximo globo que falta aparecer; con todo a la vista, hasta el final.
+              const next = pan.stops.find((st: { id: string }) => !revealed.has(st.id));
+              const limit = next ? next.at : 1;
+              const speed = 1 / (pan.ms * moodRef.current.pace);
+              pan.p = Math.min(limit, pan.p + dt * speed);
+              const k = pan.p;
+              stage.camera.cut({
+                scale: pan.start.scale + (pan.end.scale - pan.start.scale) * k,
+                x: pan.start.x + (pan.end.x - pan.start.x) * k,
+                y: pan.start.y + (pan.end.y - pan.start.y) * k,
+              });
+              if (pan.p >= 1) finishPan();
+            }
+          }
           const step = queued[0];
-          if (step && step.left !== null) {
+          if (step) {
             step.left -= dt;
             if (step.left <= 0) {
               stage.camera.glide(step.to, step.ms);

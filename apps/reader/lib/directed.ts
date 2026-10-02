@@ -47,34 +47,25 @@ export function directedShot(frame: ShotFrame, view: Viewport): DirectedShot {
     };
     const shake = tension >= 0.55 ? 2 + 4 * tension : 0;
 
-    // Con diálogo, la cámara va de globo en globo a medida que aparecen —esperando o tocando—
-    // y termina de recorrer y se aleja cuando ya se leyó todo. Sin diálogo, un paneo de
-    // duración fija según lo que recorre.
-    const reveals = frame.beats.filter((b) => b.reveal).map((b) => b.reveal!);
+    // Paneo continuo: a velocidad pareja de punta a punta, pero sin pasar un globo que
+    // todavía no apareció. Dura lo que tarda en aparecer el diálogo, o lo que recorre si no
+    // hay. Al terminar, se muestra la viñeta entera.
+    const span = (wide ? end.x - start.x : end.y - start.y) || 1;
+    const along = (t: Transform) => ((wide ? t.x - start.x : t.y - start.y) / span);
     const layers = new Map((frame.layers ?? []).map((l) => [l.id, l.rect]));
-    const stops = reveals.filter((id) => layers.has(id));
-    if (stops.length) {
-      return {
-        from: start,
-        steps: [
-          ...stops.map((id, i) => ({ to: aim(layers.get(id)!), ms: PAN.stopMs, on: id, shake: i === 0 ? shake : 0 })),
-          { to: end, ms: PAN.stopMs, on: HOLD },
-          { to, ms: 800, on: HOLD, after: PAN.stopMs * 0.8 },
-        ],
-        shake: 0,
-        pace: 1.15,
-      };
-    }
+    const stops = frame.beats
+      .filter((b) => b.reveal && layers.has(b.reveal))
+      .map((b) => ({ id: b.reveal!, at: Math.min(1, Math.max(0, along(aim(layers.get(b.reveal!)!)))) }));
     const travel = wide ? (rect.w * scale - view.w) / view.w : (rect.h * scale - view.h) / view.h;
-    const panMs = Math.min(PAN.maxMs, PAN.baseMs + travel * PAN.perScreenMs) * speed;
+    const travelMs = Math.min(PAN.maxMs, PAN.baseMs + travel * PAN.perScreenMs) * speed;
+    const dialogueMs = Math.max(0, ...frame.beats.map((b) => b.t ?? 0));
     return {
       from: start,
-      steps: [
-        { to: end, ms: panMs, at: 0 },
-        { to, ms: 700 * speed, at: panMs * 0.8 },
-      ],
+      steps: [],
+      pan: { start, end, ms: Math.max(travelMs, dialogueMs * 1.15), stops },
+      final: to,
       shake,
-      pace: 1.25,
+      pace: 1.15,
     };
   }
 
@@ -96,23 +87,23 @@ export function directedShot(frame: ShotFrame, view: Viewport): DirectedShot {
 export type ShotFrame = {
   rect: Rect;
   tension?: number;
-  beats: { reveal?: string; hold?: number }[];
+  beats: { t?: number; reveal?: string; hold?: number }[];
   layers?: { id: string; rect: Rect }[];
 };
 
-/** Disparador de los tramos que esperan a que se termine de leer la viñeta. */
-export const HOLD = "#hold";
+/** Un tramo del plano, que arranca a los `at` ms de empezar la viñeta. */
+export type ShotStep = { to: Transform; ms: number; at?: number };
 
-/**
- * Un tramo del plano. Arranca a los `at` ms de empezar la viñeta, o cuando aparece el globo
- * `on` (o con `HOLD`, cuando ya apareció todo), más `after` ms.
- */
-export type ShotStep = { to: Transform; ms: number; at?: number; on?: string; after?: number; shake?: number };
+/** Un paneo continuo de `start` a `end` en `ms`, que no pasa un globo antes de que aparezca. */
+export type Pan = { start: Transform; end: Transform; ms: number; stops: { id: string; at: number }[] };
 
 /** Un plano de la cámara experimental: dónde arranca y los tramos que recorre. */
 export type DirectedShot = {
   from: Transform;
   steps: ShotStep[];
+  /** Si la viñeta se recorre: el paneo, y la vista entera con que termina. */
+  pan?: Pan;
+  final?: Transform;
   shake: number;
   /** Ritmo de lectura de la viñeta: más de 1, más lento. */
   pace: number;
@@ -121,6 +112,6 @@ export type DirectedShot = {
 /**
  * El paneo de las viñetas que enteras quedan chicas: desde cuánto se achican para que valga
  * la pena (`minGain`: entera ocuparía menos de un tercio de lo que podría), cuánto puede
- * acercarse como mucho, cuánto dura según lo que recorre y cuánto tarda en llegar a cada globo.
+ * acercarse como mucho y cuánto dura según lo que recorre.
  */
-const PAN = { minGain: 3, maxZoom: 2.4, baseMs: 900, perScreenMs: 1100, maxMs: 4200, stopMs: 1300 };
+const PAN = { minGain: 3, maxZoom: 2.4, baseMs: 2600, perScreenMs: 2200, maxMs: 9000 };

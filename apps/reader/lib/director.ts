@@ -43,6 +43,11 @@ export class Director {
   #waiting = false;
 
   readonly reducedMotion: boolean;
+  /**
+   * Se consulta al avanzar con todo el diálogo a la vista. Si devuelve true, ese avance se
+   * usa para otra cosa —terminar un movimiento de cámara— y no se pasa de encuadre.
+   */
+  holdNext?: () => boolean;
   readonly defaultHold: number;
 
   constructor(source: FrameSource, opts: DirectorOptions = {}) {
@@ -165,6 +170,10 @@ export class Director {
       this.#fireUpTo(this.#elapsed);
       return;
     }
+
+    // Sin diálogo pendiente, quien mira puede pedir un paso más antes de pasar: la cámara
+    // que todavía está recorriendo la viñeta la muestra entera primero.
+    if (this.holdNext?.()) return;
 
     // Sin diálogo pendiente: se completan los beats que queden (cámara, pausas) y se pasa.
     this.#fireUpTo(Number.POSITIVE_INFINITY);
