@@ -63,7 +63,8 @@ export function directedShot(frame: ShotFrame, view: Viewport): DirectedShot {
   // otra forma, como un celular parado—, se recorre de cerca. Las anchas, de derecha a
   // izquierda, como se lee; las altas, de arriba a abajo.
   if (coverScale / fitScale >= PAN.minGain) {
-    const scale = Math.min(coverScale * FIT_MARGIN, fitScale * PAN.maxZoom);
+    const maxZoom = view.w >= GENTLE.minWidth ? PAN.maxZoomWide : PAN.maxZoom;
+    const scale = Math.min(coverScale * FIT_MARGIN, fitScale * maxZoom);
     const wide = rect.w * scale > view.w;
     const cx = view.w / 2 - (rect.x + rect.w / 2) * scale;
     const cy = view.h / 2 - (rect.y + rect.h / 2) * scale;
@@ -168,6 +169,6 @@ const TOUR = { maxScale: 0.55, target: 0.75, minZoom: 1.25, maxZoom: 1.6 };
  * El paneo suave de las pantallas grandes: desde qué ancho, cuánto se acerca y lo mínimo que
  * tiene que acercarse para que valga la pena recorrer.
  */
-const GENTLE = { minWidth: 900, zoom: 1.3, minZoom: 1.12 };
+const GENTLE = { minWidth: 900, zoom: 1.2, minZoom: 1.08 };
 
-const PAN = { minGain: 2.6, maxZoom: 1.6, baseMs: 2000, perScreenMs: 1700, maxMs: 7000 };
+const PAN = { minGain: 2.6, maxZoom: 1.6, maxZoomWide: 1.35, baseMs: 2000, perScreenMs: 1700, maxMs: 7000 };
