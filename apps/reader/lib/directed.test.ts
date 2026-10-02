@@ -81,10 +81,8 @@ describe("viñetas grandes y casi cuadradas", () => {
   });
 
   it("en una pantalla grande se recorren con un paneo suave, en un solo eje", () => {
-    // Más alta que la pantalla: baja, sin moverse de costado.
-    const tall = directedShot(frame({ x: 0, y: 0, w: 1000, h: 900 }), { w: 1600, h: 1000 }).pan!;
-    expect(tall.end.x).toBe(tall.start.x);
-    expect(tall.end.y).toBeLessThan(tall.start.y);
+    // Un poco más alta que la pantalla: no baja, se muestra entera.
+    expect(directedShot(frame({ x: 0, y: 0, w: 1000, h: 900 }), { w: 1600, h: 1000 }).pan).toBeUndefined();
     // Ancha: de derecha a izquierda, sin moverse de arriba a abajo.
     const wide = directedShot(frame({ x: 0, y: 0, w: 1400, h: 500 }), { w: 1600, h: 1000 }).pan!;
     expect(wide.end.y).toBe(wide.start.y);

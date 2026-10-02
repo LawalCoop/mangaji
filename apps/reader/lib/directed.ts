@@ -100,7 +100,9 @@ export function directedShot(frame: ShotFrame, view: Viewport): DirectedShot {
     const wide = rect.w / (view.w - 2 * pad) >= rect.h / (view.h - 2 * pad);
     const crossFit = wide ? (view.h - 2 * pad) / rect.h : (view.w - 2 * pad) / rect.w;
     const scale = Math.min(fitScale * GENTLE.zoom, crossFit);
-    if (scale >= fitScale * GENTLE.minZoom) {
+    // Solo de costado: en una pantalla apaisada casi cualquier viñeta es más alta que la
+    // pantalla, y bajar en todas sobraba. Las de verdad altas ya se recorren arriba.
+    if (wide && scale >= fitScale * GENTLE.minZoom) {
       const cx = view.w / 2 - (rect.x + rect.w / 2) * scale;
       const cy = view.h / 2 - (rect.y + rect.h / 2) * scale;
       return wide
