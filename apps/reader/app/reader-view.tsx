@@ -27,6 +27,10 @@ const FIT_MARGIN = 0.94;
 /** Duración del viaje de la cámara entre viñetas de la misma página. */
 const TRAVEL_MS = 520;
 const DIRECTED_KEY = "mangaji:directed";
+/** Con estas páginas listas por delante, el procesamiento espera a que la cámara pare. */
+const MOTION_AHEAD = 2;
+/** Lo máximo que espera, para que un lector que avanza sin parar no frene el tomo. */
+const MOTION_WAIT_MAX = 2000;
 
 /**
  * La cámara experimental para una viñeta, según su tensión (0 a 1).
@@ -143,6 +147,8 @@ export default function ReaderView() {
   /** El archivo que se está escribiendo, para poder guardarlo cuando esté completo. */
   const liveRef = useRef<LiveSource | null>(null);
   const workerRef = useRef<Worker | null>(null);
+  /** Hasta cuándo se está moviendo la cámara: el procesamiento le cede la placa mientras. */
+  const motionUntil = useRef(0);
 
   const [status, setStatus] = useState<Status>({ kind: "idle" });
   const [title, setTitle] = useState("");
@@ -461,6 +467,9 @@ export default function ReaderView() {
               stage.camera.cut(from);
               stage.camera.glide(to, Math.max(fresh.beats[0]?.ms ?? 0, 260));
             }
+            // Lo que dura el movimiento que se acaba de pedir, con margen para la cámara en
+            // mano y la aparición del diálogo.
+            motionUntil.current = performance.now() + 1400 * moodRef.current.pace;
             stage.render();
           } catch (err) {
             if (mine === token) setStatus({ kind: "error", problem: problemOf(err) });
@@ -712,6 +721,17 @@ export default function ReaderView() {
 
       try {
         for (let index = 0; index < total; index++) {
+          // Con un par de páginas listas por delante, se espera a que la cámara termine de
+          // moverse: la inferencia comparte la placa con el dibujo y, en el celular, el
+          // movimiento iba a tirones. Con poco adelanto no se espera, para no dejar al
+          // lector sin páginas.
+          const reading = engine.current?.director.frame.page ?? 0;
+          if (index - reading >= MOTION_AHEAD) {
+            const deadline = performance.now() + MOTION_WAIT_MAX;
+            while (performance.now() < Math.min(motionUntil.current, deadline)) {
+              await new Promise((resolve) => setTimeout(resolve, 80));
+            }
+          }
           const bitmap = await cbz.bitmap(index);
           const settled = new Promise<void>((resolve) => settle.set(index, resolve));
           // El bitmap se transfiere, no se copia; por eso se saca de la caché del archivo,

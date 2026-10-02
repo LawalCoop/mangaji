@@ -99,12 +99,19 @@ export class Stage {
   #bitmaps = new Map<number, ImageBitmap>();
   #page = -1;
 
-  /** Lienzos de composición del foco, creados una vez y reescritos en cada encuadre. */
-  #focusCanvas: HTMLCanvasElement | null = null;
-  #sharpCanvas: HTMLCanvasElement | null = null;
-  #maskCanvas: HTMLCanvasElement | null = null;
-  #smallCanvas: HTMLCanvasElement | null = null;
-  #focusTexture: Texture | null = null;
+  /**
+   * El foco se compone en capas: debajo, la página nítida, que se sube una vez; encima, el
+   * entorno desenfocado y apagado con un hueco de borde suave donde está la viñeta. Esa capa
+   * va a un cuarto de resolución, así que por viñeta se rehace y se sube algo chico. Antes se componía la página entera en canvas 2D y se subía de nuevo en
+   * cada cambio de viñeta: decenas de milisegundos en un celular, justo al arrancar la
+   * cámara, que es donde se notaba el tirón.
+   */
+  #blurred = new Sprite();
+  /** La capa de encima: el entorno desenfocado, con el hueco de la viñeta, a un cuarto. */
+  #overlayCanvas: HTMLCanvasElement | null = null;
+  #overlayTexture: Texture | null = null;
+  /** Página desenfocada a un cuarto de resolución, por página y ajuste. */
+  #blurredPages = new Map<number, { key: string; canvas: HTMLCanvasElement }>();
   #focusKey = "";
 
   /** Capa de efectos, en coordenadas de pantalla. */
@@ -121,7 +128,8 @@ export class Stage {
 
   private constructor(app: Application) {
     this.#app = app;
-    this.#world.addChild(this.#art, this.#dialogue);
+    this.#world.addChild(this.#art, this.#blurred, this.#dialogue);
+    this.#blurred.visible = false;
     // Los efectos van fuera del mundo: se dibujan sobre la pantalla y no los arrastra la
     // cámara, que es lo que hace que un destello se sienta como un golpe y no como algo
     // pegado a la página.
@@ -137,7 +145,8 @@ export class Stage {
       canvas,
       resizeTo: canvas.parentElement ?? window,
       background: "#0a0a0a",
-      antialias: true,
+      // Sin antialias: solo se dibujan imágenes, y en el celular el multisampling cuesta.
+      antialias: false,
       autoDensity: true,
       // Tope en 2: los celulares vienen con 3, que son más del doble de píxeles por cuadro
       // —con el desenfoque del foco encima— sin diferencia que se vea a esa distancia.
@@ -175,16 +184,16 @@ export class Stage {
     const focused =
       this.focusStrength > 0 && Boolean(frame.polygon && frame.polygon.length >= 3);
 
+    this.#art.texture = this.#texture(frame.page, bitmap);
     if (focused) {
-      const key = `${frame.page}:${frame.id}:${this.focusStrength}:${this.focusBlur}`;
+      const key = `${frame.page}:${frame.id}:${this.focusStrength}:${this.focusBlur}:${this.focusFeather}`;
       if (key !== this.#focusKey) {
         this.#composeFocus(frame, bitmap);
         this.#focusKey = key;
       }
-      this.#art.texture = this.#focusTexture!;
     } else {
       this.#focusKey = "";
-      this.#art.texture = this.#texture(frame.page, bitmap);
+      this.#blurred.visible = false;
     }
 
     this.#placeDialogue(frame);
@@ -375,122 +384,75 @@ export class Stage {
     this.#textures.clear();
     this.#bitmaps.clear();
     this.#art.texture = Texture.EMPTY;
-    this.#focusTexture?.destroy(true);
-    this.#focusTexture = null;
+    this.#blurredPages.clear();
+    this.#overlayTexture?.destroy(true);
+    this.#overlayTexture = null;
     this.#app.destroy(true, { children: true });
   }
 
-  /**
-   * Compone la página con la viñeta activa nítida y el resto difuminado y apagado.
-   *
-   * Se dibuja el fondo con desenfoque y luego encima la copia nítida recortada a la
-   * silueta con borde difuso, usando `destination-in` sobre un lienzo auxiliar. Todo en
-   * canvas 2D: no intervienen máscaras ni filtros del motor.
-   */
+  /** Arma el foco de una viñeta: el entorno desenfocado, con el hueco de su silueta. */
   #composeFocus(frame: Frame, bitmap: ImageBitmap): void {
     const { width, height } = bitmap;
-    const focus = this.#ensureCanvas("focus", width, height);
-    const sharp = this.#ensureCanvas("sharp", width, height);
-
-    // El fondo desenfocado se arma a un cuarto de resolución y se estira: está borroso de
-    // todos modos, así que se ve igual, y un desenfoque sobre la página entera —varios
-    // megapíxeles— era lo más caro de cada cambio de viñeta.
     const sw = Math.max(1, Math.round(width / FOCUS_SCALE));
     const sh = Math.max(1, Math.round(height / FOCUS_SCALE));
-    const small = this.#ensureCanvas("focus-small", sw, sh);
-    const smx = small.getContext("2d")!;
-    smx.setTransform(1, 0, 0, 1, 0, 0);
-    smx.clearRect(0, 0, sw, sh);
-    smx.filter = `blur(${this.focusBlur / FOCUS_SCALE}px)`;
-    smx.drawImage(bitmap, 0, 0, sw, sh);
-    smx.filter = "none";
 
-    const fx = focus.getContext("2d")!;
-    fx.setTransform(1, 0, 0, 1, 0, 0);
-    fx.clearRect(0, 0, width, height);
-    fx.imageSmoothingEnabled = true;
-    fx.imageSmoothingQuality = "high";
-    fx.drawImage(small, 0, 0, width, height);
-    fx.fillStyle = `rgba(0,0,0,${this.focusStrength})`;
-    fx.fillRect(0, 0, width, height);
+    // La página desenfocada, una vez por página: está borrosa de todos modos, así que a un
+    // cuarto se ve igual.
+    const blurKey = `${this.focusBlur}`;
+    let page = this.#blurredPages.get(frame.page);
+    if (!page || page.key !== blurKey) {
+      const canvas = document.createElement("canvas");
+      canvas.width = sw;
+      canvas.height = sh;
+      const cx = canvas.getContext("2d")!;
+      cx.filter = `blur(${this.focusBlur / FOCUS_SCALE}px)`;
+      cx.drawImage(bitmap, 0, 0, sw, sh);
+      page = { key: blurKey, canvas };
+      this.#blurredPages.set(frame.page, page);
+    }
 
-    const sx = sharp.getContext("2d")!;
-    sx.setTransform(1, 0, 0, 1, 0, 0);
-    sx.globalCompositeOperation = "source-over";
-    sx.clearRect(0, 0, width, height);
-    sx.filter = "none";
-    sx.drawImage(bitmap, 0, 0);
+    let overlay = this.#overlayCanvas;
+    if (!overlay || overlay.width !== sw || overlay.height !== sh) {
+      overlay = document.createElement("canvas");
+      overlay.width = sw;
+      overlay.height = sh;
+      this.#overlayCanvas = overlay;
+      this.#overlayTexture?.destroy(true);
+      this.#overlayTexture = Texture.from(overlay);
+    }
+    const ox = overlay.getContext("2d")!;
+    ox.setTransform(1, 0, 0, 1, 0, 0);
+    ox.globalCompositeOperation = "source-over";
+    ox.filter = "none";
+    ox.clearRect(0, 0, sw, sh);
+    ox.drawImage(page.canvas, 0, 0);
 
-    // La silueta se arma aparte y se aplica de una sola vez.
-    //
-    // Con `destination-in` cada operación de dibujo recorta, así que rellenar y después
-    // trazar dejaba solo el anillo del trazo: la viñeta salía nítida en los bordes y
-    // borrosa en el centro, justo al revés.
-    // La máscara también va a un cuarto: su borde es un desvanecido, y estirado sigue igual.
-    const mask = this.#ensureCanvas("mask", sw, sh);
-    const mx = mask.getContext("2d")!;
+    // El hueco: la silueta dilatada y con borde suave. Trazar con grosor además de rellenar
+    // dilata la silueta, y así el desvanecido cae por fuera de la viñeta en vez de
+    // repartirse a ambos lados de su borde.
     const feather = this.focusFeather / FOCUS_SCALE;
-    mx.setTransform(1 / FOCUS_SCALE, 0, 0, 1 / FOCUS_SCALE, 0, 0);
-    mx.globalCompositeOperation = "source-over";
-    mx.clearRect(0, 0, width, height);
-    // Trazar con grosor además de rellenar dilata la silueta, y así el desvanecido cae por
-    // fuera de la viñeta en vez de repartirse a ambos lados de su borde.
-    mx.filter = feather > 0 ? `blur(${feather / 3}px)` : "none";
-    mx.fillStyle = "#fff";
-    mx.strokeStyle = "#fff";
-    mx.lineJoin = "round";
-    mx.lineWidth = feather * FOCUS_SCALE;
-    mx.beginPath();
-    frame.polygon!.forEach(([x, y], i) => (i === 0 ? mx.moveTo(x, y) : mx.lineTo(x, y)));
-    mx.closePath();
-    mx.fill();
-    if (feather > 0) mx.stroke();
-    mx.filter = "none";
+    ox.globalCompositeOperation = "destination-out";
+    ox.setTransform(1 / FOCUS_SCALE, 0, 0, 1 / FOCUS_SCALE, 0, 0);
+    ox.filter = feather > 0 ? `blur(${feather / 3}px)` : "none";
+    ox.fillStyle = "#fff";
+    ox.strokeStyle = "#fff";
+    ox.lineJoin = "round";
+    ox.lineWidth = feather * FOCUS_SCALE;
+    ox.beginPath();
+    frame.polygon!.forEach(([x, y], i) => (i === 0 ? ox.moveTo(x, y) : ox.lineTo(x, y)));
+    ox.closePath();
+    ox.fill();
+    if (feather > 0) ox.stroke();
+    ox.filter = "none";
+    ox.globalCompositeOperation = "source-over";
+    this.#overlayTexture!.source.update();
 
-    sx.globalCompositeOperation = "destination-in";
-    sx.imageSmoothingEnabled = true;
-    sx.drawImage(mask, 0, 0, width, height);
-    sx.globalCompositeOperation = "source-over";
-
-    fx.drawImage(sharp, 0, 0);
-
-    if (!this.#focusTexture) {
-      this.#focusTexture = Texture.from(focus);
-    }
-    this.#focusTexture.source.update();
-  }
-
-  #ensureCanvas(
-    which: "focus" | "focus-small" | "sharp" | "mask",
-    width: number,
-    height: number,
-  ): HTMLCanvasElement {
-    const current =
-      which === "focus"
-        ? this.#focusCanvas
-        : which === "focus-small"
-          ? this.#smallCanvas
-          : which === "sharp"
-            ? this.#sharpCanvas
-            : this.#maskCanvas;
-    if (current && current.width === width && current.height === height) return current;
-
-    const canvas = document.createElement("canvas");
-    canvas.width = width;
-    canvas.height = height;
-    if (which === "focus") {
-      this.#focusCanvas = canvas;
-      // La textura queda ligada al lienzo: si el lienzo cambia, hay que rehacerla.
-      this.#focusTexture?.destroy(true);
-      this.#focusTexture = null;
-    } else if (which === "focus-small") {
-      this.#smallCanvas = canvas;
-    } else if (which === "sharp") {
-      this.#sharpCanvas = canvas;
-    } else {
-      this.#maskCanvas = canvas;
-    }
-    return canvas;
+    // Apagado con un tinte: equivale a la capa negra semitransparente de antes.
+    this.#blurred.texture = this.#overlayTexture!;
+    this.#blurred.setSize(width, height);
+    const level = Math.round(255 * (1 - this.focusStrength));
+    this.#blurred.tint = (level << 16) | (level << 8) | level;
+    this.#blurred.visible = true;
   }
 
   /**
@@ -527,6 +489,9 @@ export class Stage {
     }
     for (const p of this.#bitmaps.keys()) {
       if (Math.abs(p - page) > TEXTURE_LIMIT) this.#bitmaps.delete(p);
+    }
+    for (const p of this.#blurredPages.keys()) {
+      if (Math.abs(p - page) > TEXTURE_LIMIT) this.#blurredPages.delete(p);
     }
   }
 }
