@@ -38,6 +38,54 @@ const iou = (a: Box, b: Box) => {
   return union > 0 ? inter / union : 0;
 };
 
+/** Dos detecciones de la misma columna que se pisan en esta parte de la más chica son una. */
+const SPLIT_OVERLAP = 0.5;
+/** Qué parte del ancho de la más angosta tienen que compartir para ser la misma columna. */
+const SAME_COLUMN = 0.85;
+
+/**
+ * Une una viñeta que el modelo vio partida en dos que se pisan: en una viñeta alta suele
+ * proponer una que va de arriba hasta casi abajo y otra desde un poco más abajo hasta el
+ * final. Se pisan menos que lo que pide `dedupe` y quedaban las dos: la cámara mostraba la
+ * misma viñeta dos veces. Solo en una misma columna: de costado, el modelo propone cajas que
+ * se pisan entre viñetas angostas vecinas que sí son distintas.
+ */
+export function joinSplit(panels: Detection[]): Detection[] {
+  const out = [...panels];
+  for (let merged = true; merged; ) {
+    merged = false;
+    outer: for (let i = 0; i < out.length; i++) {
+      for (let j = i + 1; j < out.length; j++) {
+        const a = out[i].bbox;
+        const b = out[j].bbox;
+        const inter = intersection(a, b);
+        if (!inter || inter / Math.min(a.w * a.h, b.w * b.h) < SPLIT_OVERLAP) continue;
+        const shareX = (Math.min(a.x + a.w, b.x + b.w) - Math.max(a.x, b.x)) / Math.min(a.w, b.w);
+        if (shareX < SAME_COLUMN) continue;
+        const x = Math.min(a.x, b.x);
+        const y = Math.min(a.y, b.y);
+        const w = Math.max(a.x + a.w, b.x + b.w) - x;
+        const h = Math.max(a.y + a.h, b.y + b.h) - y;
+        out[i] = {
+          cls: "frame",
+          conf: Math.max(out[i].conf, out[j].conf),
+          bbox: { x, y, w, h },
+          polygon: [
+            [x, y],
+            [x + w, y],
+            [x + w, y + h],
+            [x, y + h],
+          ],
+        };
+        out.splice(j, 1);
+        merged = true;
+        break outer;
+      }
+    }
+  }
+  return out;
+}
+
 /** Se queda con la detección más confiable de cada grupo solapado. */
 export function dedupe(dets: Detection[]): Detection[] {
   const kept: Detection[] = [];
@@ -53,7 +101,7 @@ export function dedupe(dets: Detection[]): Detection[] {
  * `frames` ya viene filtrado por tamaño mínimo; acá se decide por confianza y cobertura.
  */
 export function choosePanels(frames: Detection[], pageArea: number): Detection[] {
-  const panels = dedupe(frames.filter((d) => d.conf >= PANEL_CONF));
+  const panels = joinSplit(dedupe(frames.filter((d) => d.conf >= PANEL_CONF)));
 
   const doubtful = frames
     .filter((d) => d.conf >= RESCUE_CONF && d.conf < PANEL_CONF)

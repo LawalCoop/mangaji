@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { Detection } from "./detector";
-import { choosePanels, fillAroundTexts, fillOrphans, inkGrid, isFolio, ownersOf, tailTip } from "./panels";
+import { choosePanels, fillAroundTexts, fillOrphans, inkGrid, isFolio, joinSplit, ownersOf, tailTip } from "./panels";
 
 const PAGE = 1000 * 1400;
 
@@ -238,5 +238,23 @@ describe("colita del globo", () => {
     const box = { x: 377, y: 60, w: 196, h: 256 };
     expect(ownersOf(box, panels)).toHaveLength(2);
     expect(ownersOf(box, panels, [399, 309])).toEqual([1]);
+  });
+});
+
+describe("viñeta vista partida en dos", () => {
+  it("une las dos mitades de una viñeta alta (tomo 2 de Saint Seiya, p. 96b)", () => {
+    const top = frame(0.95, 486, 7, 542, 1232);
+    const bottom = frame(0.93, 485, 342, 540, 1272);
+    const joined = joinSplit([top, bottom, frame(0.97, 82, 108, 397, 637)]);
+    expect(joined).toHaveLength(2);
+    expect(joined[0].bbox).toEqual({ x: 485, y: 7, w: 543, h: 1607 });
+  });
+
+  it("no une dos viñetas vecinas que apenas se tocan", () => {
+    expect(joinSplit([frame(0.9, 0, 0, 500, 400), frame(0.9, 0, 380, 500, 400)])).toHaveLength(2);
+  });
+
+  it("no une dos viñetas angostas de una misma fila aunque sus cajas se pisen", () => {
+    expect(joinSplit([frame(0.97, 270, 879, 297, 756), frame(0.96, 157, 873, 244, 767)])).toHaveLength(2);
   });
 });

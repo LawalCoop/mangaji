@@ -111,6 +111,8 @@ export class Stage {
   #blurred = new Sprite();
   /** La capa de encima: el entorno desenfocado, con el hueco de la viñeta, a un cuarto. */
   #overlayCanvas: HTMLCanvasElement | null = null;
+  /** La silueta de la viñeta con borde suave, que se recorta de la capa de encima. */
+  #holeCanvas: HTMLCanvasElement | null = null;
   #overlayTexture: Texture | null = null;
   /** Página desenfocada a un cuarto de resolución, por página y ajuste. */
   #blurredPages = new Map<number, { key: string; canvas: HTMLCanvasElement }>();
@@ -432,23 +434,40 @@ export class Stage {
     ox.clearRect(0, 0, sw, sh);
     ox.drawImage(page.canvas, 0, 0);
 
-    // El hueco: la silueta dilatada y con borde suave. Trazar con grosor además de rellenar
-    // dilata la silueta, y así el desvanecido cae por fuera de la viñeta en vez de
-    // repartirse a ambos lados de su borde.
+    // El hueco: la silueta dilatada y con borde suave. Se dibuja en un lienzo aparte y recién
+    // después se recorta de la capa: desenfocar y recortar en un mismo paso a veces no
+    // recortaba nada, y la viñeta quedaba desenfocada como el resto.
+    //
+    // Trazar con grosor además de rellenar dilata la silueta, y así el desvanecido cae por
+    // fuera de la viñeta en vez de repartirse a ambos lados de su borde.
+    let hole = this.#holeCanvas;
+    if (!hole || hole.width !== sw || hole.height !== sh) {
+      hole = document.createElement("canvas");
+      hole.width = sw;
+      hole.height = sh;
+      this.#holeCanvas = hole;
+    }
+    const hx = hole.getContext("2d")!;
     const feather = this.focusFeather / FOCUS_SCALE;
+    hx.setTransform(1, 0, 0, 1, 0, 0);
+    hx.filter = "none";
+    hx.clearRect(0, 0, sw, sh);
+    hx.setTransform(1 / FOCUS_SCALE, 0, 0, 1 / FOCUS_SCALE, 0, 0);
+    hx.filter = feather > 0 ? `blur(${feather / 3}px)` : "none";
+    hx.fillStyle = "#fff";
+    hx.strokeStyle = "#fff";
+    hx.lineJoin = "round";
+    hx.lineWidth = feather * FOCUS_SCALE;
+    hx.beginPath();
+    frame.polygon!.forEach(([x, y], i) => (i === 0 ? hx.moveTo(x, y) : hx.lineTo(x, y)));
+    hx.closePath();
+    hx.fill();
+    if (feather > 0) hx.stroke();
+    hx.filter = "none";
+
+    ox.setTransform(1, 0, 0, 1, 0, 0);
     ox.globalCompositeOperation = "destination-out";
-    ox.setTransform(1 / FOCUS_SCALE, 0, 0, 1 / FOCUS_SCALE, 0, 0);
-    ox.filter = feather > 0 ? `blur(${feather / 3}px)` : "none";
-    ox.fillStyle = "#fff";
-    ox.strokeStyle = "#fff";
-    ox.lineJoin = "round";
-    ox.lineWidth = feather * FOCUS_SCALE;
-    ox.beginPath();
-    frame.polygon!.forEach(([x, y], i) => (i === 0 ? ox.moveTo(x, y) : ox.lineTo(x, y)));
-    ox.closePath();
-    ox.fill();
-    if (feather > 0) ox.stroke();
-    ox.filter = "none";
+    ox.drawImage(hole, 0, 0);
     ox.globalCompositeOperation = "source-over";
     this.#overlayTexture!.source.update();
 
