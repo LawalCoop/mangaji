@@ -93,6 +93,8 @@ export class Stage {
   #sprites = new Map<string, Sprite>();
   /** Desenfoque de entrada de cada bloque de diálogo. */
   #blurs = new Map<string, BlurFilter>();
+  /** Pantalla táctil: se ahorran los efectos que más le cuestan a la placa de un celular. */
+  #lite = typeof matchMedia !== "undefined" && matchMedia("(pointer: coarse)").matches;
   /** Medida original de cada sprite, para animar sin acumular error. */
   #rects = new Map<string, Rect>();
   #textures = new Map<number, Texture>();
@@ -235,7 +237,9 @@ export class Stage {
       this.#dialogue.addChild(sprite);
       this.#sprites.set(entry.id, sprite);
       this.#rects.set(entry.id, entry.rect);
-      this.#blurs.set(entry.id, new BlurFilter({ strength: DIALOGUE_ENTRY_BLUR, quality: 2 }));
+      // En el celular el globo entra sin desenfoque: el filtro pasa por la placa en cada
+      // cuadro de la aparición, y ahí se notaba.
+      if (!this.#lite) this.#blurs.set(entry.id, new BlurFilter({ strength: DIALOGUE_ENTRY_BLUR, quality: 2 }));
     }
   }
 

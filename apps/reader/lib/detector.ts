@@ -76,7 +76,10 @@ function configure(ort: typeof Ort): void {
   // en páginas aisladas. Pedir doce sin eso no los da y encima avisa por consola.
   // Un núcleo queda libre para el hilo que dibuja: con todos ocupados en la inferencia, la
   // lectura iba a tirones mientras se procesaba el resto del tomo.
-  ort.env.wasm.numThreads = crossOriginIsolated ? Math.max(1, (navigator.hardwareConcurrency ?? 4) - 1) : 1;
+  // En el celular, la mitad: con todos menos uno, el dibujo de la lectura iba a tirones.
+  const cores = navigator.hardwareConcurrency ?? 4;
+  const threads = isMobile() ? Math.max(1, Math.floor(cores / 2)) : Math.max(1, cores - 1);
+  ort.env.wasm.numThreads = crossOriginIsolated ? threads : 1;
   ort.env.logLevel = "error";
   global[FLAG] = true;
 }
@@ -562,4 +565,11 @@ export function colorShare(image: Pick<ImageData, "data">): number {
     if (hi - lo > 80) strong++;
   }
   return total ? strong / total : 0;
+}
+
+/** ¿Corre en un celular o una tableta? Sirve también dentro de un worker. */
+function isMobile(): boolean {
+  const nav = navigator as Navigator & { userAgentData?: { mobile?: boolean } };
+  if (nav.userAgentData?.mobile !== undefined) return nav.userAgentData.mobile;
+  return /Android|iPhone|iPad|Mobile/i.test(nav.userAgent);
 }

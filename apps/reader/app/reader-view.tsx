@@ -29,8 +29,11 @@ const ASSUMED_PAGE = { w: 1600, h: 2300 };
 /** Duración del viaje de la cámara entre viñetas de la misma página. */
 const TRAVEL_MS = 520;
 const DIRECTED_KEY = "mangaji:directed";
-/** Con estas páginas listas por delante, el procesamiento espera a que la cámara pare. */
-const MOTION_AHEAD = 2;
+/**
+ * Con estas páginas listas por delante, el procesamiento espera a que la cámara pare. Si el
+ * lector ya está esperando la página siguiente, no espera.
+ */
+const MOTION_AHEAD = 1;
 /** Lo máximo que espera, para que un lector que avanza sin parar no frene el tomo. */
 const MOTION_WAIT_MAX = 2000;
 
@@ -769,7 +772,7 @@ export default function ReaderView() {
           // movimiento iba a tirones. Con poco adelanto no se espera, para no dejar al
           // lector sin páginas.
           const reading = engine.current?.director.frame.page ?? 0;
-          if (index - reading >= MOTION_AHEAD) {
+          if (index - reading >= MOTION_AHEAD && !engine.current?.director.waiting) {
             const deadline = performance.now() + MOTION_WAIT_MAX;
             while (performance.now() < Math.min(motionUntil.current, deadline)) {
               await new Promise((resolve) => setTimeout(resolve, 80));
