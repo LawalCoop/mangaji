@@ -20,43 +20,33 @@ export function directedShot(frame: ShotFrame, view: Viewport): DirectedShot {
   const speed = 1.45 - 0.8 * tension;
   const move = (ms: number) => [{ to, ms: ms * speed, at: 0 }];
 
-  // Si mostrarla entera la deja chica —una viñeta muy ancha o muy alta en una pantalla de la
-  // otra forma, como un celular parado—, se recorre de cerca y recién al final se muestra
-  // entera. Las anchas, de derecha a izquierda, como se lee; las altas, de arriba a abajo.
   const fitScale = Math.min(view.w / rect.w, view.h / rect.h);
   const coverScale = Math.max(view.w / rect.w, view.h / rect.h);
-  if (coverScale / fitScale >= PAN.minGain) {
-    const scale = Math.min(coverScale * FIT_MARGIN, fitScale * PAN.maxZoom);
-    const wide = rect.w * scale > view.w;
-    const cx = view.w / 2 - (rect.x + rect.w / 2) * scale;
-    const cy = view.h / 2 - (rect.y + rect.h / 2) * scale;
-    const pad = 0.03 * Math.min(view.w, view.h);
-    const start: Transform = wide
-      ? { scale, x: view.w - pad - (rect.x + rect.w) * scale, y: cy }
-      : { scale, x: cx, y: pad - rect.y * scale };
-    const end: Transform = wide
-      ? { scale, x: pad - rect.x * scale, y: cy }
-      : { scale, x: cx, y: view.h - pad - (rect.y + rect.h) * scale };
-    // Centrar un punto de la viñeta sin salirse del recorrido.
-    const lo = Math.min(wide ? start.x : start.y, wide ? end.x : end.y);
-    const hi = Math.max(wide ? start.x : start.y, wide ? end.x : end.y);
-    const aim = (r: Rect): Transform => {
-      const c = wide ? view.w / 2 - (r.x + r.w / 2) * scale : view.h / 2 - (r.y + r.h / 2) * scale;
-      const v = Math.min(hi, Math.max(lo, c));
-      return wide ? { scale, x: v, y: cy } : { scale, x: cx, y: v };
-    };
-    const shake = tension >= 0.55 ? 2 + 4 * tension : 0;
+  const pad = 0.03 * Math.min(view.w, view.h);
+  const shake = tension >= 0.55 ? 2 + 4 * tension : 0;
 
-    // Paneo continuo: a velocidad pareja de punta a punta, pero sin pasar un globo que
-    // todavía no apareció. Dura lo que tarda en aparecer el diálogo, o lo que recorre si no
-    // hay. Al terminar, se muestra la viñeta entera.
-    const span = (wide ? end.x - start.x : end.y - start.y) || 1;
-    const along = (t: Transform) => ((wide ? t.x - start.x : t.y - start.y) / span);
+  // Paneo continuo de `start` a `end`, a velocidad pareja pero sin pasar un globo que todavía
+  // no apareció. Dura lo que tarda en aparecer el diálogo, o lo que recorre si no hay. Al
+  // terminar, se muestra la viñeta entera.
+  const panShot = (start: Transform, end: Transform): DirectedShot => {
+    const scale = start.scale;
+    const dx = end.x - start.x;
+    const dy = end.y - start.y;
+    const len2 = dx * dx + dy * dy || 1;
+    const along = (t: Transform) => ((t.x - start.x) * dx + (t.y - start.y) * dy) / len2;
+    // Centrar un globo sin salirse del recorrido.
+    const clamp = (v: number, a: number, b: number) => Math.min(Math.max(a, b), Math.max(Math.min(a, b), v));
+    const aim = (r: Rect): Transform => ({
+      scale,
+      x: clamp(view.w / 2 - (r.x + r.w / 2) * scale, start.x, end.x),
+      y: clamp(view.h / 2 - (r.y + r.h / 2) * scale, start.y, end.y),
+    });
     const layers = new Map((frame.layers ?? []).map((l) => [l.id, l.rect]));
     const stops = frame.beats
       .filter((b) => b.reveal && layers.has(b.reveal))
       .map((b) => ({ id: b.reveal!, at: Math.min(1, Math.max(0, along(aim(layers.get(b.reveal!)!)))) }));
-    const travel = wide ? (rect.w * scale - view.w) / view.w : (rect.h * scale - view.h) / view.h;
+    // Lo que se recorre, en pantallas: de eso sale cuánto dura.
+    const travel = Math.hypot(dx / view.w, dy / view.h);
     const travelMs = Math.min(PAN.maxMs, PAN.baseMs + travel * PAN.perScreenMs) * speed;
     const dialogueMs = Math.max(0, ...frame.beats.map((b) => b.t ?? 0));
     return {
@@ -67,6 +57,38 @@ export function directedShot(frame: ShotFrame, view: Viewport): DirectedShot {
       shake,
       pace: 1.15,
     };
+  };
+
+  // Si mostrarla entera la deja chica —una viñeta muy ancha o muy alta en una pantalla de la
+  // otra forma, como un celular parado—, se recorre de cerca. Las anchas, de derecha a
+  // izquierda, como se lee; las altas, de arriba a abajo.
+  if (coverScale / fitScale >= PAN.minGain) {
+    const scale = Math.min(coverScale * FIT_MARGIN, fitScale * PAN.maxZoom);
+    const wide = rect.w * scale > view.w;
+    const cx = view.w / 2 - (rect.x + rect.w / 2) * scale;
+    const cy = view.h / 2 - (rect.y + rect.h / 2) * scale;
+    return wide
+      ? panShot(
+          { scale, x: view.w - pad - (rect.x + rect.w) * scale, y: cy },
+          { scale, x: pad - rect.x * scale, y: cy },
+        )
+      : panShot({ scale, x: cx, y: pad - rect.y * scale }, { scale, x: cx, y: view.h - pad - (rect.y + rect.h) * scale });
+  }
+
+  // Una viñeta grande, más o menos cuadrada, que entera se ve a menos de la mitad de su
+  // resolución: el dibujo no se aprecia. Se recorre en diagonal desde la esquina de arriba a
+  // la derecha, donde se empieza a leer, hasta la de abajo a la izquierda.
+  if (fitScale < TOUR.maxScale) {
+    const scale = fitScale * Math.min(TOUR.maxZoom, Math.max(TOUR.minZoom, TOUR.target / fitScale));
+    // En el eje en que la viñeta ya entra, se la centra y no se mueve.
+    const cx = view.w / 2 - (rect.x + rect.w / 2) * scale;
+    const cy = view.h / 2 - (rect.y + rect.h / 2) * scale;
+    const overW = rect.w * scale > view.w - 2 * pad;
+    const overH = rect.h * scale > view.h - 2 * pad;
+    return panShot(
+      { scale, x: overW ? view.w - pad - (rect.x + rect.w) * scale : cx, y: overH ? pad - rect.y * scale : cy },
+      { scale, x: overW ? pad - rect.x * scale : cx, y: overH ? view.h - pad - (rect.y + rect.h) * scale : cy },
+    );
   }
 
   if (tension >= 0.55) {
@@ -115,4 +137,11 @@ export type DirectedShot = {
  * la pena (`minGain`: entera ocuparía menos de la mitad de lo que podría, más o menos), cuánto puede
  * acercarse como mucho y cuánto dura según lo que recorre.
  */
+/**
+ * El recorrido en diagonal de las viñetas grandes: se hace si entera se vería a menos de
+ * `maxScale` de su resolución, y se acerca hasta `target` sin pasar de entre `minZoom` y
+ * `maxZoom` veces la viñeta entera.
+ */
+const TOUR = { maxScale: 0.55, target: 0.75, minZoom: 1.25, maxZoom: 1.6 };
+
 const PAN = { minGain: 2.6, maxZoom: 1.6, baseMs: 2000, perScreenMs: 1700, maxMs: 7000 };

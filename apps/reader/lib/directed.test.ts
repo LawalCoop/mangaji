@@ -62,3 +62,25 @@ describe("todo plano dice dónde termina", () => {
     expect(directedShot(frame({ x: 0, y: 0, w: 400, h: 700 }), phone).final).toBeDefined();
   });
 });
+
+describe("viñetas grandes y casi cuadradas", () => {
+  it("se recorren en diagonal, de arriba a la derecha a abajo a la izquierda", () => {
+    // 1000×900 en un celular: entera se ve a 0,39 de su resolución.
+    const shot = directedShot(frame({ x: 50, y: 50, w: 1000, h: 900 }), phone);
+    const pan = shot.pan!;
+    expect(pan.start.scale).toBeGreaterThan(shot.final.scale * 1.2);
+    expect(pan.end.x).toBeGreaterThan(pan.start.x); // hacia la izquierda
+    // A lo alto ya entra: se la centra y no se mueve en ese eje.
+    expect(pan.end.y).toBe(pan.start.y);
+  });
+
+  it("si no entra a lo alto, también baja", () => {
+    const pan = directedShot(frame({ x: 0, y: 0, w: 1000, h: 1300 }), phone).pan!;
+    expect(pan.end.x).toBeGreaterThan(pan.start.x);
+    expect(pan.end.y).toBeLessThan(pan.start.y);
+  });
+
+  it("en una pantalla grande, donde ya se aprecia, no se recorren", () => {
+    expect(directedShot(frame({ x: 0, y: 0, w: 1000, h: 900 }), { w: 1600, h: 1000 }).pan).toBeUndefined();
+  });
+});
