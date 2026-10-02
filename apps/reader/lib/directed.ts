@@ -112,7 +112,7 @@ export type DirectedShot = {
 
 /**
  * El paneo de las viñetas que enteras quedan chicas: desde cuánto se achican para que valga
- * la pena (`minGain`: entera ocuparía menos de un tercio de lo que podría), cuánto puede
+ * la pena (`minGain`: entera ocuparía menos de la mitad de lo que podría, más o menos), cuánto puede
  * acercarse como mucho y cuánto dura según lo que recorre.
  */
-const PAN = { minGain: 3, maxZoom: 1.6, baseMs: 2600, perScreenMs: 2200, maxMs: 9000 };
+const PAN = { minGain: 2.6, maxZoom: 1.6, baseMs: 2000, perScreenMs: 1700, maxMs: 7000 };

@@ -20,7 +20,7 @@ describe("cámara β en el celular", () => {
     // …y va hacia la izquierda, a la misma escala, sin apuro.
     expect(pan.end.x).toBeGreaterThan(pan.start.x);
     expect(pan.end.scale).toBe(pan.start.scale);
-    expect(pan.ms).toBeGreaterThanOrEqual(2500);
+    expect(pan.ms).toBeGreaterThanOrEqual(2000);
   });
 
   it("recorre de arriba a abajo una viñeta alta en una pantalla ancha", () => {
