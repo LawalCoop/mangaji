@@ -210,3 +210,29 @@ describe("encuadre", () => {
     });
   });
 });
+
+describe("cortar un movimiento con un toque", () => {
+  it("el toque se usa para eso y muestra todo el diálogo, sin pasar de encuadre", () => {
+    const frames = [
+      { id: "a", page: 0, rect: { x: 0, y: 0, w: 1, h: 1 }, beats: [{ t: 0, ms: 0, reveal: "b1" }, { t: 900, ms: 0, reveal: "b2" }] },
+      { id: "b", page: 0, rect: { x: 0, y: 0, w: 1, h: 1 }, beats: [] },
+    ];
+    const director = new Director({ length: 2, at: (i: number) => frames[i], label: (i: number) => String(i) } as never);
+    const revealed: string[] = [];
+    director.on((ev) => {
+      if (ev.type === "beat" && ev.beat.reveal) revealed.push(ev.beat.reveal);
+    });
+    let holding = true;
+    director.holdNext = () => {
+      if (!holding) return false;
+      holding = false;
+      director.revealAll();
+      return true;
+    };
+    director.next();
+    expect(director.index).toBe(0);
+    expect(revealed).toEqual(["b1", "b2"]);
+    director.next();
+    expect(director.index).toBe(1);
+  });
+});

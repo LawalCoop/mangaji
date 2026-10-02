@@ -338,7 +338,13 @@ export default function ReaderView() {
           stage.camera.glide(pan.final, 800 * moodRef.current.pace);
           return true;
         };
-        director.holdNext = finishPan;
+        // Tocar durante el paneo lo corta: la viñeta entera, con todo su diálogo. El toque
+        // siguiente ya pasa de viñeta.
+        director.holdNext = () => {
+          if (!finishPan()) return false;
+          director.revealAll();
+          return true;
+        };
         /** Cámara experimental: ritmo de lectura de la viñeta actual. */
         let readingPace = 1;
         /** Apariciones de diálogo en curso, avanzadas por el ticker. */

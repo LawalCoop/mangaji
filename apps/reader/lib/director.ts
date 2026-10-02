@@ -44,8 +44,8 @@ export class Director {
 
   readonly reducedMotion: boolean;
   /**
-   * Se consulta al avanzar con todo el diálogo a la vista. Si devuelve true, ese avance se
-   * usa para otra cosa —terminar un movimiento de cámara— y no se pasa de encuadre.
+   * Se consulta al avanzar. Si devuelve true, ese avance se usa para otra cosa —terminar un
+   * movimiento de cámara— y no se revela ni se pasa de encuadre.
    */
   holdNext?: () => boolean;
   readonly defaultHold: number;
@@ -162,6 +162,10 @@ export class Director {
    * —que era lo que obligaba a tocar dos veces—.
    */
   next(): void {
+    // Quien mira puede pedir que este avance se use para otra cosa: la cámara que todavía
+    // está recorriendo la viñeta la muestra entera primero, con todo su diálogo.
+    if (this.holdNext?.()) return;
+
     const beats = this.frame.beats;
     const pending = beats.findIndex((b, i) => i >= this.#fired && b.reveal !== undefined);
 
@@ -170,10 +174,6 @@ export class Director {
       this.#fireUpTo(this.#elapsed);
       return;
     }
-
-    // Sin diálogo pendiente, quien mira puede pedir un paso más antes de pasar: la cámara
-    // que todavía está recorriendo la viñeta la muestra entera primero.
-    if (this.holdNext?.()) return;
 
     // Sin diálogo pendiente: se completan los beats que queden (cámara, pausas) y se pasa.
     this.#fireUpTo(Number.POSITIVE_INFINITY);
@@ -193,6 +193,14 @@ export class Director {
       return;
     }
     this.seek(this.#index + 1);
+  }
+
+  /** Muestra de una todo el diálogo que falta del encuadre actual, sin pasar al siguiente. */
+  revealAll(): void {
+    const last = this.frame.beats.reduce((t, b) => (b.reveal !== undefined ? Math.max(t, b.t) : t), -1);
+    if (last < 0) return;
+    this.#elapsed = Math.max(this.#elapsed, last);
+    this.#fireUpTo(this.#elapsed);
   }
 
   /** La fuente incorporó encuadres nuevos: si se estaba esperando por ellos, se sigue. */
