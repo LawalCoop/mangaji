@@ -91,6 +91,22 @@ export function directedShot(frame: ShotFrame, view: Viewport): DirectedShot {
     );
   }
 
+  // En pantallas grandes casi ninguna viñeta queda chica, pero el recorrido gusta igual: se
+  // acerca un poco y recorre lo que no entra, en el sentido de lectura.
+  if (view.w >= GENTLE.minWidth) {
+    const scale = fitScale * GENTLE.zoom;
+    const overW = rect.w * scale > view.w - 2 * pad;
+    const overH = rect.h * scale > view.h - 2 * pad;
+    if (overW || overH) {
+      const cx = view.w / 2 - (rect.x + rect.w / 2) * scale;
+      const cy = view.h / 2 - (rect.y + rect.h / 2) * scale;
+      return panShot(
+        { scale, x: overW ? view.w - pad - (rect.x + rect.w) * scale : cx, y: overH ? pad - rect.y * scale : cy },
+        { scale, x: overW ? pad - rect.x * scale : cx, y: overH ? view.h - pad - (rect.y + rect.h) * scale : cy },
+      );
+    }
+  }
+
   if (tension >= 0.55) {
     return { from: fit(1.2), steps: move(900), final: to, shake: 2 + 5 * tension, pace: 0.85 };
   }
@@ -143,5 +159,8 @@ export type DirectedShot = {
  * `maxZoom` veces la viñeta entera.
  */
 const TOUR = { maxScale: 0.55, target: 0.75, minZoom: 1.25, maxZoom: 1.6 };
+
+/** El paneo suave de las pantallas grandes: desde qué ancho y cuánto se acerca. */
+const GENTLE = { minWidth: 900, zoom: 1.3 };
 
 const PAN = { minGain: 2.6, maxZoom: 1.6, baseMs: 2000, perScreenMs: 1700, maxMs: 7000 };

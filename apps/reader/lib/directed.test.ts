@@ -29,7 +29,7 @@ describe("cámara β en el celular", () => {
     expect(pan.end.x).toBe(pan.start.x);
   });
 
-  it("no panea una viñeta que entera no queda tan chica", () => {
+  it("en el celular no panea una viñeta que entera no queda tan chica", () => {
     // Entera ocupa más de la mitad de lo que podría: se muestra sin recorrerla.
     expect(directedShot(frame({ x: 0, y: 0, w: 600, h: 500 }), phone).steps).toHaveLength(1);
   });
@@ -80,7 +80,8 @@ describe("viñetas grandes y casi cuadradas", () => {
     expect(pan.end.y).toBeLessThan(pan.start.y);
   });
 
-  it("en una pantalla grande, donde ya se aprecia, no se recorren", () => {
-    expect(directedShot(frame({ x: 0, y: 0, w: 1000, h: 900 }), { w: 1600, h: 1000 }).pan).toBeUndefined();
+  it("en una pantalla grande se recorren con un paneo suave", () => {
+    const shot = directedShot(frame({ x: 0, y: 0, w: 1000, h: 900 }), { w: 1600, h: 1000 });
+    expect(shot.pan!.start.scale).toBeCloseTo(shot.final.scale * (1.3 / 0.94), 2);
   });
 });
