@@ -14,6 +14,7 @@ import { DEFAULT_MOOD, MOOD_ORDER, MOODS, type MoodId } from "@/lib/mood";
 import { Music } from "@/lib/music";
 import { bookKey, forget, savedPage, savePage } from "@/lib/progress";
 import { shelf, shelvedPages } from "@/lib/shelf";
+import { directedShot, FIT_MARGIN, type DirectedShot } from "@/lib/directed";
 import type { ProcessedPage } from "@/lib/process";
 import { Stage } from "@/lib/stage";
 import type { Rect } from "@/lib/types";
@@ -25,7 +26,6 @@ import { Toolbar } from "./toolbar";
 /** Hasta que la página se decodifica no se sabe su tamaño; esto evita un encuadre en cero. */
 const ASSUMED_PAGE = { w: 1600, h: 2300 };
 /** Aire alrededor del encuadre: pegar la viñeta al borde se siente asfixiante. */
-const FIT_MARGIN = 0.94;
 /** Duración del viaje de la cámara entre viñetas de la misma página. */
 const TRAVEL_MS = 520;
 const DIRECTED_KEY = "mangaji:directed";
@@ -34,31 +34,6 @@ const MOTION_AHEAD = 2;
 /** Lo máximo que espera, para que un lector que avanza sin parar no frene el tomo. */
 const MOTION_WAIT_MAX = 2000;
 
-/**
- * La cámara experimental para una viñeta, según su tensión (0 a 1).
- *
- * Reglas de cine tomadas de DynamicManga: una escena tensa entra de golpe y desde cerca, con
- * la cámara en mano; una tranquila se abre despacio; un plano ancho y calmo se recorre de
- * derecha a izquierda, como se lee, antes de mostrarse entero. El ritmo de lectura también
- * cambia: lo tenso se lee más rápido, lo calmo con más aire.
- */
-function directedShot(tension: number, rect: Rect, view: Viewport) {
-  const fit = (zoom: number) => Camera.fit(rect, view, FIT_MARGIN * zoom);
-  const to = fit(1);
-  const speed = 1.45 - 0.8 * tension;
-  if (tension >= 0.55) {
-    return { from: fit(1.2), to, speed, shake: 2 + 5 * tension, pace: 0.85 };
-  }
-  if (rect.w / rect.h >= 1.8 && tension < 0.45) {
-    // Plano de ubicación: arranca en el tercio derecho y se abre a la viñeta entera.
-    const part = { x: rect.x + rect.w * 0.45, y: rect.y, w: rect.w * 0.55, h: rect.h };
-    return { from: Camera.fit(part, view, FIT_MARGIN), to, speed: speed * 1.6, shake: 0, pace: 1.1 };
-  }
-  if (tension <= 0.25) {
-    return { from: fit(0.93), to, speed: speed * 1.2, shake: 0, pace: 1.15 };
-  }
-  return { from: fit(1.07), to, speed, shake: 0, pace: 1 };
-}
 /**
  * Apertura: la primera página no aparece, se descubre.
  *
@@ -341,7 +316,19 @@ export default function ReaderView() {
         /** La apertura ocurre una sola vez, al abrir el archivo. */
         let opening = true;
         /** Cámara experimental: el segundo tramo del movimiento, que arranca al llegar. */
-        let queued: { left: number; to: Transform; ms: number; shake: number } | null = null;
+        let queued: { left: number; to: Transform; ms: number; shake: number }[] = [];
+        /**
+         * Los tramos de un plano en cola: cada uno arranca cuando el anterior casi llegó. La
+         * cámara se asienta de a poco, así que esperar a que llegue del todo se sentía como
+         * una pausa entre tramos.
+         */
+        const steps = (shot: DirectedShot, wait: number) =>
+          shot.steps.map((st, i) => ({
+            left: i === 0 ? wait : shot.steps[i - 1].ms * moodRef.current.pace * 0.75,
+            to: st.to,
+            ms: st.ms * moodRef.current.pace,
+            shake: i === 0 ? shot.shake : 0,
+          }));
         /** Cámara experimental: ritmo de lectura de la viñeta actual. */
         let readingPace = 1;
         /** Apariciones de diálogo en curso, avanzadas por el ticker. */
@@ -435,9 +422,11 @@ export default function ReaderView() {
               directedRef.current && fresh.tension !== undefined && !director.reducedMotion
                 ? directedShot(fresh.tension, fresh.rect, stage.viewport)
                 : null;
-            const { from, to } = shot ?? framing(cam, fresh.rect, stage.viewport);
+            const { from, to } = shot
+              ? { from: shot.from, to: shot.steps[shot.steps.length - 1].to }
+              : framing(cam, fresh.rect, stage.viewport);
             readingPace = shot?.pace ?? 1;
-            queued = null;
+            queued = [];
 
             if (immediate && !director.reducedMotion && opening) {
               opening = false;
@@ -453,17 +442,16 @@ export default function ReaderView() {
               stage.camera.cut(to);
             } else if (samePage && shot) {
               // Experimental: se viaja al arranque del plano y desde ahí se hace el movimiento.
-              const travel = TRAVEL_MS * moodRef.current.pace * Math.min(shot.speed, 1);
+              const travel = TRAVEL_MS * moodRef.current.pace;
               stage.camera.glide(from, travel);
-              queued = { left: travel * 0.8, to, ms: 900 * shot.speed * moodRef.current.pace, shake: shot.shake };
+              queued = steps(shot, travel * 0.8);
             } else if (samePage) {
               // Dentro de la página la cámara viaja: es lo que da la sensación de estar
               // recorriendo la hoja en vez de ver recortes sueltos.
               stage.camera.glide(to, TRAVEL_MS * moodRef.current.pace);
             } else if (shot) {
               stage.camera.cut(from);
-              stage.camera.glide(to, 900 * shot.speed * moodRef.current.pace);
-              if (shot.shake) stage.camera.shake(shot.shake, 500);
+              queued = steps(shot, 0);
             } else {
               // Página nueva: se entra con el movimiento que pida el beat.
               stage.camera.cut(from);
@@ -522,12 +510,14 @@ export default function ReaderView() {
           // El ritmo del mood se aplica al reloj del director: así escala todo de una vez
           // —pausas, tiempos de lectura, apariciones— en vez de retocar cada duración.
           director.tick(dt / (moodRef.current.pace * readingPace));
-          if (queued) {
-            queued.left -= dt;
-            if (queued.left <= 0) {
-              stage.camera.glide(queued.to, queued.ms);
-              if (queued.shake) stage.camera.shake(queued.shake, 500);
-              queued = null;
+          // Los tramos de la cámara experimental, uno detrás del otro.
+          const step = queued[0];
+          if (step) {
+            step.left -= dt;
+            if (step.left <= 0) {
+              stage.camera.glide(step.to, step.ms);
+              if (step.shake) stage.camera.shake(step.shake, 500);
+              queued.shift();
             }
           }
           stage.camera.update(dt);
