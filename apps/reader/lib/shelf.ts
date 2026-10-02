@@ -19,7 +19,8 @@ const DIR = "pages";
 /** Cuántos tomos se guardan; al pasarse se borra el que hace más que no se abre. */
 const KEEP = 3;
 
-type Entry = { dir: string; at: number };
+/** `total`: las páginas del tomo, para saber sin abrir el archivo si ya están todas. */
+type Entry = { dir: string; at: number; total?: number };
 
 function index(): Record<string, Entry> {
   try {
@@ -141,17 +142,21 @@ const patiently = <T>(task: Promise<T>, fallback: T): Promise<T> =>
     () => fallback,
   );
 
-/** Las páginas ya procesadas de este tomo, desde la primera y sin huecos. */
-export function shelvedPages(key: string): Promise<ShelvedPage[]> {
-  return patiently(readShelf(key), []);
+/**
+ * Las páginas ya procesadas de este tomo, desde la primera y sin huecos, y cuántas tiene el
+ * tomo, si se sabe: con todas guardadas no hace falta ni descomprimir el archivo.
+ */
+export function shelvedPages(key: string): Promise<{ pages: ShelvedPage[]; total: number | null }> {
+  return patiently(readShelf(key), { pages: [], total: null });
 }
 
-async function readShelf(key: string): Promise<ShelvedPage[]> {
+async function readShelf(key: string): Promise<{ pages: ShelvedPage[]; total: number | null }> {
+  const none = { pages: [], total: null };
   const all = index();
   const entry = all[versioned(key)];
-  if (!entry) return [];
+  if (!entry) return none;
   const top = await root();
-  if (!top) return [];
+  if (!top) return none;
   try {
     const dir = await top.getDirectoryHandle(entry.dir);
     const pages: ShelvedPage[] = [];
@@ -162,9 +167,9 @@ async function readShelf(key: string): Promise<ShelvedPage[]> {
     }
     entry.at = Date.now();
     saveIndex(all);
-    return pages;
+    return { pages, total: entry.total ?? null };
   } catch {
-    return [];
+    return none;
   }
 }
 
@@ -172,11 +177,11 @@ async function readShelf(key: string): Promise<ShelvedPage[]> {
  * Anota un tomo para empezar a guardarlo, haciendo lugar si hace falta. Devuelve con qué
  * guardar cada página, o null si no se puede guardar.
  */
-export function shelf(key: string): Promise<((page: ProcessedPage) => Promise<void>) | null> {
-  return patiently(openShelf(key), null);
+export function shelf(key: string, total: number): Promise<((page: ProcessedPage) => Promise<void>) | null> {
+  return patiently(openShelf(key, total), null);
 }
 
-async function openShelf(key: string): Promise<((page: ProcessedPage) => Promise<void>) | null> {
+async function openShelf(key: string, total: number): Promise<((page: ProcessedPage) => Promise<void>) | null> {
   const top = await root();
   if (!top) return null;
   const all = index();
@@ -192,7 +197,7 @@ async function openShelf(key: string): Promise<((page: ProcessedPage) => Promise
     delete all[k];
   }
   const name = dirName(mine);
-  all[mine] = { dir: name, at: Date.now() };
+  all[mine] = { dir: name, at: Date.now(), total };
   saveIndex(all);
   navigator.storage.persist?.().catch(() => {});
 

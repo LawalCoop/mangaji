@@ -693,14 +693,22 @@ export default function ReaderView() {
       // según el tamaño: un tomo de 150 MB tarda bastante más que un capítulo de 10.
       const unpacked = Math.min(PREP.unpackedMax, PREP.unpackedMin + file.size / UNPACK_BYTES_PER_SHARE);
       advance(0, unpacked * 0.95);
-      let cbz: CbzSource;
-      try {
-        cbz = await CbzSource.open(file);
-      } catch (err) {
-        window.clearInterval(creep);
-        throw err;
+      // Lo ya procesado de este tomo en otra visita: se carga y se sigue desde lo que falta.
+      // Si están todas las páginas, ni se descomprime el archivo, que es lo que más tarda.
+      const key = bookRef.current;
+      const shelved = key ? await shelvedPages(key) : { pages: [], total: null };
+      const complete = shelved.total !== null && shelved.pages.length >= shelved.total;
+
+      let cbz: CbzSource | null = null;
+      if (!complete) {
+        try {
+          cbz = await CbzSource.open(file);
+        } catch (err) {
+          window.clearInterval(creep);
+          throw err;
+        }
       }
-      const total = cbz.pageCount;
+      const total = cbz ? cbz.pageCount : shelved.total!;
       setLines((l) => [...l, { note: { key: "pageCount", n: total } }]);
       advance(unpacked);
 
@@ -713,10 +721,9 @@ export default function ReaderView() {
       const pageFrames = new PageFrameSource(ready);
       const panelFrames = new PanelFrameSource(undefined, total);
 
-      // Lo ya procesado de este tomo en otra visita: se carga y se sigue desde lo que falta.
-      const key = bookRef.current;
-      const saved = key ? await shelvedPages(key) : [];
-      const store = key && saved.length < total ? await shelf(key) : null;
+      const saved = shelved.pages;
+      // También si falta anotar el total, como en lo guardado antes de que se anotara.
+      const store = key && (saved.length < total || shelved.total === null) ? await shelf(key, total) : null;
 
       const worker = new Worker(new URL("../lib/process.worker.ts", import.meta.url), {
         type: "module",
@@ -840,12 +847,12 @@ export default function ReaderView() {
             if (now - waitStart > MOTION_WAIT_MAX) break;
             await new Promise((resolve) => setTimeout(resolve, 80));
           }
-          const bitmap = await cbz.bitmap(index);
+          const bitmap = await cbz!.bitmap(index);
           const settled = new Promise<void>((resolve) => settle.set(index, resolve));
           // El bitmap se transfiere, no se copia; por eso se saca de la caché del archivo,
           // que si no queda apuntando a una imagen que ya no es suya.
           worker.postMessage({ kind: "page", index, bitmap } satisfies ProcessRequest, [bitmap]);
-          cbz.release(index);
+          cbz!.release(index);
           await settled;
           settle.delete(index);
           if (failed) throw new Error(failed);
@@ -858,7 +865,7 @@ export default function ReaderView() {
         }
       } finally {
         window.clearInterval(creep);
-        cbz.close();
+        cbz?.close();
         worker.postMessage({ kind: "close" } satisfies ProcessRequest);
         workerRef.current = null;
       }
