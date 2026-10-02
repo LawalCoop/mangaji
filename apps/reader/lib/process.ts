@@ -1,6 +1,6 @@
 import { zipSync } from "fflate";
 import type { Note } from "./notes";
-import { choosePanels, dedupe, fillAroundTexts, fillOrphans, inkGrid, isFolio, joinFillers, ownersOf, tailTip } from "./panels";
+import { choosePanels, dedupe, fillAroundTexts, fillOrphans, inkGrid, isFolio, ownersOf, tailTip } from "./panels";
 // Solo el tipo: así quien únicamente empaqueta no se trae los modelos ni el runtime.
 import type { Detector, Detection } from "./detector";
 import { lift, type Sprite } from "./dialogue";
@@ -144,11 +144,7 @@ export async function processPage(
     pageArea,
   );
   // Lo que el modelo no vio: zonas grandes con dibujo que no son de ninguna viñeta.
-  const grid = inkGrid(pixels.data, width, height);
-  panels.push(...fillOrphans(panels, dets.filter((d) => d.cls === "frame"), grid));
-  // Un relleno pegado a una viñeta de su misma columna, con el dibujo de corrido entre los
-  // dos, es la parte de esa viñeta que el modelo dejó afuera.
-  panels = joinFillers(panels, pixels.data, width, height);
+  panels.push(...fillOrphans(panels, dets.filter((d) => d.cls === "frame"), inkGrid(pixels.data, width, height)));
   const balloons = dedupe(dets.filter((d) => d.cls === "balloon"));
   const texts = dets.filter((d) => d.cls === "text");
 

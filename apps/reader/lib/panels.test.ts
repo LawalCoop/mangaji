@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { Detection } from "./detector";
-import { choosePanels, fillAroundTexts, fillOrphans, inkGrid, isFolio, joinFillers, joinSplit, ownersOf, tailTip } from "./panels";
+import { choosePanels, fillAroundTexts, fillOrphans, inkGrid, isFolio, joinSplit, ownersOf, tailTip } from "./panels";
 
 const PAGE = 1000 * 1400;
 
@@ -256,37 +256,5 @@ describe("viñeta vista partida en dos", () => {
 
   it("no une dos viñetas angostas de una misma fila aunque sus cajas se pisen", () => {
     expect(joinSplit([frame(0.97, 270, 879, 297, 756), frame(0.96, 157, 873, 244, 767)])).toHaveLength(2);
-  });
-});
-
-describe("relleno que continúa una viñeta", () => {
-  const W = 400;
-  const H = 800;
-  /** Página con tinta en toda la columna izquierda, o con una calle blanca en y = 300. */
-  const page = (gutter: boolean) => {
-    const data = new Uint8ClampedArray(W * H * 4).fill(255);
-    for (let y = 0; y < H; y++) {
-      if (gutter && y >= 290 && y < 310) continue;
-      for (let x = 0; x < 200; x++) if (x % 3 === 0) data.set([0, 0, 0], (y * W + x) * 4);
-    }
-    return data;
-  };
-  const filler = { ...frame(0, 0, 0, 200, 300) };
-  const detected = frame(0.8, 0, 300, 200, 500);
-
-  it("lo une si el dibujo sigue de corrido (tomo 2 de Saint Seiya, p. 6a)", () => {
-    const out = joinFillers([filler, detected], page(false), W, H);
-    expect(out).toHaveLength(1);
-    expect(out[0].bbox).toEqual({ x: 0, y: 0, w: 200, h: 800 });
-  });
-
-  it("no lo une si entre los dos hay una calle", () => {
-    expect(joinFillers([filler, detected], page(true), W, H)).toHaveLength(2);
-  });
-
-  it("no une una viñeta angosta con una ancha de abajo (tomo 2 de Saint Seiya, p. 5a)", () => {
-    const narrow = frame(0.86, 0, 0, 100, 300);
-    const wide = frame(0.09, 0, 300, 200, 500);
-    expect(joinFillers([wide, narrow], page(false), W, H)).toHaveLength(2);
   });
 });
