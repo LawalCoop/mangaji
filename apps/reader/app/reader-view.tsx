@@ -13,6 +13,7 @@ import { ProblemError, problemOf, type Problem } from "@/lib/notes";
 import { DEFAULT_MOOD, MOOD_ORDER, MOODS, type MoodId } from "@/lib/mood";
 import { Music } from "@/lib/music";
 import { bookKey, forget, savedPage, savePage } from "@/lib/progress";
+import { shelve, shelved } from "@/lib/shelf";
 import { Stage } from "@/lib/stage";
 import type { Rect } from "@/lib/types";
 import type { ProcessRequest, ProcessResponse } from "@/lib/process.worker";
@@ -759,6 +760,18 @@ export default function ReaderView() {
       setBuilt(null);
       setEta(null);
       setArchived(true);
+
+      // Se guarda en el navegador para que la próxima vez abra sin procesar. Por partes y
+      // de fondo, mientras se lee.
+      const key = bookRef.current;
+      const pages = live.pages;
+      if (key) {
+        void import("@/lib/process").then(({ archiveSize, writeArchive }) =>
+          shelve(key, archiveSize(pages), (out) =>
+            writeArchive(pages, { write: (chunk) => out.write(chunk as Uint8Array<ArrayBuffer>) }),
+          ),
+        );
+      }
     },
     [mount],
   );
@@ -787,13 +800,16 @@ export default function ReaderView() {
           throw new ProblemError({ code: "notATome", ext });
         }
 
-        // Un CBZ hay que procesarlo, y eso se hace leyendo; un `.cbza` ya viene listo.
-        if (!/\.cbza$/i.test(input.name)) {
+        // Un CBZ hay que procesarlo, y eso se hace leyendo; un `.cbza` ya viene listo. Si el
+        // mismo tomo ya se procesó en este navegador, se abre lo guardado.
+        let ready = /\.cbza$/i.test(input.name) ? input : null;
+        if (!ready) ready = await shelved(bookRef.current);
+        if (!ready) {
           await build(canvas, input);
           return;
         }
 
-        const source = await CbzSource.open(input);
+        const source = await CbzSource.open(ready);
         const sizes = Array.from({ length: source.pageCount }, () => ({ ...ASSUMED_PAGE }));
         const pageFrames = new PageFrameSource(sizes);
 

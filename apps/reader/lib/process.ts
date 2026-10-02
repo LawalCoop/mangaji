@@ -1,4 +1,4 @@
-import { zipSync } from "fflate";
+import { Zip, ZipPassThrough, zipSync } from "fflate";
 import type { Note } from "./notes";
 import { choosePanels, dedupe, fillAroundTexts, fillOrphans, inkGrid, isFolio, ownersOf, tailTip } from "./panels";
 // Solo el tipo: así quien únicamente empaqueta no se trae los modelos ni el runtime.
@@ -364,14 +364,52 @@ export async function processPage(
  * Se hace al final, cuando ya no interrumpe a nadie: para ese momento la lectura viene
  * corriendo desde hace rato sobre estas mismas piezas.
  */
-export function packArchive(pages: ProcessedPage[]): Blob {
-  const files: Record<string, Uint8Array> = {};
+/**
+ * Escribe el `.cbza` por partes en `out`, cediendo el hilo entre archivo y archivo: el tomo
+ * entero son cien megas y armarlo de una vez trababa la lectura en el celular.
+ */
+export async function writeArchive(
+  pages: ProcessedPage[],
+  out: { write(chunk: Uint8Array): Promise<void> },
+): Promise<void> {
+  const chunks: Uint8Array[] = [];
+  let failed: unknown = null;
+  const zip = new Zip((err, data) => {
+    if (err) failed = err;
+    else chunks.push(data);
+  });
+  const flush = async () => {
+    while (chunks.length) await out.write(chunks.shift()!);
+    if (failed) throw failed;
+  };
+  const add = async (name: string, data: Uint8Array) => {
+    const entry = new ZipPassThrough(name);
+    zip.add(entry);
+    entry.push(data, true);
+    await flush();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  };
   for (const page of pages) {
-    files[`pages/${page.id}.webp`] = page.image;
-    Object.assign(files, page.sprites);
+    await add(`pages/${page.id}.webp`, page.image);
+    for (const [name, data] of Object.entries(page.sprites)) await add(name, data);
   }
+  await add("manifest.json", manifestBytes(pages));
+  zip.end();
+  await flush();
+}
 
-  files["manifest.json"] = new TextEncoder().encode(
+/** Lo que pesa el `.cbza` de estas páginas, más o menos. */
+export function archiveSize(pages: ProcessedPage[]): number {
+  let n = 0;
+  for (const page of pages) {
+    n += page.image.length;
+    for (const data of Object.values(page.sprites)) n += data.length;
+  }
+  return n;
+}
+
+function manifestBytes(pages: ProcessedPage[]): Uint8Array {
+  return new TextEncoder().encode(
     JSON.stringify({
       version: 1,
       readingDirection: "rtl",
@@ -379,6 +417,16 @@ export function packArchive(pages: ProcessedPage[]): Blob {
       pages: pages.map((p) => p.page),
     }),
   );
+}
+
+export function packArchive(pages: ProcessedPage[]): Blob {
+  const files: Record<string, Uint8Array> = {};
+  for (const page of pages) {
+    files[`pages/${page.id}.webp`] = page.image;
+    Object.assign(files, page.sprites);
+  }
+
+  files["manifest.json"] = manifestBytes(pages);
 
   // Sin comprimir: el arte ya es WebP y los sprites PNG, comprimir de nuevo no gana nada.
   const zipped = zipSync(files, { level: 0 });
