@@ -76,6 +76,8 @@ const OPENABLE = new Set(["cbza", "cbz", "cbr", "zip", "rar"]);
 const TAP_SLOP = 10;
 /** A partir de cuánto apoyar el dedo deja de ser un toque y pasa a ser una pausa. */
 const HOLD_MS = 280;
+/** Manteniendo una flecha, cuánto tarda en recorrerse el paneo entero. */
+const KEY_SCRUB_MS = 2500;
 /** Ancho de cada zona lateral de toque; el centro que queda muestra los controles. */
 const TAP_ZONE = 0.35;
 /** Un deslizamiento tiene que ser rápido y largo, para no confundirse con mover la cámara. */
@@ -125,7 +127,7 @@ export default function ReaderView() {
     pageFrames: PageFrameSource;
     panelFrames: PanelFrameSource | null;
     /** El paneo de la cámara β, para pausarlo y moverlo con el dedo. */
-    pan: { hold: (on: boolean) => boolean; scrub: (dx: number, dy: number) => void };
+    pan: { hold: (on: boolean) => boolean; scrub: (dx: number, dy: number) => void; step: (dp: number) => void };
     dispose: () => void;
   } | null>(null);
   /** El archivo que se está escribiendo, para poder guardarlo cuando esté completo. */
@@ -372,6 +374,13 @@ export default function ReaderView() {
             if (len2 <= 0) return;
             pan.delay = 0;
             pan.p = Math.min(panLimit(), Math.max(0, pan.p + (dx * ddx + dy * ddy) / len2));
+            placePan();
+          },
+          /** Mueve el paneo una fracción de su recorrido: positivo hacia el final. */
+          step: (dp: number) => {
+            if (!pan || pan.done) return;
+            pan.delay = 0;
+            pan.p = Math.min(panLimit(), Math.max(0, pan.p + dp));
             placePan();
           },
         };
@@ -1036,9 +1045,47 @@ export default function ReaderView() {
 
   // Teclado. Manga se lee derecha→izquierda: la flecha izquierda avanza.
   useEffect(() => {
+    // Mantener una flecha hace con el paneo de la cámara β lo mismo que mantener el dedo: lo
+    // pausa, y mientras sigue apretada lo mueve —← hacia adelante, → hacia atrás—. Al
+    // soltarla sigue. Una pulsación corta hace lo de siempre.
+    let held: { key: string; t0: number; moving: boolean; timer: number; last: number } | null = null;
+    const moveHeld = (now: number) => {
+      if (!held) return;
+      const eng = engine.current;
+      if (!eng) return;
+      const dt = now - held.last;
+      held.last = now;
+      if (now - held.t0 < HOLD_MS) return;
+      held.moving = true;
+      eng.pan.step(((held.key === "ArrowLeft" ? 1 : -1) * dt) / KEY_SCRUB_MS);
+    };
+    const onKeyUp = (e: KeyboardEvent) => {
+      if (!held || e.key !== held.key) return;
+      const eng = engine.current;
+      window.clearInterval(held.timer);
+      const short = !held.moving && performance.now() - held.t0 < HOLD_MS;
+      const key = held.key;
+      held = null;
+      eng?.pan.hold(false);
+      if (short && eng) (key === "ArrowLeft" ? eng.director.next() : eng.director.prev());
+    };
+
     const onKey = (e: KeyboardEvent) => {
       const eng = engine.current;
       if (!eng) return;
+      if (!e.shiftKey && (e.key === "ArrowLeft" || e.key === "ArrowRight")) {
+        if (held) {
+          e.preventDefault();
+          return;
+        }
+        if (!e.repeat && eng.pan.hold(true)) {
+          e.preventDefault();
+          const now = performance.now();
+          held = { key: e.key, t0: now, moving: false, last: now, timer: 0 };
+          held.timer = window.setInterval(() => moveHeld(performance.now()), 16);
+          return;
+        }
+      }
       // Con Shift, las flechas de siempre saltan la página entera.
       if (e.shiftKey && (e.key === "ArrowLeft" || e.key === "ArrowRight")) {
         e.preventDefault();
@@ -1095,8 +1142,22 @@ export default function ReaderView() {
           break;
       }
     };
+    // Si la ventana pierde el foco con la flecha apretada, el soltarla no llega: se suelta acá.
+    const onBlur = () => {
+      if (!held) return;
+      window.clearInterval(held.timer);
+      held = null;
+      engine.current?.pan.hold(false);
+    };
     window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
+    window.addEventListener("keyup", onKeyUp);
+    window.addEventListener("blur", onBlur);
+    return () => {
+      window.removeEventListener("keydown", onKey);
+      window.removeEventListener("keyup", onKeyUp);
+      window.removeEventListener("blur", onBlur);
+      if (held) window.clearInterval(held.timer);
+    };
   }, [applyMood, fit, toggleMode, toggleMusic, zoom]);
 
   const onDrop = useCallback(
