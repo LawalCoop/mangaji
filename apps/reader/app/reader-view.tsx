@@ -433,7 +433,7 @@ export default function ReaderView() {
                 ? directedShot(fresh, stage.viewport)
                 : null;
             const { from, to } = shot
-              ? { from: shot.from, to: shot.steps[shot.steps.length - 1].to }
+              ? { from: shot.from, to: shot.final }
               : framing(cam, fresh.rect, stage.viewport);
             readingPace = shot?.pace ?? 1;
             queued = [];
@@ -456,7 +456,7 @@ export default function ReaderView() {
               const travel = TRAVEL_MS * moodRef.current.pace;
               stage.camera.glide(from, travel);
               queued = steps(shot, travel * 0.8);
-              if (shot.pan) pan = { ...shot.pan, p: 0, delay: travel * 0.8, final: shot.final!, done: false };
+              if (shot.pan) pan = { ...shot.pan, p: 0, delay: travel * 0.8, final: shot.final, done: false };
             } else if (samePage) {
               // Dentro de la página la cámara viaja: es lo que da la sensación de estar
               // recorriendo la hoja en vez de ver recortes sueltos.
@@ -464,7 +464,7 @@ export default function ReaderView() {
             } else if (shot) {
               stage.camera.cut(from);
               queued = steps(shot, 0);
-              if (shot.pan) pan = { ...shot.pan, p: 0, delay: 0, final: shot.final!, done: false };
+              if (shot.pan) pan = { ...shot.pan, p: 0, delay: 0, final: shot.final, done: false };
               if (shot.pan && shot.shake) stage.camera.shake(shot.shake, 500);
             } else {
               // Página nueva: se entra con el movimiento que pida el beat.

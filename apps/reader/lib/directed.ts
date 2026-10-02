@@ -70,17 +70,17 @@ export function directedShot(frame: ShotFrame, view: Viewport): DirectedShot {
   }
 
   if (tension >= 0.55) {
-    return { from: fit(1.2), steps: move(900), shake: 2 + 5 * tension, pace: 0.85 };
+    return { from: fit(1.2), steps: move(900), final: to, shake: 2 + 5 * tension, pace: 0.85 };
   }
   if (rect.w / rect.h >= 1.8 && tension < 0.45) {
     // Plano de ubicación: arranca en el tercio derecho y se abre a la viñeta entera.
     const part = { x: rect.x + rect.w * 0.45, y: rect.y, w: rect.w * 0.55, h: rect.h };
-    return { from: Camera.fit(part, view, FIT_MARGIN), steps: move(1440), shake: 0, pace: 1.1 };
+    return { from: Camera.fit(part, view, FIT_MARGIN), steps: move(1440), final: to, shake: 0, pace: 1.1 };
   }
   if (tension <= 0.25) {
-    return { from: fit(0.93), steps: move(1080), shake: 0, pace: 1.15 };
+    return { from: fit(0.93), steps: move(1080), final: to, shake: 0, pace: 1.15 };
   }
-  return { from: fit(1.07), steps: move(900), shake: 0, pace: 1 };
+  return { from: fit(1.07), steps: move(900), final: to, shake: 0, pace: 1 };
 }
 
 /** Lo que el plano necesita saber de la viñeta. */
@@ -101,9 +101,10 @@ export type Pan = { start: Transform; end: Transform; ms: number; stops: { id: s
 export type DirectedShot = {
   from: Transform;
   steps: ShotStep[];
-  /** Si la viñeta se recorre: el paneo, y la vista entera con que termina. */
+  /** Si la viñeta se recorre: el paneo. */
   pan?: Pan;
-  final?: Transform;
+  /** Dónde queda la cámara al final del plano: la viñeta entera. */
+  final: Transform;
   shake: number;
   /** Ritmo de lectura de la viñeta: más de 1, más lento. */
   pace: number;

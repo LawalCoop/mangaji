@@ -52,3 +52,13 @@ describe("cámara β en el celular", () => {
     expect(pan.ms).toBeGreaterThanOrEqual(9000);
   });
 });
+
+describe("todo plano dice dónde termina", () => {
+  it("también el que se recorre, que no tiene tramos", () => {
+    // Faltaba en el paneo, y el lector, al buscar el final en los tramos, se caía.
+    const shot = directedShot(frame({ x: 0, y: 0, w: 1000, h: 300 }), phone);
+    expect(shot.steps).toHaveLength(0);
+    expect(shot.final).toBeDefined();
+    expect(directedShot(frame({ x: 0, y: 0, w: 400, h: 700 }), phone).final).toBeDefined();
+  });
+});
