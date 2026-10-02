@@ -94,16 +94,20 @@ export function directedShot(frame: ShotFrame, view: Viewport): DirectedShot {
   // En pantallas grandes casi ninguna viñeta queda chica, pero el recorrido gusta igual: se
   // acerca un poco y recorre lo que no entra, en el sentido de lectura.
   if (view.w >= GENTLE.minWidth) {
-    const scale = fitScale * GENTLE.zoom;
-    const overW = rect.w * scale > view.w - 2 * pad;
-    const overH = rect.h * scale > view.h - 2 * pad;
-    if (overW || overH) {
+    // Un solo eje, el que más sobra: el acercamiento se limita para que en el otro la viñeta
+    // entre entera. Recorriendo en diagonal se perdía de vista una franja todo el tiempo.
+    const wide = rect.w / (view.w - 2 * pad) >= rect.h / (view.h - 2 * pad);
+    const crossFit = wide ? (view.h - 2 * pad) / rect.h : (view.w - 2 * pad) / rect.w;
+    const scale = Math.min(fitScale * GENTLE.zoom, crossFit);
+    if (scale >= fitScale * GENTLE.minZoom) {
       const cx = view.w / 2 - (rect.x + rect.w / 2) * scale;
       const cy = view.h / 2 - (rect.y + rect.h / 2) * scale;
-      return panShot(
-        { scale, x: overW ? view.w - pad - (rect.x + rect.w) * scale : cx, y: overH ? pad - rect.y * scale : cy },
-        { scale, x: overW ? pad - rect.x * scale : cx, y: overH ? view.h - pad - (rect.y + rect.h) * scale : cy },
-      );
+      return wide
+        ? panShot(
+            { scale, x: view.w - pad - (rect.x + rect.w) * scale, y: cy },
+            { scale, x: pad - rect.x * scale, y: cy },
+          )
+        : panShot({ scale, x: cx, y: pad - rect.y * scale }, { scale, x: cx, y: view.h - pad - (rect.y + rect.h) * scale });
     }
   }
 
@@ -160,7 +164,10 @@ export type DirectedShot = {
  */
 const TOUR = { maxScale: 0.55, target: 0.75, minZoom: 1.25, maxZoom: 1.6 };
 
-/** El paneo suave de las pantallas grandes: desde qué ancho y cuánto se acerca. */
-const GENTLE = { minWidth: 900, zoom: 1.3 };
+/**
+ * El paneo suave de las pantallas grandes: desde qué ancho, cuánto se acerca y lo mínimo que
+ * tiene que acercarse para que valga la pena recorrer.
+ */
+const GENTLE = { minWidth: 900, zoom: 1.3, minZoom: 1.12 };
 
 const PAN = { minGain: 2.6, maxZoom: 1.6, baseMs: 2000, perScreenMs: 1700, maxMs: 7000 };
