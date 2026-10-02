@@ -74,6 +74,8 @@ const CREEP = { everyMs: 150, share: 0.05 };
 const OPENABLE = new Set(["cbza", "cbz", "cbr", "zip", "rar"]);
 /** Cuánto puede moverse un dedo y seguir contando como toque. Un pulgar nunca queda quieto. */
 const TAP_SLOP = 10;
+/** A partir de cuánto apoyar el dedo deja de ser un toque y pasa a ser una pausa. */
+const HOLD_MS = 280;
 /** Ancho de cada zona lateral de toque; el centro que queda muestra los controles. */
 const TAP_ZONE = 0.35;
 /** Un deslizamiento tiene que ser rápido y largo, para no confundirse con mover la cámara. */
@@ -122,6 +124,8 @@ export default function ReaderView() {
     sizes: { w: number; h: number }[];
     pageFrames: PageFrameSource;
     panelFrames: PanelFrameSource | null;
+    /** El paneo de la cámara β, para pausarlo y moverlo con el dedo. */
+    pan: { hold: (on: boolean) => boolean; scrub: (dx: number, dy: number) => void };
     dispose: () => void;
   } | null>(null);
   /** El archivo que se está escribiendo, para poder guardarlo cuando esté completo. */
@@ -334,7 +338,43 @@ export default function ReaderView() {
          * globo que todavía no apareció, y al terminar —o si se pide avanzar antes— muestra
          * la viñeta entera.
          */
-        let pan: (Pan & { p: number; delay: number; final: Transform; done: boolean }) | null = null;
+        let pan: (Pan & { p: number; delay: number; final: Transform; done: boolean; held: boolean }) | null = null;
+        /** Hasta dónde puede llegar el paneo: el próximo globo que falta aparecer, o el final. */
+        const panLimit = () => {
+          if (!pan) return 1;
+          const next = pan.stops.find((st) => !revealed.has(st.id));
+          return next ? next.at : 1;
+        };
+        const placePan = () => {
+          if (!pan) return;
+          const k = pan.p;
+          stage.camera.cut({
+            scale: pan.start.scale + (pan.end.scale - pan.start.scale) * k,
+            x: pan.start.x + (pan.end.x - pan.start.x) * k,
+            y: pan.start.y + (pan.end.y - pan.start.y) * k,
+          });
+        };
+        /**
+         * Con el dedo apoyado el paneo se pausa; arrastrando se lo mueve por su recorrido —para
+         * atrás o para adelante, sin pasar un globo que falta—, y al soltar sigue desde ahí.
+         */
+        const panControl = {
+          hold: (on: boolean) => {
+            if (!pan || pan.done) return false;
+            pan.held = on;
+            return true;
+          },
+          scrub: (dx: number, dy: number) => {
+            if (!pan || pan.done) return;
+            const ddx = pan.end.x - pan.start.x;
+            const ddy = pan.end.y - pan.start.y;
+            const len2 = ddx * ddx + ddy * ddy;
+            if (len2 <= 0) return;
+            pan.delay = 0;
+            pan.p = Math.min(panLimit(), Math.max(0, pan.p + (dx * ddx + dy * ddy) / len2));
+            placePan();
+          },
+        };
         const finishPan = () => {
           if (!pan || pan.done) return false;
           pan.done = true;
@@ -465,7 +505,7 @@ export default function ReaderView() {
               const travel = TRAVEL_MS * moodRef.current.pace;
               stage.camera.glide(from, travel);
               queued = steps(shot, travel * 0.8);
-              if (shot.pan) pan = { ...shot.pan, p: 0, delay: travel * 0.8, final: shot.final, done: false };
+              if (shot.pan) pan = { ...shot.pan, p: 0, delay: travel * 0.8, final: shot.final, done: false, held: false };
             } else if (samePage) {
               // Dentro de la página la cámara viaja: es lo que da la sensación de estar
               // recorriendo la hoja en vez de ver recortes sueltos.
@@ -473,7 +513,7 @@ export default function ReaderView() {
             } else if (shot) {
               stage.camera.cut(from);
               queued = steps(shot, 0);
-              if (shot.pan) pan = { ...shot.pan, p: 0, delay: 0, final: shot.final, done: false };
+              if (shot.pan) pan = { ...shot.pan, p: 0, delay: 0, final: shot.final, done: false, held: false };
               if (shot.pan && shot.shake) stage.camera.shake(shot.shake, 500);
             } else {
               // Página nueva: se entra con el movimiento que pida el beat.
@@ -532,22 +572,15 @@ export default function ReaderView() {
         const offTick = stage.onTick((dt) => {
           // El ritmo del mood se aplica al reloj del director: así escala todo de una vez
           // —pausas, tiempos de lectura, apariciones— en vez de retocar cada duración.
-          director.tick(dt / (moodRef.current.pace * readingPace));
+          // Con el paneo pausado bajo el dedo, el diálogo también espera.
+          if (!pan?.held) director.tick(dt / (moodRef.current.pace * readingPace));
           // Los tramos de la cámara experimental, uno detrás del otro.
-          if (pan && !pan.done) {
+          if (pan && !pan.done && !pan.held) {
             if (pan.delay > 0) pan.delay -= dt;
             else {
-              // Hasta el próximo globo que falta aparecer; con todo a la vista, hasta el final.
-              const next = pan.stops.find((st: { id: string }) => !revealed.has(st.id));
-              const limit = next ? next.at : 1;
               const speed = 1 / (pan.ms * moodRef.current.pace);
-              pan.p = Math.min(limit, pan.p + dt * speed);
-              const k = pan.p;
-              stage.camera.cut({
-                scale: pan.start.scale + (pan.end.scale - pan.start.scale) * k,
-                x: pan.start.x + (pan.end.x - pan.start.x) * k,
-                y: pan.start.y + (pan.end.y - pan.start.y) * k,
-              });
+              pan.p = Math.min(panLimit(), pan.p + dt * speed);
+              placePan();
               if (pan.p >= 1) finishPan();
             }
           }
@@ -593,6 +626,7 @@ export default function ReaderView() {
           sizes,
           pageFrames,
           panelFrames,
+          pan: panControl,
           dispose: () => {
             window.removeEventListener("resize", onResize);
             offTick();
@@ -1091,6 +1125,8 @@ export default function ReaderView() {
     moved: boolean;
     /** Hubo dos dedos en algún momento: ya no es un toque ni un deslizamiento. */
     multi: boolean;
+    /** El dedo pausó un paneo de la cámara β: arrastrar lo mueve en vez de la página. */
+    panning: boolean;
     pinch: { dist: number; cx: number; cy: number } | null;
   } | null>(null);
 
@@ -1120,6 +1156,7 @@ export default function ReaderView() {
         moved: false,
         multi: false,
         pinch: null,
+        panning: engine.current.pan.hold(true),
       };
     } else if (pointers.current.size === 2 && gesture.current) {
       gesture.current.multi = true;
@@ -1147,7 +1184,8 @@ export default function ReaderView() {
     if (g.multi) return;
 
     if (Math.hypot(e.clientX - g.x0, e.clientY - g.y0) > TAP_SLOP) g.moved = true;
-    eng.stage.camera.nudge(e.clientX - prev.x, e.clientY - prev.y);
+    if (g.panning) eng.pan.scrub(e.clientX - prev.x, e.clientY - prev.y);
+    else eng.stage.camera.nudge(e.clientX - prev.x, e.clientY - prev.y);
   };
 
   const onPointerUp = (e: React.PointerEvent) => {
@@ -1164,6 +1202,13 @@ export default function ReaderView() {
       return;
     }
     gesture.current = null;
+
+    // Se soltó un paneo pausado: sigue. Si fue una pausa larga o se lo arrastró, termina acá;
+    // un toque corto, en cambio, corta el paneo y va a la viñeta entera.
+    if (g.panning) {
+      eng.pan.hold(false);
+      if (g.moved || performance.now() - g.t0 > HOLD_MS) return;
+    }
 
     const dx = e.clientX - g.x0;
     const dy = e.clientY - g.y0;
@@ -1193,6 +1238,7 @@ export default function ReaderView() {
 
   const onPointerCancel = (e: React.PointerEvent) => {
     pointers.current.delete(e.pointerId);
+    if (gesture.current?.panning) engine.current?.pan.hold(false);
     if (pointers.current.size === 0) gesture.current = null;
   };
 
