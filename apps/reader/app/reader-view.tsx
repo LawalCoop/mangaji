@@ -12,6 +12,7 @@ import { problemText, useI18n } from "@/lib/i18n";
 import { ProblemError, problemOf, type Problem } from "@/lib/notes";
 import { DEFAULT_MOOD, MOOD_ORDER, MOODS, type MoodId } from "@/lib/mood";
 import { Music } from "@/lib/music";
+import { bookKey, forget, savedPage, savePage } from "@/lib/progress";
 import { Stage } from "@/lib/stage";
 import type { Rect } from "@/lib/types";
 import type { ProcessRequest, ProcessResponse } from "@/lib/process.worker";
@@ -145,6 +146,14 @@ export default function ReaderView() {
 
   const [status, setStatus] = useState<Status>({ kind: "idle" });
   const [title, setTitle] = useState("");
+  /** El tomo abierto, para anotar por dónde se va. */
+  const bookRef = useRef<string | null>(null);
+  /**
+   * Retomar donde se dejó: la página a la que hay que ir apenas esté lista, y si el aviso
+   * se muestra. Mientras se procesa, la página puede tardar en llegar.
+   */
+  const resumeRef = useRef<number | null>(null);
+  const [resume, setResume] = useState<{ page: number; ready: boolean } | null>(null);
   /** Lo que se muestra mientras se espera la primera página de un CBZ. */
   const [stage, setStage] = useState<ProcessStage | null>(null);
   const [lines, setLines] = useState<LogLine[]>([]);
@@ -278,6 +287,30 @@ export default function ReaderView() {
    * No le importa si el archivo está completo o todavía se está procesando: `ArchiveSource`
    * existe justamente para eso, y `PanelFrameSource` puede seguir creciendo debajo.
    */
+  /** Salta a la página a retomar si ya está lista; si no, queda pendiente y se avisa. */
+  const tryResume = useCallback((director: Director) => {
+    const page = resumeRef.current;
+    if (page === null) return;
+    for (let i = 0; i < director.length; i++) {
+      if (director.frameAt(i).page === page) {
+        resumeRef.current = null;
+        director.seek(i);
+        setResume({ page, ready: true });
+        window.setTimeout(() => setResume((r) => (r?.ready ? null : r)), 6000);
+        return;
+      }
+    }
+    setResume({ page, ready: false });
+  }, []);
+
+  /** Empezar el tomo desde el principio, olvidando por dónde se iba. */
+  const restart = useCallback(() => {
+    resumeRef.current = null;
+    setResume(null);
+    if (bookRef.current) forget(bookRef.current);
+    engine.current?.director.seek(0);
+  }, []);
+
   const mount = useCallback(
     async (
       canvas: HTMLCanvasElement,
@@ -315,6 +348,13 @@ export default function ReaderView() {
           const mine = ++token;
           const frame = director.frame;
           const pos = director.positionInPage;
+          if (bookRef.current && resumeRef.current === null) savePage(bookRef.current, frame.page, sizes.length);
+          // Si se empezó a avanzar por cuenta propia antes de que llegara la página a retomar,
+          // se eligió leer desde el principio: ya no se salta.
+          if (resumeRef.current !== null && director.index > 2) {
+            resumeRef.current = null;
+            setResume(null);
+          }
           setAt({
             page: frame.page + 1,
             pages: sizes.length,
@@ -504,6 +544,7 @@ export default function ReaderView() {
         stage.focusStrength = moodRef.current.focus.shade;
         stage.focusBlur = moodRef.current.focus.blur;
 
+        tryResume(director);
         engine.current = {
           source,
           stage,
@@ -663,6 +704,7 @@ export default function ReaderView() {
           await mount(canvas, live, sizes, pageFrames, panelFrames);
         } else {
           engine.current?.director.grew();
+          if (engine.current) tryResume(engine.current.director);
         }
 
         settle.get(done.index)?.();
@@ -707,6 +749,9 @@ export default function ReaderView() {
       setFetching(null);
       setStatus({ kind: "loading" });
       setTitle(input.name);
+      bookRef.current = bookKey(input);
+      resumeRef.current = savedPage(bookRef.current);
+      setResume(null);
       setArchived(false);
       setBuilt(null);
       liveRef.current = null;
@@ -1105,7 +1150,24 @@ export default function ReaderView() {
 
       {/* Solo aparece si la lectura alcanzó al procesamiento, que es raro: procesar una
           página lleva menos que leerla. */}
-      {waiting && (
+      {/* Retomar: dónde se sigue, con la salida para empezar de nuevo a mano. */}
+      {resume && status.kind === "ready" && (
+        <div className="absolute inset-x-0 top-[max(1.5rem,env(safe-area-inset-top))] z-20 flex justify-center px-4">
+          <span className="flex items-center gap-3 rounded-full border border-neutral-700/80 bg-neutral-900/90 py-1.5 pr-1.5 pl-4 text-xs text-neutral-200 backdrop-blur">
+            {!resume.ready && <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-[#00D9F5]" />}
+            {resume.ready ? t.reader.resumed(resume.page + 1) : t.reader.resuming(resume.page + 1)}
+            <button
+              type="button"
+              onClick={restart}
+              className="rounded-full border border-neutral-600 px-3 py-1 text-neutral-100 hover:border-[#FF2E88] hover:text-white"
+            >
+              {t.reader.restart}
+            </button>
+          </span>
+        </div>
+      )}
+
+      {waiting && !resume && (
         <div className="pointer-events-none absolute inset-x-0 top-[max(1.5rem,env(safe-area-inset-top))] z-20 flex justify-center px-4">
           <span className="flex items-center gap-2 rounded-full border border-neutral-700/80 bg-neutral-900/85 px-4 py-2 text-xs text-neutral-300 backdrop-blur">
             <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-[#00D9F5]" />

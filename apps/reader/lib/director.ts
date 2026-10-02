@@ -58,6 +58,10 @@ export class Director {
   get length(): number {
     return this.#source.length;
   }
+  /** El encuadre en la posición `i`, sin moverse. */
+  frameAt(i: number): Frame {
+    return this.#source.at(i);
+  }
   get frame(): Frame {
     return this.#source.at(this.#index);
   }

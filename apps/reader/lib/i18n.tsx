@@ -132,6 +132,9 @@ const es = {
 
   reader: {
     waiting: "preparando la página que sigue…",
+    resumed: (page: number) => `Seguís en la página ${page}`,
+    resuming: (page: number) => `Ibas por la página ${page}: te llevo apenas esté lista`,
+    restart: "desde el principio",
     hintNext: ["tocá acá", "para avanzar"],
     hintCenter: ["centro:", "controles"],
     hintPage: "deslizá ↑↓ para saltar de página",
@@ -359,6 +362,9 @@ const en: Messages = {
 
   reader: {
     waiting: "getting the next page ready…",
+    resumed: (page: number) => `Picking up at page ${page}`,
+    resuming: (page: number) => `You were on page ${page}: I'll take you there as soon as it's ready`,
+    restart: "from the start",
     hintNext: ["tap here", "to go on"],
     hintCenter: ["center:", "controls"],
     hintPage: "swipe ↑↓ to jump pages",
@@ -587,6 +593,9 @@ const ja: Messages = {
 
   reader: {
     waiting: "次のページを準備中…",
+    resumed: (page: number) => `${page} ページから続きを読めます`,
+    resuming: (page: number) => `${page} ページまで読んでいました。準備ができたら移動します`,
+    restart: "最初から",
     hintNext: ["ここをタップで", "次へ"],
     hintCenter: ["中央：", "操作メニュー"],
     hintPage: "上下にスワイプでページ移動",
