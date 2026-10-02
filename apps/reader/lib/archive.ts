@@ -1,3 +1,4 @@
+import { pageOfSprite } from "./live-archive";
 import { ProblemError } from "./notes";
 /**
  * Acceso al archivo de manga desde el hilo principal.
@@ -144,6 +145,15 @@ export class CbzSource implements ArchiveSource {
   #evictAround(index: number): void {
     for (const i of [...this.#cache.keys()]) {
       if (Math.abs(i - index) > CACHE_LIMIT) this.release(i);
+    }
+    // Los globos también: decodificados y acumulados durante todo el tomo, dejaban al
+    // celular sin memoria.
+    for (const [name, task] of this.#named) {
+      const page = pageOfSprite(name);
+      if (page !== null && Math.abs(page - index) > CACHE_LIMIT) {
+        this.#named.delete(name);
+        void task.then((b) => b.close()).catch(() => {});
+      }
     }
   }
 

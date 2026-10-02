@@ -13,7 +13,7 @@ import { ProblemError, problemOf, type Problem } from "@/lib/notes";
 import { DEFAULT_MOOD, MOOD_ORDER, MOODS, type MoodId } from "@/lib/mood";
 import { Music } from "@/lib/music";
 import { bookKey, forget, savedPage, savePage } from "@/lib/progress";
-import { shelf, shelvedPages } from "@/lib/shelf";
+import { shelf, shelvedPages, type ShelvedPage } from "@/lib/shelf";
 import { directedShot, FIT_MARGIN, type DirectedShot, type Pan } from "@/lib/directed";
 import type { ProcessedPage } from "@/lib/process";
 import { Stage } from "@/lib/stage";
@@ -709,9 +709,9 @@ export default function ReaderView() {
       };
 
       /** Una página lista, recién procesada o traída de lo guardado. */
-      const accept = async (done: ProcessedPage, fromShelf = false) => {
+      const accept = async (done: ProcessedPage | ShelvedPage, fromShelf = false) => {
         live.add(done);
-        if (!fromShelf) void store?.(done);
+        if (!fromShelf) void store?.(done as ProcessedPage);
         sizes[done.index] = { w: done.size[0], h: done.size[1] };
         ready[done.index] = sizes[done.index];
 
@@ -963,7 +963,18 @@ export default function ReaderView() {
     if (!live) return;
 
     const { packArchive } = await import("@/lib/process");
-    const url = URL.createObjectURL(packArchive(live.pages));
+    // Las páginas traídas de lo guardado están en el archivo, sin leer: se leen recién acá.
+    const bytes = async (b: Uint8Array | Blob) => (b instanceof Blob ? new Uint8Array(await b.arrayBuffer()) : b);
+    const pages = await Promise.all(
+      live.pages.map(async (p) => ({
+        ...p,
+        image: await bytes(p.image),
+        sprites: Object.fromEntries(
+          await Promise.all(Object.entries(p.sprites).map(async ([k, v]) => [k, await bytes(v)] as const)),
+        ),
+      })),
+    );
+    const url = URL.createObjectURL(packArchive(pages));
     const link = document.createElement("a");
     link.href = url;
     link.download = title.replace(/\.[^.]+$/, "") + ".cbza";

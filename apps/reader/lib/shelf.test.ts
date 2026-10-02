@@ -24,3 +24,12 @@ describe("guardar páginas procesadas", () => {
     });
   });
 });
+
+describe("de qué página es cada globo", () => {
+  it("lo saca del nombre del sprite", async () => {
+    const { pageOfSprite } = await import("./live-archive");
+    expect(pageOfSprite("sprites/p012.b3.png")).toBe(11);
+    expect(pageOfSprite("pages/p001.webp")).toBe(0);
+    expect(pageOfSprite("manifest.json")).toBeNull();
+  });
+});

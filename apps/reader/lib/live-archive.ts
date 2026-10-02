@@ -1,5 +1,6 @@
 import type { ArchiveSource } from "./archive";
 import type { ProcessedPage } from "./process";
+import type { ShelvedPage } from "./shelf";
 
 /**
  * Un archivo que todavía se está escribiendo.
@@ -17,21 +18,22 @@ import type { ProcessedPage } from "./process";
 const CACHE_LIMIT = 5;
 
 export class LiveSource implements ArchiveSource {
-  #pages: ProcessedPage[] = [];
-  #bytes = new Map<string, Uint8Array>();
+  #pages: (ProcessedPage | ShelvedPage)[] = [];
+  /** Los bytes de cada entrada, o la porción del archivo guardado donde están. */
+  #bytes = new Map<string, Uint8Array | Blob>();
   #cache = new Map<number, Promise<ImageBitmap>>();
   #named = new Map<string, Promise<ImageBitmap>>();
   #closed = false;
 
   /** Incorpora una página recién procesada. Llegan en orden. */
-  add(page: ProcessedPage): void {
+  add(page: ProcessedPage | ShelvedPage): void {
     this.#pages[page.index] = page;
     this.#bytes.set(`pages/${page.id}.webp`, page.image);
     for (const [name, data] of Object.entries(page.sprites)) this.#bytes.set(name, data);
   }
 
   /** Todo lo procesado hasta ahora, para armar el `.cbza` al terminar. */
-  get pages(): ProcessedPage[] {
+  get pages(): (ProcessedPage | ShelvedPage)[] {
     return this.#pages;
   }
 
@@ -59,7 +61,7 @@ export class LiveSource implements ArchiveSource {
     const bytes = this.#bytes.get(name);
     if (!bytes) return Promise.reject(new Error(`No está listo: ${name}`));
 
-    const task = createImageBitmap(new Blob([bytes as unknown as BlobPart]));
+    const task = createImageBitmap(bytes instanceof Blob ? bytes : new Blob([bytes as unknown as BlobPart]));
     this.#named.set(name, task);
     task.catch(() => this.#named.delete(name));
     return task;
@@ -72,7 +74,7 @@ export class LiveSource implements ArchiveSource {
     const bytes = this.#bytes.get(this.entryName(index));
     if (!bytes) return Promise.reject(new Error(`La página ${index + 1} todavía no está lista`));
 
-    const task = createImageBitmap(new Blob([bytes as unknown as BlobPart]));
+    const task = createImageBitmap(bytes instanceof Blob ? bytes : new Blob([bytes as unknown as BlobPart]));
     this.#cache.set(index, task);
     task.catch(() => this.#cache.delete(index));
     this.#evictAround(index);
@@ -99,10 +101,26 @@ export class LiveSource implements ArchiveSource {
     for (const i of [...this.#cache.keys()]) this.release(i);
   }
 
-  /** Descarta lo que quedó lejos de donde está mirando el lector. */
+  /**
+   * Descarta lo que quedó lejos de donde está mirando el lector: las páginas y también los
+   * globos, que antes se acumulaban decodificados durante todo el tomo.
+   */
   #evictAround(index: number): void {
     for (const i of [...this.#cache.keys()]) {
       if (Math.abs(i - index) > CACHE_LIMIT) this.release(i);
     }
+    for (const [name, task] of this.#named) {
+      const page = pageOfSprite(name);
+      if (page !== null && Math.abs(page - index) > CACHE_LIMIT) {
+        this.#named.delete(name);
+        void task.then((b) => b.close()).catch(() => {});
+      }
+    }
   }
+}
+
+/** La página (desde 0) de un globo, por su nombre: `sprites/p012.b3.png` es de la 12. */
+export function pageOfSprite(name: string): number | null {
+  const m = /\/p(\d+)\./.exec(name);
+  return m ? Number(m[1]) - 1 : null;
 }

@@ -40,11 +40,16 @@ function saveIndex(all: Record<string, Entry>): void {
   }
 }
 
+let cleaned = false;
+
 async function root(): Promise<FileSystemDirectoryHandle | null> {
   try {
     const top = await navigator.storage.getDirectory();
-    // Lo del formato anterior ocupa lugar y ya no se usa.
-    await top.removeEntry("shelf", { recursive: true }).catch(() => {});
+    // Lo del formato anterior ocupa lugar y ya no se usa: se borra una vez, de fondo.
+    if (!cleaned) {
+      cleaned = true;
+      void top.removeEntry("shelf", { recursive: true }).catch(() => {});
+    }
     return await top.getDirectoryHandle(DIR, { create: true });
   } catch {
     return null;
@@ -104,8 +109,44 @@ export function decodePage(bytes: Uint8Array): ProcessedPage {
   return { index: h.index, id: h.id, size: h.size, page: h.page, panels: h.panels, balloons: h.balloons, image, sprites };
 }
 
+/**
+ * Una página guardada, sin leer todavía: el arte y los globos quedan como porciones del
+ * archivo y se leen recién cuando se muestran. Cargar un tomo entero de golpe dejaba al
+ * celular sin memoria.
+ */
+export type ShelvedPage = Omit<ProcessedPage, "image" | "sprites"> & {
+  image: Blob;
+  sprites: Record<string, Blob>;
+};
+
+/** Lee solo el encabezado de una página guardada; el resto queda como porciones del archivo. */
+async function openPage(file: Blob): Promise<ShelvedPage> {
+  const length = new DataView(await file.slice(0, 4).arrayBuffer()).getUint32(0);
+  const h = JSON.parse(await file.slice(4, 4 + length).text());
+  let o = 4 + length;
+  const image = file.slice(o, o + h.image, "image/webp");
+  o += h.image;
+  const sprites: Record<string, Blob> = {};
+  for (const [name, len] of h.sprites as [string, number][]) {
+    sprites[name] = file.slice(o, o + len, "image/png");
+    o += len;
+  }
+  return { index: h.index, id: h.id, size: h.size, page: h.page, panels: h.panels, balloons: h.balloons, image, sprites };
+}
+
+/** Si el almacenamiento no responde en este tiempo, se procesa como si no hubiera nada. */
+const PATIENCE_MS = 5000;
+const patiently = <T>(task: Promise<T>, fallback: T): Promise<T> =>
+  Promise.race([task, new Promise<T>((resolve) => setTimeout(() => resolve(fallback), PATIENCE_MS))]).catch(
+    () => fallback,
+  );
+
 /** Las páginas ya procesadas de este tomo, desde la primera y sin huecos. */
-export async function shelvedPages(key: string): Promise<ProcessedPage[]> {
+export function shelvedPages(key: string): Promise<ShelvedPage[]> {
+  return patiently(readShelf(key), []);
+}
+
+async function readShelf(key: string): Promise<ShelvedPage[]> {
   const all = index();
   const entry = all[versioned(key)];
   if (!entry) return [];
@@ -113,11 +154,11 @@ export async function shelvedPages(key: string): Promise<ProcessedPage[]> {
   if (!top) return [];
   try {
     const dir = await top.getDirectoryHandle(entry.dir);
-    const pages: ProcessedPage[] = [];
+    const pages: ShelvedPage[] = [];
     for (let i = 0; ; i++) {
       const handle = await dir.getFileHandle(pageFile(i)).catch(() => null);
       if (!handle) break;
-      pages.push(decodePage(new Uint8Array(await (await handle.getFile()).arrayBuffer())));
+      pages.push(await openPage(await handle.getFile()));
     }
     entry.at = Date.now();
     saveIndex(all);
@@ -131,7 +172,11 @@ export async function shelvedPages(key: string): Promise<ProcessedPage[]> {
  * Anota un tomo para empezar a guardarlo, haciendo lugar si hace falta. Devuelve con qué
  * guardar cada página, o null si no se puede guardar.
  */
-export async function shelf(key: string): Promise<((page: ProcessedPage) => Promise<void>) | null> {
+export function shelf(key: string): Promise<((page: ProcessedPage) => Promise<void>) | null> {
+  return patiently(openShelf(key), null);
+}
+
+async function openShelf(key: string): Promise<((page: ProcessedPage) => Promise<void>) | null> {
   const top = await root();
   if (!top) return null;
   const all = index();

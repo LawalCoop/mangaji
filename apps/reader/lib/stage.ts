@@ -221,7 +221,8 @@ export class Stage {
    * mejor: el desenfoque se lee como suciedad, no como algo que falta.
    */
   setDialogue(entries: { id: string; bitmap: ImageBitmap; rect: Rect }[]): void {
-    this.#dialogue.removeChildren().forEach((child) => child.destroy());
+    // Con su textura: si no, cada página dejaba la de sus globos ocupando la placa.
+    this.#dialogue.removeChildren().forEach((child) => child.destroy({ texture: true, textureSource: true }));
     this.#sprites.clear();
 
     this.#blurs.clear();
