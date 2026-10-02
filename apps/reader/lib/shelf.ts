@@ -1,24 +1,32 @@
+import type { ProcessedPage } from "./process";
+
 /**
- * Los últimos tomos procesados, guardados en el navegador para no procesarlos de nuevo.
+ * Los últimos tomos procesados, guardados página por página en el navegador.
  *
- * Van al almacenamiento privado del sitio (OPFS): no salen del dispositivo, igual que
- * todo lo demás. Se reconocen por nombre y tamaño del archivo original y por la versión
- * del procesamiento: si el procesamiento cambia, lo guardado con la versión anterior deja
- * de servir y se vuelve a procesar.
+ * Cada página se guarda apenas se procesa, así que al volver a abrir el mismo archivo se
+ * cargan las que ya estaban y se sigue desde la primera que falta; si están todas, abre sin
+ * procesar nada. Van al almacenamiento privado del sitio (OPFS): no salen del dispositivo.
+ *
+ * Un tomo se reconoce por nombre y tamaño del archivo original y por la versión del
+ * procesamiento: si el procesamiento cambia, lo guardado con la versión anterior deja de
+ * servir y se vuelve a procesar.
  */
 
 /** Sube cuando cambia el procesamiento, para no reabrir tomos procesados con errores viejos. */
 export const PROCESSING_VERSION = 1;
 const INDEX = "mangaji:shelf";
-const DIR = "shelf";
+const DIR = "pages";
 /** Cuántos tomos se guardan; al pasarse se borra el que hace más que no se abre. */
 const KEEP = 3;
 
-type Entry = { file: string; at: number };
+type Entry = { dir: string; at: number };
 
 function index(): Record<string, Entry> {
   try {
-    return JSON.parse(localStorage.getItem(INDEX) ?? "{}") as Record<string, Entry>;
+    const all = JSON.parse(localStorage.getItem(INDEX) ?? "{}") as Record<string, Entry>;
+    // Formato anterior (un .cbza por tomo): se descarta.
+    for (const k of Object.keys(all)) if (!all[k].dir) delete all[k];
+    return all;
   } catch {
     return {};
   }
@@ -32,10 +40,12 @@ function saveIndex(all: Record<string, Entry>): void {
   }
 }
 
-async function folder(): Promise<FileSystemDirectoryHandle | null> {
+async function root(): Promise<FileSystemDirectoryHandle | null> {
   try {
-    const root = await navigator.storage.getDirectory();
-    return await root.getDirectoryHandle(DIR, { create: true });
+    const top = await navigator.storage.getDirectory();
+    // Lo del formato anterior ocupa lugar y ya no se usa.
+    await top.removeEntry("shelf", { recursive: true }).catch(() => {});
+    return await top.getDirectoryHandle(DIR, { create: true });
   } catch {
     return null;
   }
@@ -43,75 +53,121 @@ async function folder(): Promise<FileSystemDirectoryHandle | null> {
 
 const versioned = (key: string) => `${PROCESSING_VERSION}|${key}`;
 
-/** Un nombre de archivo seguro y corto a partir de la clave. */
-function fileName(key: string): string {
+function dirName(key: string): string {
   let h = 2166136261;
   for (let i = 0; i < key.length; i++) h = Math.imul(h ^ key.charCodeAt(i), 16777619);
-  return `t${(h >>> 0).toString(36)}.cbza`;
+  return `t${(h >>> 0).toString(36)}`;
 }
 
-/** El `.cbza` guardado de este tomo, o null si no hay. */
-export async function shelved(key: string): Promise<File | null> {
+const pageFile = (i: number) => `${String(i).padStart(4, "0")}.bin`;
+
+/** Una página en un solo archivo: largo del encabezado, encabezado JSON y los bytes. */
+export function encodePage(page: ProcessedPage): Uint8Array {
+  const sprites = Object.entries(page.sprites);
+  const header = new TextEncoder().encode(
+    JSON.stringify({
+      index: page.index,
+      id: page.id,
+      size: page.size,
+      page: page.page,
+      panels: page.panels,
+      balloons: page.balloons,
+      image: page.image.length,
+      sprites: sprites.map(([name, data]) => [name, data.length]),
+    }),
+  );
+  const total = 4 + header.length + page.image.length + sprites.reduce((n, [, d]) => n + d.length, 0);
+  const out = new Uint8Array(total);
+  new DataView(out.buffer).setUint32(0, header.length);
+  out.set(header, 4);
+  let o = 4 + header.length;
+  out.set(page.image, o);
+  o += page.image.length;
+  for (const [, data] of sprites) {
+    out.set(data, o);
+    o += data.length;
+  }
+  return out;
+}
+
+export function decodePage(bytes: Uint8Array): ProcessedPage {
+  const length = new DataView(bytes.buffer, bytes.byteOffset).getUint32(0);
+  const h = JSON.parse(new TextDecoder().decode(bytes.subarray(4, 4 + length)));
+  let o = 4 + length;
+  const image = bytes.slice(o, o + h.image);
+  o += h.image;
+  const sprites: Record<string, Uint8Array> = {};
+  for (const [name, len] of h.sprites as [string, number][]) {
+    sprites[name] = bytes.slice(o, o + len);
+    o += len;
+  }
+  return { index: h.index, id: h.id, size: h.size, page: h.page, panels: h.panels, balloons: h.balloons, image, sprites };
+}
+
+/** Las páginas ya procesadas de este tomo, desde la primera y sin huecos. */
+export async function shelvedPages(key: string): Promise<ProcessedPage[]> {
   const all = index();
   const entry = all[versioned(key)];
-  if (!entry) return null;
-  const dir = await folder();
-  if (!dir) return null;
+  if (!entry) return [];
+  const top = await root();
+  if (!top) return [];
   try {
-    const file = await (await dir.getFileHandle(entry.file)).getFile();
+    const dir = await top.getDirectoryHandle(entry.dir);
+    const pages: ProcessedPage[] = [];
+    for (let i = 0; ; i++) {
+      const handle = await dir.getFileHandle(pageFile(i)).catch(() => null);
+      if (!handle) break;
+      pages.push(decodePage(new Uint8Array(await (await handle.getFile()).arrayBuffer())));
+    }
     entry.at = Date.now();
     saveIndex(all);
-    return new File([file], entry.file, { type: "application/zip" });
+    return pages;
   } catch {
-    delete all[versioned(key)];
-    saveIndex(all);
-    return null;
+    return [];
   }
 }
 
 /**
- * Guarda el tomo procesado. `write` recibe dónde escribir y lo hace por partes. Si no hay
- * lugar o el navegador no lo permite, no se guarda y no pasa nada.
+ * Anota un tomo para empezar a guardarlo, haciendo lugar si hace falta. Devuelve con qué
+ * guardar cada página, o null si no se puede guardar.
  */
-export async function shelve(
-  key: string,
-  bytes: number,
-  write: (out: FileSystemWritableFileStream) => Promise<void>,
-): Promise<boolean> {
-  const dir = await folder();
-  if (!dir) return false;
-  try {
-    const { quota = 0, usage = 0 } = await navigator.storage.estimate();
-    if (quota - usage < bytes * 1.3) return false;
-  } catch {
-    // Sin estimación se intenta igual.
-  }
-
+export async function shelf(key: string): Promise<((page: ProcessedPage) => Promise<void>) | null> {
+  const top = await root();
+  if (!top) return null;
   const all = index();
-  // Lo de versiones anteriores ya no sirve; y se deja lugar para el nuevo.
+  const mine = versioned(key);
+  // Lo de versiones anteriores ya no sirve, y se deja lugar para este.
   const stale = Object.keys(all).filter((k) => !k.startsWith(`${PROCESSING_VERSION}|`));
   const old = Object.keys(all)
-    .filter((k) => k.startsWith(`${PROCESSING_VERSION}|`) && k !== versioned(key))
+    .filter((k) => k.startsWith(`${PROCESSING_VERSION}|`) && k !== mine)
     .sort((a, b) => all[b].at - all[a].at)
     .slice(KEEP - 1);
   for (const k of [...stale, ...old]) {
-    await dir.removeEntry(all[k].file).catch(() => {});
+    await top.removeEntry(all[k].dir, { recursive: true }).catch(() => {});
     delete all[k];
   }
-
-  const name = fileName(versioned(key));
-  try {
-    const handle = await dir.getFileHandle(name, { create: true });
-    const out = await handle.createWritable();
-    await write(out);
-    await out.close();
-  } catch {
-    await dir.removeEntry(name).catch(() => {});
-    return false;
-  }
-  all[versioned(key)] = { file: name, at: Date.now() };
+  const name = dirName(mine);
+  all[mine] = { dir: name, at: Date.now() };
   saveIndex(all);
-  // Que el navegador no lo borre por su cuenta si se queda sin lugar, cuando lo permite.
   navigator.storage.persist?.().catch(() => {});
-  return true;
+
+  let dir: FileSystemDirectoryHandle;
+  try {
+    dir = await top.getDirectoryHandle(name, { create: true });
+  } catch {
+    return null;
+  }
+  let full = false;
+  return async (page) => {
+    if (full) return;
+    try {
+      const handle = await dir.getFileHandle(pageFile(page.index), { create: true });
+      const out = await handle.createWritable();
+      await out.write(encodePage(page) as Uint8Array<ArrayBuffer>);
+      await out.close();
+    } catch {
+      // Sin lugar, o el navegador no deja escribir: se sigue leyendo sin guardar.
+      full = true;
+    }
+  };
 }

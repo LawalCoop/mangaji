@@ -13,7 +13,8 @@ import { ProblemError, problemOf, type Problem } from "@/lib/notes";
 import { DEFAULT_MOOD, MOOD_ORDER, MOODS, type MoodId } from "@/lib/mood";
 import { Music } from "@/lib/music";
 import { bookKey, forget, savedPage, savePage } from "@/lib/progress";
-import { shelve, shelved } from "@/lib/shelf";
+import { shelf, shelvedPages } from "@/lib/shelf";
+import type { ProcessedPage } from "@/lib/process";
 import { Stage } from "@/lib/stage";
 import type { Rect } from "@/lib/types";
 import type { ProcessRequest, ProcessResponse } from "@/lib/process.worker";
@@ -632,6 +633,11 @@ export default function ReaderView() {
       const pageFrames = new PageFrameSource(ready);
       const panelFrames = new PanelFrameSource(undefined, total);
 
+      // Lo ya procesado de este tomo en otra visita: se carga y se sigue desde lo que falta.
+      const key = bookRef.current;
+      const saved = key ? await shelvedPages(key) : [];
+      const store = key && saved.length < total ? await shelf(key) : null;
+
       const worker = new Worker(new URL("../lib/process.worker.ts", import.meta.url), {
         type: "module",
       });
@@ -678,8 +684,13 @@ export default function ReaderView() {
           return;
         }
 
-        const done = msg.page;
+        await accept(msg.page);
+      };
+
+      /** Una página lista, recién procesada o traída de lo guardado. */
+      const accept = async (done: ProcessedPage, fromShelf = false) => {
         live.add(done);
+        if (!fromShelf) void store?.(done);
         sizes[done.index] = { w: done.size[0], h: done.size[1] };
         ready[done.index] = sizes[done.index];
 
@@ -721,7 +732,11 @@ export default function ReaderView() {
       };
 
       try {
-        for (let index = 0; index < total; index++) {
+        for (const page of saved) {
+          if (page.index >= total) break;
+          await accept(page, true);
+        }
+        for (let index = Math.min(saved.length, total); index < total; index++) {
           // Con un par de páginas listas por delante, se espera a que la cámara termine de
           // moverse: la inferencia comparte la placa con el dibujo y, en el celular, el
           // movimiento iba a tirones. Con poco adelanto no se espera, para no dejar al
@@ -761,17 +776,6 @@ export default function ReaderView() {
       setEta(null);
       setArchived(true);
 
-      // Se guarda en el navegador para que la próxima vez abra sin procesar. Por partes y
-      // de fondo, mientras se lee.
-      const key = bookRef.current;
-      const pages = live.pages;
-      if (key) {
-        void import("@/lib/process").then(({ archiveSize, writeArchive }) =>
-          shelve(key, archiveSize(pages), (out) =>
-            writeArchive(pages, { write: (chunk) => out.write(chunk as Uint8Array<ArrayBuffer>) }),
-          ),
-        );
-      }
     },
     [mount],
   );
@@ -800,16 +804,13 @@ export default function ReaderView() {
           throw new ProblemError({ code: "notATome", ext });
         }
 
-        // Un CBZ hay que procesarlo, y eso se hace leyendo; un `.cbza` ya viene listo. Si el
-        // mismo tomo ya se procesó en este navegador, se abre lo guardado.
-        let ready = /\.cbza$/i.test(input.name) ? input : null;
-        if (!ready) ready = await shelved(bookRef.current);
-        if (!ready) {
+        // Un CBZ hay que procesarlo, y eso se hace leyendo; un `.cbza` ya viene listo.
+        if (!/\.cbza$/i.test(input.name)) {
           await build(canvas, input);
           return;
         }
 
-        const source = await CbzSource.open(ready);
+        const source = await CbzSource.open(input);
         const sizes = Array.from({ length: source.pageCount }, () => ({ ...ASSUMED_PAGE }));
         const pageFrames = new PageFrameSource(sizes);
 
