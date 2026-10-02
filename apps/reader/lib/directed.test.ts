@@ -23,10 +23,15 @@ describe("cámara β en el celular", () => {
     expect(pan.ms).toBeGreaterThanOrEqual(2000);
   });
 
-  it("recorre de arriba a abajo una viñeta alta en una pantalla ancha", () => {
+  it("recorre de arriba a abajo una viñeta alta en una pantalla ancha, si entera pierde detalle", () => {
     const pan = directedShot(frame({ x: 0, y: 0, w: 200, h: 1400 }), { w: 1200, h: 700 }).pan!;
     expect(pan.end.y).toBeLessThan(pan.start.y);
     expect(pan.end.x).toBe(pan.start.x);
+  });
+
+  it("en la compu no recorre una viñeta alta que entera ya se ve grande", () => {
+    // 450×1100 en una pantalla de 1600×1000: entera se ve a 0,9 de su resolución.
+    expect(directedShot(frame({ x: 0, y: 0, w: 450, h: 1100 }), { w: 1600, h: 1000 }).pan).toBeUndefined();
   });
 
   it("en el celular no panea una viñeta que entera no queda tan chica", () => {

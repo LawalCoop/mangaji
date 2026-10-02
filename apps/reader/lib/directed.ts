@@ -62,8 +62,11 @@ export function directedShot(frame: ShotFrame, view: Viewport): DirectedShot {
   // Si mostrarla entera la deja chica —una viñeta muy ancha o muy alta en una pantalla de la
   // otra forma, como un celular parado—, se recorre de cerca. Las anchas, de derecha a
   // izquierda, como se lee; las altas, de arriba a abajo.
-  if (coverScale / fitScale >= PAN.minGain) {
-    const maxZoom = view.w >= GENTLE.minWidth ? PAN.maxZoomWide : PAN.maxZoom;
+  // En una pantalla grande, una viñeta alta entera ya se ve casi a resolución completa: solo
+  // se recorre si así pierde detalle.
+  const big = view.w >= GENTLE.minWidth;
+  if (coverScale / fitScale >= PAN.minGain && (!big || fitScale < TOUR.maxScale)) {
+    const maxZoom = big ? PAN.maxZoomWide : PAN.maxZoom;
     const scale = Math.min(coverScale * FIT_MARGIN, fitScale * maxZoom);
     const wide = rect.w * scale > view.w;
     const cx = view.w / 2 - (rect.x + rect.w / 2) * scale;
