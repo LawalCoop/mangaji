@@ -115,4 +115,4 @@ export type DirectedShot = {
  * la pena (`minGain`: entera ocuparía menos de un tercio de lo que podría), cuánto puede
  * acercarse como mucho y cuánto dura según lo que recorre.
  */
-const PAN = { minGain: 3, maxZoom: 2.4, baseMs: 2600, perScreenMs: 2200, maxMs: 9000 };
+const PAN = { minGain: 3, maxZoom: 1.6, baseMs: 2600, perScreenMs: 2200, maxMs: 9000 };
