@@ -32,24 +32,77 @@ export async function isRar(file: Blob): Promise<boolean> {
  * si se la pide de nuevo, así que se guarda la promesa y se reutiliza.
  */
 let ready: Promise<typeof import("libarchive.js").Archive> | null = null;
+/** El worker que creó libarchive para la apertura en curso, para vigilarlo y cortarlo. */
+let current: Worker | null = null;
 
 function archiveLib() {
   ready ??= import("libarchive.js").then(({ Archive }) => {
-    Archive.init({ workerUrl: asset("/libarchive/worker-bundle.js") });
+    Archive.init({
+      getWorker: () => {
+        current = new Worker(asset("/libarchive/worker-bundle.js"), { type: "module" });
+        return current;
+      },
+    });
     return Archive;
   });
   return ready;
 }
 
-/** Páginas del CBR, en orden de lectura y ya descomprimidas. */
+/** Si el arranque —bajar y preparar el descompresor— no responde en este tiempo, se reintenta. */
+const START_MS = 20_000;
+/** Y la descompresión: un margen fijo más un segundo cada tantos bytes del archivo. */
+const EXTRACT = { baseMs: 60_000, bytesPerSecond: 2_000_000 };
+
+/**
+ * Espera `task`, pero no para siempre: si el worker se cae —en el celular, sin memoria— o no
+ * responde, libarchive no avisa y la carga quedaba trabada en "descomprimiendo".
+ */
+function guarded<T>(task: Promise<T>, worker: Worker | null, ms: number, what: string): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const fail = (why: string) => {
+      worker?.terminate();
+      reject(new Error(`${what}: ${why}`));
+    };
+    const timer = setTimeout(() => fail("no respondió"), ms);
+    const onError = (ev: ErrorEvent) => fail(ev.message || "se cayó");
+    worker?.addEventListener("error", onError);
+    task.then(
+      (v) => {
+        clearTimeout(timer);
+        worker?.removeEventListener("error", onError);
+        resolve(v);
+      },
+      (e) => {
+        clearTimeout(timer);
+        worker?.removeEventListener("error", onError);
+        reject(e);
+      },
+    );
+  });
+}
+
 export async function readRar(file: File): Promise<RarEntry[]> {
   const Archive = await archiveLib();
-  const archive = await Archive.open(file);
+
+  // El arranque se reintenta una vez: a veces el worker no termina de cargar y no avisa.
+  let archive: Awaited<ReturnType<typeof Archive.open>> | null = null;
+  for (let attempt = 0; attempt < 2 && !archive; attempt++) {
+    current = null;
+    const opening = Archive.open(file);
+    try {
+      archive = await guarded(opening, null, START_MS, "No se pudo preparar el descompresor");
+    } catch (err) {
+      (current as Worker | null)?.terminate();
+      if (attempt === 1) throw err;
+    }
+  }
+  const worker = current;
 
   try {
     // El listado viene anidado por carpetas; se aplana conservando la ruta, que es lo que
     // define el orden cuando el tomo trae un directorio por capítulo.
-    const flat = await archive.extractFiles();
+    const limit = EXTRACT.baseMs + (file.size / EXTRACT.bytesPerSecond) * 1000;
+    const flat = await guarded(archive!.extractFiles(), worker, limit, "No se pudo descomprimir el archivo");
 
     const found: RarEntry[] = [];
     const walk = (node: Record<string, unknown>, prefix: string) => {
@@ -68,6 +121,6 @@ export async function readRar(file: File): Promise<RarEntry[]> {
     return order.map((name) => found.find((f) => f.name === name)!);
   } finally {
     // Sin cerrar, la próxima apertura encuentra la sesión ocupada.
-    await archive.close();
+    await archive!.close();
   }
 }
