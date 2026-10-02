@@ -12,11 +12,13 @@ export const FIT_MARGIN = 0.94;
  * derecha a izquierda, como se lee, antes de mostrarse entero. El ritmo de lectura también
  * cambia: lo tenso se lee más rápido, lo calmo con más aire.
  */
-export function directedShot(tension: number, rect: Rect, view: Viewport): DirectedShot {
+export function directedShot(frame: ShotFrame, view: Viewport): DirectedShot {
+  const { rect } = frame;
+  const tension = frame.tension ?? 0;
   const fit = (zoom: number) => Camera.fit(rect, view, FIT_MARGIN * zoom);
   const to = fit(1);
   const speed = 1.45 - 0.8 * tension;
-  const move = (ms: number) => [{ to, ms: ms * speed }];
+  const move = (ms: number) => [{ to, ms: ms * speed, at: 0 }];
 
   // Si mostrarla entera la deja chica —una viñeta muy ancha o muy alta en una pantalla de la
   // otra forma, como un celular parado—, se recorre de cerca y recién al final se muestra
@@ -35,16 +37,43 @@ export function directedShot(tension: number, rect: Rect, view: Viewport): Direc
     const end: Transform = wide
       ? { scale, x: pad - rect.x * scale, y: cy }
       : { scale, x: cx, y: view.h - pad - (rect.y + rect.h) * scale };
-    // Lo que se recorre, en pantallas: de eso sale cuánto dura el paneo.
+    // Centrar un punto de la viñeta sin salirse del recorrido.
+    const lo = Math.min(wide ? start.x : start.y, wide ? end.x : end.y);
+    const hi = Math.max(wide ? start.x : start.y, wide ? end.x : end.y);
+    const aim = (r: Rect): Transform => {
+      const c = wide ? view.w / 2 - (r.x + r.w / 2) * scale : view.h / 2 - (r.y + r.h / 2) * scale;
+      const v = Math.min(hi, Math.max(lo, c));
+      return wide ? { scale, x: v, y: cy } : { scale, x: cx, y: v };
+    };
+    const shake = tension >= 0.55 ? 2 + 4 * tension : 0;
+
+    // Con diálogo, la cámara va de globo en globo a medida que aparecen —esperando o tocando—
+    // y termina de recorrer y se aleja cuando ya se leyó todo. Sin diálogo, un paneo de
+    // duración fija según lo que recorre.
+    const reveals = frame.beats.filter((b) => b.reveal).map((b) => b.reveal!);
+    const layers = new Map((frame.layers ?? []).map((l) => [l.id, l.rect]));
+    const stops = reveals.filter((id) => layers.has(id));
+    if (stops.length) {
+      return {
+        from: start,
+        steps: [
+          ...stops.map((id, i) => ({ to: aim(layers.get(id)!), ms: PAN.stopMs, on: id, shake: i === 0 ? shake : 0 })),
+          { to: end, ms: PAN.stopMs, on: HOLD },
+          { to, ms: 800, on: HOLD, after: PAN.stopMs * 0.8 },
+        ],
+        shake: 0,
+        pace: 1.15,
+      };
+    }
     const travel = wide ? (rect.w * scale - view.w) / view.w : (rect.h * scale - view.h) / view.h;
     const panMs = Math.min(PAN.maxMs, PAN.baseMs + travel * PAN.perScreenMs) * speed;
     return {
       from: start,
       steps: [
-        { to: end, ms: panMs },
-        { to, ms: 700 * speed },
+        { to: end, ms: panMs, at: 0 },
+        { to, ms: 700 * speed, at: panMs * 0.8 },
       ],
-      shake: tension >= 0.55 ? 2 + 4 * tension : 0,
+      shake,
       pace: 1.25,
     };
   }
@@ -63,10 +92,27 @@ export function directedShot(tension: number, rect: Rect, view: Viewport): Direc
   return { from: fit(1.07), steps: move(900), shake: 0, pace: 1 };
 }
 
+/** Lo que el plano necesita saber de la viñeta. */
+export type ShotFrame = {
+  rect: Rect;
+  tension?: number;
+  beats: { reveal?: string; hold?: number }[];
+  layers?: { id: string; rect: Rect }[];
+};
+
+/** Disparador de los tramos que esperan a que se termine de leer la viñeta. */
+export const HOLD = "#hold";
+
+/**
+ * Un tramo del plano. Arranca a los `at` ms de empezar la viñeta, o cuando aparece el globo
+ * `on` (o con `HOLD`, cuando ya apareció todo), más `after` ms.
+ */
+export type ShotStep = { to: Transform; ms: number; at?: number; on?: string; after?: number; shake?: number };
+
 /** Un plano de la cámara experimental: dónde arranca y los tramos que recorre. */
 export type DirectedShot = {
   from: Transform;
-  steps: { to: Transform; ms: number }[];
+  steps: ShotStep[];
   shake: number;
   /** Ritmo de lectura de la viñeta: más de 1, más lento. */
   pace: number;
@@ -74,6 +120,7 @@ export type DirectedShot = {
 
 /**
  * El paneo de las viñetas que enteras quedan chicas: desde cuánto se achican para que valga
- * la pena (`minGain`), cuánto puede acercarse como mucho y cuánto dura según lo que recorre.
+ * la pena (`minGain`: entera ocuparía menos de un tercio de lo que podría), cuánto puede
+ * acercarse como mucho, cuánto dura según lo que recorre y cuánto tarda en llegar a cada globo.
  */
-const PAN = { minGain: 1.6, maxZoom: 2.4, baseMs: 900, perScreenMs: 1100, maxMs: 4200 };
+const PAN = { minGain: 3, maxZoom: 2.4, baseMs: 900, perScreenMs: 1100, maxMs: 4200, stopMs: 1300 };

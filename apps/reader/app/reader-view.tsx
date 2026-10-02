@@ -14,7 +14,7 @@ import { DEFAULT_MOOD, MOOD_ORDER, MOODS, type MoodId } from "@/lib/mood";
 import { Music } from "@/lib/music";
 import { bookKey, forget, savedPage, savePage } from "@/lib/progress";
 import { shelf, shelvedPages } from "@/lib/shelf";
-import { directedShot, FIT_MARGIN, type DirectedShot } from "@/lib/directed";
+import { directedShot, FIT_MARGIN, HOLD, type DirectedShot } from "@/lib/directed";
 import type { ProcessedPage } from "@/lib/process";
 import { Stage } from "@/lib/stage";
 import type { Rect } from "@/lib/types";
@@ -315,20 +315,36 @@ export default function ReaderView() {
         let shownPage = -1;
         /** La apertura ocurre una sola vez, al abrir el archivo. */
         let opening = true;
-        /** Cámara experimental: el segundo tramo del movimiento, que arranca al llegar. */
-        let queued: { left: number; to: Transform; ms: number; shake: number }[] = [];
         /**
-         * Los tramos de un plano en cola: cada uno arranca cuando el anterior casi llegó. La
-         * cámara se asienta de a poco, así que esperar a que llegue del todo se sentía como
-         * una pausa entre tramos.
+         * Cámara experimental: los tramos del plano en cola, uno detrás del otro. Los que
+         * esperan un globo (`on`) arrancan cuando aparece, esperando o tocando; los demás,
+         * a tiempo (`left`, en ms desde que arrancó el anterior).
          */
-        const steps = (shot: DirectedShot, wait: number) =>
-          shot.steps.map((st, i) => ({
-            left: i === 0 ? wait : shot.steps[i - 1].ms * moodRef.current.pace * 0.75,
-            to: st.to,
-            ms: st.ms * moodRef.current.pace,
-            shake: i === 0 ? shot.shake : 0,
-          }));
+        let queued: { left: number | null; on?: string; after?: number; to: Transform; ms: number; shake: number }[] = [];
+        const steps = (shot: DirectedShot, wait: number) => {
+          let prevAt = 0;
+          return shot.steps.map((st, i) => {
+            const pace = moodRef.current.pace;
+            let left: number | null = null;
+            if (!st.on) {
+              const at = st.at ?? 0;
+              left = (i === 0 ? wait : 0) + (at - prevAt) * pace;
+              prevAt = at;
+            }
+            return {
+              left,
+              on: st.on,
+              after: (st.after ?? 0) * pace,
+              to: st.to,
+              ms: st.ms * pace,
+              shake: st.shake ?? (i === 0 ? shot.shake : 0),
+            };
+          });
+        };
+        /** Arranca los tramos que esperaban este globo, o el fin de la lectura (`HOLD`). */
+        const arm = (on: string) => {
+          for (const st of queued) if (st.on === on && st.left === null) st.left = st.after ?? 0;
+        };
         /** Cámara experimental: ritmo de lectura de la viñeta actual. */
         let readingPace = 1;
         /** Apariciones de diálogo en curso, avanzadas por el ticker. */
@@ -420,7 +436,7 @@ export default function ReaderView() {
             const cam = fresh.beats[0]?.cam;
             const shot =
               directedRef.current && fresh.tension !== undefined && !director.reducedMotion
-                ? directedShot(fresh.tension, fresh.rect, stage.viewport)
+                ? directedShot(fresh, stage.viewport)
                 : null;
             const { from, to } = shot
               ? { from: shot.from, to: shot.steps[shot.steps.length - 1].to }
@@ -482,6 +498,8 @@ export default function ReaderView() {
           }
           if (ev.type !== "beat") return;
 
+          if (ev.beat.reveal) arm(ev.beat.reveal);
+          if (ev.beat.hold !== undefined) arm(HOLD);
           if (ev.beat.reveal) {
             const id = ev.beat.reveal;
             if (director.reducedMotion || revealed.has(id)) stage.revealDialogue(id, 1);
@@ -512,7 +530,7 @@ export default function ReaderView() {
           director.tick(dt / (moodRef.current.pace * readingPace));
           // Los tramos de la cámara experimental, uno detrás del otro.
           const step = queued[0];
-          if (step) {
+          if (step && step.left !== null) {
             step.left -= dt;
             if (step.left <= 0) {
               stage.camera.glide(step.to, step.ms);
