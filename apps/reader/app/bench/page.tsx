@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useRef, useState } from "react";
-import { asset } from "@/lib/base";
+import { asset } from "../../lib/base";
 
 /**
  * Banco de pruebas del pipeline en el navegador.
@@ -49,7 +49,7 @@ export default function Bench() {
     let bitmap: ImageBitmap;
 
     if (/\.(cbz|cbza|zip)$/i.test(file.name)) {
-      const { CbzSource } = await import("@/lib/archive");
+      const { CbzSource } = await import("../../lib/archive");
       const source = await CbzSource.open(file);
       const index = Math.floor(source.pageCount / 2);
       bitmap = await source.bitmap(index);

@@ -1,8 +1,8 @@
 "use client";
 
 import { useState } from "react";
-import { etaText, useI18n } from "@/lib/i18n";
-import { MOOD_ORDER, type MoodId } from "@/lib/mood";
+import { etaText, useI18n } from "../lib/i18n";
+import { MOOD_ORDER, type MoodId } from "../lib/mood";
 
 /**
  * Controles del lector. Se muestran sobre la página y se apagan solos mientras se lee, para
@@ -45,6 +45,8 @@ export type ToolbarProps = {
   onToggleMode: () => void;
   /** Cámara experimental, que sigue la tensión de cada escena. */
   directed: boolean;
+  shade: boolean;
+  onToggleShade: () => void;
   onToggleDirected: () => void;
 };
 
@@ -202,6 +204,9 @@ export function Toolbar(props: ToolbarProps) {
             </Button>
             <Button onClick={props.onToggleDirected} active={props.directed} title={T.directedTitle}>
               {T.directed}
+            </Button>
+            <Button onClick={props.onToggleShade} active={props.shade} title={T.shadeTitle}>
+              {T.shade}
             </Button>
           </Group>
         )}

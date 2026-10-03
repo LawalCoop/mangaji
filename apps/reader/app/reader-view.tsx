@@ -2,23 +2,23 @@
 
 import { MANIFEST_FILENAME, Page, safeParseManifest, type CameraMove } from "@mangaji/format";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { CbzSource, type ArchiveSource } from "@/lib/archive";
-import { Camera, type Transform, type Viewport } from "@/lib/camera";
-import { Director } from "@/lib/director";
-import { PageFrameSource, PanelFrameSource } from "@/lib/frame-sources";
-import { LiveSource } from "@/lib/live-archive";
-import { download, resolveLink, type DownloadProgress } from "@/lib/remote";
-import { problemText, useI18n } from "@/lib/i18n";
-import { ProblemError, problemOf, type Problem } from "@/lib/notes";
-import { DEFAULT_MOOD, MOOD_ORDER, MOODS, type MoodId } from "@/lib/mood";
-import { Music } from "@/lib/music";
-import { bookKey, forget, savedPage, savePage } from "@/lib/progress";
-import { shelf, shelvedPages, type ShelvedPage } from "@/lib/shelf";
-import { directedShot, FIT_MARGIN, type DirectedShot, type Pan } from "@/lib/directed";
-import type { ProcessedPage } from "@/lib/process";
-import { Stage } from "@/lib/stage";
-import type { Rect } from "@/lib/types";
-import type { ProcessRequest, ProcessResponse } from "@/lib/process.worker";
+import { CbzSource, type ArchiveSource } from "../lib/archive";
+import { Camera, type Transform, type Viewport } from "../lib/camera";
+import { Director } from "../lib/director";
+import { PageFrameSource, PanelFrameSource } from "../lib/frame-sources";
+import { LiveSource } from "../lib/live-archive";
+import { download, resolveLink, type DownloadProgress } from "../lib/remote";
+import { problemText, useI18n } from "../lib/i18n";
+import { ProblemError, problemOf, type Problem } from "../lib/notes";
+import { DEFAULT_MOOD, MOOD_ORDER, MOODS, type MoodId } from "../lib/mood";
+import { Music } from "../lib/music";
+import { bookKey, forget, savedPage, savePage } from "../lib/progress";
+import { shelf, shelvedPages, type ShelvedPage } from "../lib/shelf";
+import { directedShot, FIT_MARGIN, type DirectedShot, type Pan } from "../lib/directed";
+import type { ProcessedPage } from "../lib/process";
+import { Stage } from "../lib/stage";
+import type { Rect } from "../lib/types";
+import type { ProcessRequest, ProcessResponse } from "../lib/process.worker";
 import { Landing } from "./landing";
 import { Processing, type LogLine, type Stage as ProcessStage } from "./processing";
 import { Toolbar } from "./toolbar";
@@ -29,6 +29,9 @@ const ASSUMED_PAGE = { w: 1600, h: 2300 };
 /** Duración del viaje de la cámara entre viñetas de la misma página. */
 const TRAVEL_MS = 520;
 const DIRECTED_KEY = "mangaji:directed";
+const SHADE_KEY = "mangaji:shade";
+/** Con la sombra prendida, lo oscuro que llega a estar lo más lejano de la viñeta enfocada. */
+const SHADE = 0.72;
 /**
  * Con estas páginas listas por delante, el procesamiento espera a que la cámara pare. Si el
  * lector ya está esperando la página siguiente, no espera.
@@ -124,8 +127,27 @@ type Status =
 /** Cuántas páginas mirar hacia atrás para estimar lo que falta. */
 const ETA_WINDOW = 5;
 
-export default function ReaderView() {
+/**
+ * Un tomo que llega ya listo de afuera —el portal de una editorial— en vez de elegirse en la
+ * portada: se abre solo, sin pasar por ella.
+ */
+export type RemoteBook = {
+  open: () => Promise<ArchiveSource>;
+  title: string;
+  /** Para recordar por dónde se va. */
+  key: string;
+  /** Salir del lector: volver a la ficha de la serie, por ejemplo. */
+  exit?: { label: string; onClick: () => void };
+  /** Abrir en esta página (desde 0) en vez de donde se había quedado. */
+  startPage?: number;
+  /** Por dónde se va (página desde 0), para guardarlo afuera: en la cuenta del portal. */
+  onPage?: (page: number, pages: number) => void;
+};
+
+export default function ReaderView({ remote }: { remote?: RemoteBook } = {}) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const remoteRef = useRef(remote);
+  remoteRef.current = remote;
   const engine = useRef<{
     source: ArchiveSource;
     stage: Stage;
@@ -188,6 +210,39 @@ export default function ReaderView() {
       setDirected(on);
     } catch {
       // Sin almacenamiento: queda apagada.
+    }
+  }, []);
+  /**
+   * Sombra: lo lejano a la viñeta que se lee se va a oscuras. Aparte de la cámara β, desde
+   * la barra, y recordada por navegador como ella.
+   */
+  const [shade, setShade] = useState(false);
+  const shadeRef = useRef(false);
+  useEffect(() => {
+    try {
+      const on = localStorage.getItem(SHADE_KEY) === "1";
+      shadeRef.current = on;
+      setShade(on);
+    } catch {
+      // Sin almacenamiento: queda apagada.
+    }
+  }, []);
+  // Va y viene también con un tomo ya abierto.
+  useEffect(() => {
+    const eng = engine.current;
+    if (!eng) return;
+    eng.stage.focusShadow = shade ? SHADE : 0;
+    eng.stage.refocus(eng.director.frame);
+    eng.stage.render();
+  }, [shade]);
+  const toggleShade = useCallback(() => {
+    const on = !shadeRef.current;
+    shadeRef.current = on;
+    setShade(on);
+    try {
+      localStorage.setItem(SHADE_KEY, on ? "1" : "0");
+    } catch {
+      // Sin almacenamiento: dura lo que dure la pestaña.
     }
   }, []);
   const toggleDirected = useCallback(() => {
@@ -418,7 +473,10 @@ export default function ReaderView() {
           const mine = ++token;
           const frame = director.frame;
           const pos = director.positionInPage;
-          if (bookRef.current && resumeRef.current === null) savePage(bookRef.current, frame.page, sizes.length);
+          if (bookRef.current && resumeRef.current === null) {
+            savePage(bookRef.current, frame.page, sizes.length);
+            remoteRef.current?.onPage?.(frame.page, sizes.length);
+          }
           // Si se empezó a avanzar por cuenta propia antes de que llegara la página a retomar,
           // se eligió leer desde el principio: ya no se salta.
           if (resumeRef.current !== null && director.index > 2) {
@@ -633,6 +691,7 @@ export default function ReaderView() {
 
         stage.focusStrength = moodRef.current.focus.shade;
         stage.focusBlur = moodRef.current.focus.blur;
+        stage.focusShadow = shadeRef.current ? SHADE : 0;
 
         tryResume(director);
         engine.current = {
@@ -909,7 +968,17 @@ export default function ReaderView() {
           return;
         }
 
-        const source = await CbzSource.open(input);
+        await openSource(canvas, await CbzSource.open(input));
+      } catch (err) {
+        setStatus({ kind: "error", problem: problemOf(err) });
+      }
+    },
+    [build, mount, teardown],
+  );
+
+  /** Monta una fuente ya abierta: un `.cbza` del dispositivo o un tomo del portal. */
+  const openSource = useCallback(
+    async (canvas: HTMLCanvasElement, source: ArchiveSource) => {
         const sizes = Array.from({ length: source.pageCount }, () => ({ ...ASSUMED_PAGE }));
         const pageFrames = new PageFrameSource(sizes);
 
@@ -928,12 +997,37 @@ export default function ReaderView() {
         }
 
         await mount(canvas, source, sizes, pageFrames, panelFrames);
-      } catch (err) {
-        setStatus({ kind: "error", problem: problemOf(err) });
-      }
     },
-    [build, mount, teardown],
+    [mount],
   );
+
+  // Un tomo del portal se abre solo, apenas está el lienzo.
+  useEffect(() => {
+    if (!remote) return;
+    let cancelled = false;
+    void (async () => {
+      teardown();
+      setStatus({ kind: "loading" });
+      setTitle(remote.title);
+      bookRef.current = remote.key;
+      resumeRef.current = remote.startPage ?? savedPage(remote.key);
+      setResume(null);
+      try {
+        const canvas = canvasRef.current;
+        if (!canvas) throw new Error("Canvas no disponible");
+        const source = await remote.open();
+        if (cancelled) return source.close();
+        await openSource(canvas, source);
+      } catch (err) {
+        if (!cancelled) setStatus({ kind: "error", problem: problemOf(err) });
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+    // Solo al montar: `remote` llega una vez por tomo.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   /**
    * Abre un tomo desde un link: lo baja directo al navegador y sigue como si se lo hubiera
@@ -1040,7 +1134,7 @@ export default function ReaderView() {
     const live = liveRef.current;
     if (!live) return;
 
-    const { packArchive } = await import("@/lib/process");
+    const { packArchive } = await import("../lib/process");
     // Las páginas traídas de lo guardado están en el archivo, sin leer: se leen recién acá.
     const bytes = async (b: Uint8Array | Blob) => (b instanceof Blob ? new Uint8Array(await b.arrayBuffer()) : b);
     const pages = await Promise.all(
@@ -1363,7 +1457,8 @@ export default function ReaderView() {
           página lleva menos que leerla. */}
       {/* Retomar: dónde se sigue, con la salida para empezar de nuevo a mano. */}
       {resume && status.kind === "ready" && (
-        <div className="absolute inset-x-0 top-[max(1.5rem,env(safe-area-inset-top))] z-20 flex justify-center px-4">
+        // Con el botón de salir del portal arriba a la izquierda, el aviso baja para no taparlo.
+        <div className={`absolute inset-x-0 z-20 flex justify-center px-4 ${remote?.exit ? "top-[max(4.25rem,calc(env(safe-area-inset-top)+3.5rem))]" : "top-[max(1.5rem,env(safe-area-inset-top))]"}`}>
           <span className="flex items-center gap-3 rounded-full border border-neutral-700/80 bg-neutral-900/90 py-1.5 pr-1.5 pl-4 text-xs text-neutral-200 backdrop-blur">
             {!resume.ready && <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-[#00D9F5]" />}
             {resume.ready ? t.reader.resumed(resume.page + 1) : t.reader.resuming(resume.page + 1)}
@@ -1379,7 +1474,7 @@ export default function ReaderView() {
       )}
 
       {waiting && !resume && (
-        <div className="pointer-events-none absolute inset-x-0 top-[max(1.5rem,env(safe-area-inset-top))] z-20 flex justify-center px-4">
+        <div className={`pointer-events-none absolute inset-x-0 z-20 flex justify-center px-4 ${remote?.exit ? "top-[max(4.25rem,calc(env(safe-area-inset-top)+3.5rem))]" : "top-[max(1.5rem,env(safe-area-inset-top))]"}`}>
           <span className="flex items-center gap-2 rounded-full border border-neutral-700/80 bg-neutral-900/85 px-4 py-2 text-xs text-neutral-300 backdrop-blur">
             <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-[#00D9F5]" />
             {t.reader.waiting}
@@ -1421,7 +1516,36 @@ export default function ReaderView() {
         </div>
       )}
 
-      {status.kind !== "ready" && status.kind !== "processing" && (
+      {/* Un tomo del portal no pasa por la portada: mientras llega, solo eso; si falla, por qué. */}
+      {remote && status.kind !== "ready" && (
+        <div className="absolute inset-0 flex flex-col items-center justify-center gap-4 px-6 text-center text-neutral-300">
+          {status.kind === "error" ? (
+            <p className="max-w-sm">{problemText(t, status.problem)}</p>
+          ) : (
+            <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-[#00D9F5]" aria-label={remote.title} />
+          )}
+          {remote.exit && status.kind === "error" && (
+            <button type="button" onClick={remote.exit.onClick} className="rounded-full bg-neutral-800 px-5 py-2 text-sm">
+              {remote.exit.label}
+            </button>
+          )}
+        </div>
+      )}
+
+      {/* Salir del lector, junto con el resto de los controles. */}
+      {remote?.exit && status.kind === "ready" && (
+        <button
+          type="button"
+          onClick={remote.exit.onClick}
+          onPointerDown={(e) => e.stopPropagation()}
+          className={`absolute top-[max(0.75rem,env(safe-area-inset-top))] left-3 z-30 flex h-10 items-center gap-2 rounded-full border border-neutral-700/80 bg-neutral-900/85 px-4 text-sm text-neutral-200 backdrop-blur transition-opacity duration-300 ${chrome ? "opacity-100" : "pointer-events-none opacity-0"}`}
+        >
+          <span aria-hidden>←</span>
+          {remote.exit.label}
+        </button>
+      )}
+
+      {!remote && status.kind !== "ready" && status.kind !== "processing" && (
         <div className="absolute inset-0 overflow-y-auto">
           <Landing
             status={status.kind === "error" ? "error" : status.kind === "loading" ? "loading" : "idle"}
@@ -1468,6 +1592,8 @@ export default function ReaderView() {
           onToggleMode={toggleMode}
           directed={directed}
           onToggleDirected={toggleDirected}
+          shade={shade}
+          onToggleShade={toggleShade}
         />
       )}
     </main>

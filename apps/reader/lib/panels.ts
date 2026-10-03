@@ -1,6 +1,6 @@
 import type { Detection } from "./detector";
 import { insidePolygon } from "./dialogue";
-import { open, type Point } from "./vision";
+import { open, polygonArea, type Point } from "./vision";
 
 /**
  * Qué detecciones de viñeta se quedan.
@@ -43,12 +43,43 @@ const SPLIT_OVERLAP = 0.5;
 /** Qué parte del ancho de la más angosta tienen que compartir para ser la misma columna. */
 const SAME_COLUMN = 0.85;
 
+/** Muestras por lado de la grilla con la que se mide cuánto se pisan dos siluetas. */
+const OVERLAP_SAMPLES = 48;
+
+/**
+ * Qué parte de la silueta más chica cae dentro de la otra, contando puntos de una grilla
+ * sobre la zona donde se cruzan sus cajas.
+ */
+function shapeOverlap(a: Detection, b: Detection): number {
+  const x0 = Math.max(a.bbox.x, b.bbox.x);
+  const y0 = Math.max(a.bbox.y, b.bbox.y);
+  const x1 = Math.min(a.bbox.x + a.bbox.w, b.bbox.x + b.bbox.w);
+  const y1 = Math.min(a.bbox.y + a.bbox.h, b.bbox.y + b.bbox.h);
+  if (x1 <= x0 || y1 <= y0) return 0;
+  const sx = (x1 - x0) / OVERLAP_SAMPLES;
+  const sy = (y1 - y0) / OVERLAP_SAMPLES;
+  let both = 0;
+  for (let i = 0; i < OVERLAP_SAMPLES; i++) {
+    for (let j = 0; j < OVERLAP_SAMPLES; j++) {
+      const px = x0 + (i + 0.5) * sx;
+      const py = y0 + (j + 0.5) * sy;
+      if (insidePoly(px, py, a.polygon as [number, number][]) && insidePoly(px, py, b.polygon as [number, number][])) both++;
+    }
+  }
+  const smaller = Math.min(polygonArea(a.polygon), polygonArea(b.polygon));
+  return smaller > 0 ? (both * sx * sy) / smaller : 0;
+}
+
 /**
  * Une una viñeta que el modelo vio partida en dos que se pisan: en una viñeta alta suele
  * proponer una que va de arriba hasta casi abajo y otra desde un poco más abajo hasta el
  * final. Se pisan menos que lo que pide `dedupe` y quedaban las dos: la cámara mostraba la
  * misma viñeta dos veces. Solo en una misma columna: de costado, el modelo propone cajas que
  * se pisan entre viñetas angostas vecinas que sí son distintas.
+ *
+ * Lo que se mide es cuánto se pisan las siluetas, no las cajas: con un corte en diagonal, las
+ * cajas de dos viñetas vecinas se pisan más de la mitad aunque las viñetas casi no se toquen
+ * (tomo 49 de Kingdom, p. 7), y se unían.
  */
 export function joinSplit(panels: Detection[]): Detection[] {
   const out = [...panels];
@@ -60,6 +91,7 @@ export function joinSplit(panels: Detection[]): Detection[] {
         const b = out[j].bbox;
         const inter = intersection(a, b);
         if (!inter || inter / Math.min(a.w * a.h, b.w * b.h) < SPLIT_OVERLAP) continue;
+        if (shapeOverlap(out[i], out[j]) < SPLIT_OVERLAP) continue;
         const shareX = (Math.min(a.x + a.w, b.x + b.w) - Math.max(a.x, b.x)) / Math.min(a.w, b.w);
         if (shareX < SAME_COLUMN) continue;
         const x = Math.min(a.x, b.x);

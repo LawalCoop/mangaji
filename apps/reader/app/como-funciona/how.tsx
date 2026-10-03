@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { DocumentTitle, useI18n } from "@/lib/i18n";
+import { DocumentTitle, useI18n } from "../../lib/i18n";
 import { CYAN, INK, MAGENTA, PAPER, SiteFooter, SiteHeader, TONE, panel, screenPanel } from "../site";
 import {
   DetectScene,

@@ -6,6 +6,7 @@ import type { Detector, Detection } from "./detector";
 import { lift, type Sprite } from "./dialogue";
 import { balloonTail } from "./tail";
 import { jaggedness, smooth, tension, tilt } from "./look";
+import { ENTER_MS, revealBeats } from "./beats";
 
 /**
  * Hasta qué tamaño se prueba levantar el texto de un globo entero, como fracción de la
@@ -26,18 +27,6 @@ import { polygonArea, type Point } from "./vision";
 
 /** Descarta fragmentos espurios: una viñeta real nunca es tan chica. */
 const MIN_PANEL_AREA = 0.02;
-
-const ENTER_MS = 450;
-const REVEAL_MS = 300;
-const TAIL_MS = 600;
-/**
- * Cuánto se deja leer cada globo antes del siguiente, según cuánto texto tiene.
- *
- * Antes iba de 0,65 a 2,8 s y entre dos globos de la misma viñeta pasaba 1,5 s en el caso
- * típico: con el dedo, esperando, se sentía lento. Se lee más rápido de lo que se escribe.
- */
-const READ_MS = { min: 250, max: 1600 };
-const READ_SCALE = 160_000;
 
 /**
  * Una página ya procesada, lista para leerse.
@@ -63,8 +52,6 @@ export type ProcessedPage = {
 export type PageReporter = (note: Note) => void;
 
 
-const readMs = (ink: number) =>
-  Math.round(Math.min(Math.max(READ_MS.min + ink * READ_SCALE, READ_MS.min), READ_MS.max));
 
 /** Cuánta tinta y qué tan alineados están los trazos: de ahí salen la cámara y el efecto. */
 function measure(ctx: OffscreenCanvasRenderingContext2D, polygon: Point[], pageArea: number) {
@@ -306,12 +293,7 @@ export async function processPage(
     const fx = effect(look);
     if (fx) beats.push({ t: Math.max(ENTER_MS - 80, 0), ms: 420, fx });
 
-    let t = ENTER_MS;
-    for (const balloon of withSprite) {
-      beats.push({ t, ms: REVEAL_MS, reveal: balloon.id });
-      t += REVEAL_MS + readMs(balloon.inkArea);
-    }
-    beats.push({ t, ms: 0, hold: TAIL_MS });
+    beats.push(...revealBeats(withSprite));
 
     return {
       id: `${pageId}.k${position}`,

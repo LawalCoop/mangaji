@@ -1,7 +1,7 @@
 "use client";
 
-import { DocumentTitle, useI18n } from "@/lib/i18n";
-import { LEGAL, LEGAL_EMAIL } from "@/lib/legal";
+import { DocumentTitle, useI18n } from "../../lib/i18n";
+import { LEGAL, LEGAL_EMAIL } from "../../lib/legal";
 import { INK, SiteFooter, SiteHeader, TONE, panel } from "../site";
 
 /**

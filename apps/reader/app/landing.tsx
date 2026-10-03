@@ -2,9 +2,9 @@
 
 import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
-import { asset } from "@/lib/base";
-import { useI18n } from "@/lib/i18n";
-import { SAMPLE_PATH } from "@/lib/sample";
+import { asset } from "../lib/base";
+import { useI18n } from "../lib/i18n";
+import { SAMPLE_PATH } from "../lib/sample";
 import { ReadingDemo } from "./reading-demo";
 import { CYAN, INK, MAGENTA, PAPER, SiteFooter, SiteHeader, TONE, panel, screenPanel } from "./site";
 

@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import type { Messages } from "@/lib/i18n";
+import type { Messages } from "../../lib/i18n";
 import { PANELS, type Pt } from "../reading-demo";
 import { CYAN, INK, MAGENTA, PAPER } from "../site";
 

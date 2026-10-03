@@ -254,6 +254,20 @@ describe("viñeta vista partida en dos", () => {
     expect(joinSplit([frame(0.9, 0, 0, 500, 400), frame(0.9, 0, 380, 500, 400)])).toHaveLength(2);
   });
 
+  it("no une dos viñetas separadas por un corte en diagonal (tomo 49 de Kingdom, p. 7)", () => {
+    // Las cajas se pisan dos tercios de la de abajo; las siluetas, nada.
+    const shape = (polygon: [number, number][]) => {
+      const xs = polygon.map((p) => p[0]);
+      const ys = polygon.map((p) => p[1]);
+      const x = Math.min(...xs);
+      const y = Math.min(...ys);
+      return { cls: "frame" as const, conf: 0.95, polygon, bbox: { x, y, w: Math.max(...xs) - x, h: Math.max(...ys) - y } };
+    };
+    const top = shape([[0, 0], [400, 0], [400, 500], [0, 700]]);
+    const bottom = shape([[0, 710], [400, 510], [400, 800], [0, 800]]);
+    expect(joinSplit([top, bottom])).toHaveLength(2);
+  });
+
   it("no une dos viñetas angostas de una misma fila aunque sus cajas se pisen", () => {
     expect(joinSplit([frame(0.97, 270, 879, 297, 756), frame(0.96, 157, 873, 244, 767)])).toHaveLength(2);
   });

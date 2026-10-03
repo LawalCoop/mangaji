@@ -137,6 +137,28 @@ export class Detector {
     return new Detector(ort, panels, text);
   }
 
+  /**
+   * Arma el detector con un runtime y modelos que ya tiene quien llama: en el servidor,
+   * onnxruntime-node con los archivos del disco. El lector usa `load`.
+   */
+  static async create(
+    ort: typeof Ort,
+    panelBytes: Uint8Array,
+    textBytes: Uint8Array,
+    executionProviders: string[] = ["cpu"],
+    extra: Partial<Ort.InferenceSession.SessionOptions> = {},
+  ): Promise<Detector> {
+    const options: Ort.InferenceSession.SessionOptions = {
+      executionProviders,
+      graphOptimizationLevel: "all",
+      logSeverityLevel: 3,
+      ...extra,
+    };
+    const panels = await ort.InferenceSession.create(panelBytes, options);
+    const text = await ort.InferenceSession.create(textBytes, options);
+    return new Detector(ort, panels, text);
+  }
+
   async release(): Promise<void> {
     await this.#panels.release();
     await this.#text.release();

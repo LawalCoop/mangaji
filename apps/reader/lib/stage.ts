@@ -52,6 +52,17 @@ function paperColor(bitmap: ImageBitmap): number {
 }
 /** A qué fracción de la resolución se arman el desenfoque y la máscara del foco. */
 const FOCUS_SCALE = 4;
+/** Cuánto de la página (su lado mayor) llega la luz alrededor de la viñeta, con la sombra. */
+const SHADOW_REACH = 0.12;
+
+/** Un color hacia el negro, en la proporción dada. */
+function darken(color: number, amount: number): number {
+  const k = 1 - amount;
+  const r = Math.round(((color >> 16) & 255) * k);
+  const g = Math.round(((color >> 8) & 255) * k);
+  const b = Math.round((color & 255) * k);
+  return (r << 16) | (g << 8) | b;
+}
 /**
  * Cuánto se atenúa el diálogo de las viñetas que no son la activa.
  *
@@ -85,6 +96,12 @@ export class Stage {
    * transición larga disimula el efecto mejor que una angosta.
    */
   focusFeather = 180;
+  /**
+   * Además del desenfoque, una sombra que crece con la distancia a la viñeta enfocada (la
+   * opción "sombra" de la barra). Quedan tres planos: la viñeta nítida, las vecinas desenfocadas y lo lejano a
+   * oscuras. En 0, sin sombra; es lo oscuro que llega a estar lo más lejano.
+   */
+  focusShadow = 0;
 
   #app: Application;
   #world = new Container();
@@ -113,6 +130,11 @@ export class Stage {
   #overlayCanvas: HTMLCanvasElement | null = null;
   /** La silueta de la viñeta con borde suave, que se recorta de la capa de encima. */
   #holeCanvas: HTMLCanvasElement | null = null;
+  /** Cercanía a la viñeta enfocada, para la sombra: blanco cerca, nada lejos. */
+  #nearCanvas: HTMLCanvasElement | null = null;
+  #shadeCanvas: HTMLCanvasElement | null = null;
+  /** El tono del papel de la página actual, para oscurecer también lo que queda fuera de ella. */
+  #paper = 0xffffff;
   #overlayTexture: Texture | null = null;
   /** Página desenfocada a un cuarto de resolución, por página y ajuste. */
   #blurredPages = new Map<number, { key: string; canvas: HTMLCanvasElement }>();
@@ -182,7 +204,8 @@ export class Stage {
       this.#evict(frame.page);
       // El fondo toma el tono del papel: cuando el encuadre se sale de la hoja, en vez de
       // un corte contra el negro parece que la página siguiera.
-      this.#app.renderer.background.color = paperColor(bitmap);
+      this.#paper = paperColor(bitmap);
+      this.#app.renderer.background.color = this.#paper;
     }
 
     const focused =
@@ -190,7 +213,7 @@ export class Stage {
 
     this.#art.texture = this.#texture(frame.page, bitmap);
     if (focused) {
-      const key = `${frame.page}:${frame.id}:${this.focusStrength}:${this.focusBlur}:${this.focusFeather}`;
+      const key = `${frame.page}:${frame.id}:${this.focusStrength}:${this.focusBlur}:${this.focusFeather}:${this.focusShadow}`;
       if (key !== this.#focusKey) {
         this.#composeFocus(frame, bitmap);
         this.#focusKey = key;
@@ -198,6 +221,7 @@ export class Stage {
     } else {
       this.#focusKey = "";
       this.#blurred.visible = false;
+      this.#app.renderer.background.color = this.#paper;
     }
 
     this.#placeDialogue(frame);
@@ -397,6 +421,54 @@ export class Stage {
     this.#app.destroy(true, { children: true });
   }
 
+  /**
+   * La sombra sobre la capa del entorno: nada junto a la viñeta, y de a poco
+   * más oscura con la distancia. La cercanía es la silueta engordada y muy desenfocada; la
+   * sombra, una capa negra a la que se le resta esa cercanía.
+   */
+  #shade(ox: CanvasRenderingContext2D, frame: Frame, sw: number, sh: number, side: number): void {
+    const canvas = (current: HTMLCanvasElement | null) => {
+      if (current && current.width === sw && current.height === sh) return current;
+      const c = document.createElement("canvas");
+      c.width = sw;
+      c.height = sh;
+      return c;
+    };
+    this.#nearCanvas = canvas(this.#nearCanvas);
+    this.#shadeCanvas = canvas(this.#shadeCanvas);
+
+    // Hasta dónde llega la luz alrededor de la viñeta, en píxeles de la página.
+    const reach = side * SHADOW_REACH;
+    const nx = this.#nearCanvas.getContext("2d")!;
+    nx.setTransform(1, 0, 0, 1, 0, 0);
+    nx.filter = "none";
+    nx.clearRect(0, 0, sw, sh);
+    nx.setTransform(1 / FOCUS_SCALE, 0, 0, 1 / FOCUS_SCALE, 0, 0);
+    nx.filter = `blur(${reach / FOCUS_SCALE / 2}px)`;
+    nx.fillStyle = "#fff";
+    nx.strokeStyle = "#fff";
+    nx.lineJoin = "round";
+    nx.lineWidth = reach;
+    nx.beginPath();
+    frame.polygon!.forEach(([x, y], i) => (i === 0 ? nx.moveTo(x, y) : nx.lineTo(x, y)));
+    nx.closePath();
+    nx.fill();
+    nx.stroke();
+    nx.filter = "none";
+
+    const dx = this.#shadeCanvas.getContext("2d")!;
+    dx.setTransform(1, 0, 0, 1, 0, 0);
+    dx.globalCompositeOperation = "source-over";
+    dx.clearRect(0, 0, sw, sh);
+    dx.fillStyle = `rgba(0, 0, 0, ${this.focusShadow})`;
+    dx.fillRect(0, 0, sw, sh);
+    dx.globalCompositeOperation = "destination-out";
+    dx.drawImage(this.#nearCanvas, 0, 0);
+    dx.globalCompositeOperation = "source-over";
+
+    ox.drawImage(this.#shadeCanvas, 0, 0);
+  }
+
   /** Arma el foco de una viñeta: el entorno desenfocado, con el hueco de su silueta. */
   #composeFocus(frame: Frame, bitmap: ImageBitmap): void {
     const { width, height } = bitmap;
@@ -469,7 +541,10 @@ export class Stage {
     ox.globalCompositeOperation = "destination-out";
     ox.drawImage(hole, 0, 0);
     ox.globalCompositeOperation = "source-over";
+    if (this.focusShadow > 0) this.#shade(ox, frame, sw, sh, Math.max(width, height));
     this.#overlayTexture!.source.update();
+    // Fuera de la página también: si no, más allá del borde quedaba el papel claro.
+    this.#app.renderer.background.color = this.focusShadow > 0 ? darken(this.#paper, this.focusShadow) : this.#paper;
 
     // Apagado con un tinte: equivale a la capa negra semitransparente de antes.
     this.#blurred.texture = this.#overlayTexture!;

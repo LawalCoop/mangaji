@@ -1,5 +1,5 @@
-import { DocumentTitle } from "@/lib/i18n";
-import { APP_JSON_LD } from "@/lib/seo";
+import { DocumentTitle } from "../lib/i18n";
+import { APP_JSON_LD } from "../lib/seo";
 import ReaderView from "./reader-view";
 
 export default function Home() {

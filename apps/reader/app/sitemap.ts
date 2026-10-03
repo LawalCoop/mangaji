@@ -1,5 +1,5 @@
 import type { MetadataRoute } from "next";
-import { HOME, HOW, LEGAL, SITE_URL } from "@/lib/seo";
+import { HOME, HOW, LEGAL, SITE_URL } from "../lib/seo";
 
 // La exportación estática necesita que el sitemap se arme una sola vez, al compilar.
 export const dynamic = "force-static";

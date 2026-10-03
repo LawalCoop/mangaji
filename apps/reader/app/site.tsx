@@ -1,9 +1,9 @@
 "use client";
 
 import Link from "next/link";
-import { asset } from "@/lib/base";
-import { LANGS, useI18n } from "@/lib/i18n";
-import { LAWAL_URL, REPO_URL } from "@/lib/seo";
+import { asset } from "../lib/base";
+import { LANGS, useI18n } from "../lib/i18n";
+import { LAWAL_URL, REPO_URL } from "../lib/seo";
 
 /**
  * Lo que comparten las páginas del sitio: la paleta, el marco de los cuadros, el
@@ -42,7 +42,7 @@ export const screenPanel = {
 /** Trama de puntos, el gris del manga. */
 export const TONE = `radial-gradient(circle at 1px 1px, ${INK}2e 1.6px, transparent 0) 0 0 / 9px 9px`;
 
-export { LAWAL_URL, REPO_URL } from "@/lib/seo";
+export { LAWAL_URL, REPO_URL } from "../lib/seo";
 
 /** Encabezado: la marca, un link a la otra página y el idioma. */
 export function SiteHeader({ link }: { link: { href: string; label: string } }) {

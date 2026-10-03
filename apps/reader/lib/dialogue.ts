@@ -384,6 +384,11 @@ export async function lift(
   pageArea: number,
   balloons: Point[][] = [],
   maxArea = MAX_TEXT_AREA_RATIO,
+  /**
+   * Lo marcó una persona en el corrector, no el modelo: alcanza con que haya tinta. Unos
+   * puntos suspensivos no se reparten como letras y el filtro de siempre los descarta.
+   */
+  trusted = false,
 ): Promise<Sprite | null> {
   const { x, y, w, h } = text.bbox;
   if (w * h > maxArea * pageArea) return null; // es dibujo, no diálogo
@@ -426,7 +431,7 @@ export async function lift(
     w: Math.min(Math.ceil(w), cw),
     h: Math.min(Math.ceil(h), ch),
   };
-  const measured = inkOf(px, cw, ch, seed, text.light);
+  const measured = inkOf(px, cw, ch, seed, text.light, trusted);
   if (!measured) return null;
   const { alpha, paper } = measured;
 
@@ -479,13 +484,14 @@ export function inkOf(
   h: number,
   seed: Rect,
   light = false,
+  trusted = false,
 ): { alpha: Uint8Array; paper: number | Rgb } | null {
   // Letra clara sobre fondo oscuro —lo que encontró la pasada en negativo— se mide solo por
   // color. Por brillo se leía al revés: el fondo negro pasaba por letras y se tapaba de
   // blanco, dejando un rectángulo blanco en el dibujo.
   if (light) {
     const byColor = inkByColor(px, w, h, seed);
-    return byColor && readable(byColor.alpha, w, seed) ? byColor : null;
+    return byColor && readable(byColor.alpha, w, seed, trusted) ? byColor : null;
   }
   // El orden importa, porque cualquiera de las dos puede dar un falso positivo. Por brillo,
   // un globo rosa cuenta como papel y los pedazos de cielo que entran en la caja pasan por
@@ -504,7 +510,7 @@ export function inkOf(
   const order = isColoredBox(px, w, seed) ? [byColor, byLight] : [byLight, byColor];
   for (const measure of order) {
     const found = measure();
-    if (found && readable(found.alpha, w, seed)) return found;
+    if (found && readable(found.alpha, w, seed, trusted)) return found;
   }
   return null;
 }
@@ -560,11 +566,15 @@ function forRing(seed: Rect, visit: (x: number, y: number) => void): void {
   }
 }
 
-/** ¿Hay tinta, y está repartida como letras? */
-function readable(alpha: Uint8Array, w: number, seed: Rect): boolean {
+/** Píxeles de tinta que alcanzan cuando el texto lo marcó una persona: unos puntos suspensivos. */
+const MIN_TRUSTED_INK = 12;
+
+/** ¿Hay tinta, y está repartida como letras? Si lo marcó una persona, alcanza con que haya. */
+function readable(alpha: Uint8Array, w: number, seed: Rect, trusted = false): boolean {
   const inked = crop(alpha, w, seed);
   let ink = 0;
   for (const a of inked) if (a > 40) ink++;
+  if (trusted) return ink >= MIN_TRUSTED_INK;
   return ink / inked.length >= 0.005 && looksLikeText(inked, seed.w, seed.h);
 }
 

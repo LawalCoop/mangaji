@@ -2,9 +2,9 @@ import type { Metadata, Viewport } from "next";
 import { Anton, Zen_Kaku_Gothic_New } from "next/font/google";
 import "./globals.css";
 import { Analytics } from "./analytics";
-import { I18nProvider } from "@/lib/i18n";
-import { HOME, LAWAL_URL, SITE_URL, pageMetadata } from "@/lib/seo";
-import { asset } from "@/lib/base";
+import { I18nProvider } from "../lib/i18n";
+import { HOME, LAWAL_URL, SITE_URL, pageMetadata } from "../lib/seo";
+import { asset } from "../lib/base";
 
 /** Condensada y pesada: el peso de una onomatopeya. Se usa solo en titulares. */
 const display = Anton({

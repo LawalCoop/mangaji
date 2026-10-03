@@ -1,8 +1,8 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { etaText, noteText, useI18n, type Messages } from "@/lib/i18n";
-import type { Note } from "@/lib/notes";
+import { etaText, noteText, useI18n, type Messages } from "../lib/i18n";
+import type { Note } from "../lib/notes";
 import { TONE } from "./site";
 
 /**
