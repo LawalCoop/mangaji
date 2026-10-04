@@ -23,6 +23,7 @@ import type { ProcessRequest, ProcessResponse } from "../lib/process.worker";
 import { Landing } from "./landing";
 import { Processing, type LogLine, type Preview, type Stage as ProcessStage } from "./processing";
 import { Toolbar } from "./toolbar";
+import { DemoView } from "./demo-view";
 import { CPU_2D } from "../lib/canvas";
 
 /** Hasta que la página se decodifica no se sabe su tamaño; esto evita un encuadre en cero. */
@@ -210,6 +211,12 @@ export default function ReaderView({ remote }: { remote?: RemoteBook } = {}) {
   const motionUntil = useRef(0);
 
   const [status, setStatus] = useState<Status>({ kind: "idle" });
+  /** Modo demo (`?demo=on`): cuenta el proceso página por página, para charlas y stands. */
+  const [demo, setDemo] = useState(false);
+  useEffect(() => {
+    const v = new URLSearchParams(window.location.search).get("demo");
+    setDemo(v === "on" || v === "1");
+  }, []);
   const [title, setTitle] = useState("");
   /** El tomo abierto, para anotar por dónde se va. */
   const bookRef = useRef<string | null>(null);
@@ -1766,7 +1773,16 @@ export default function ReaderView({ remote }: { remote?: RemoteBook } = {}) {
         </div>
       )}
 
-      {status.kind === "ready" && (
+      {demo && status.kind === "ready" && engine.current?.panelFrames && (
+        <DemoView
+          source={engine.current.source}
+          frames={engine.current.panelFrames}
+          title={title}
+          onExit={remote?.exit?.onClick ?? closeBook}
+        />
+      )}
+
+      {status.kind === "ready" && !demo && (
         <Toolbar
           visible={chrome}
           onActivity={poke}

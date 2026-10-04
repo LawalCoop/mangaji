@@ -43,6 +43,8 @@ export class PageFrameSource implements FrameSource {
 export class PanelFrameSource implements FrameSource {
   #frames: Frame[] = [];
   #pages = 0;
+  /** Lo que se sabe de cada página, entero: lo usa el modo demo para contar el proceso. */
+  #pageData: Manifest["pages"][number][] = [];
   /** Cuántas páginas va a tener el tomo, que se sabe antes de procesarlas. */
   #expected: number;
   #complete: boolean;
@@ -60,6 +62,7 @@ export class PanelFrameSource implements FrameSource {
   /** Suma los encuadres de una página recién procesada. Llegan en orden. */
   append(page: Manifest["pages"][number], pageIndex: number): void {
     this.#pages = Math.max(this.#pages, pageIndex + 1);
+    this.#pageData[pageIndex] = page;
     for (const panel of page.panels) {
       this.#frames.push({
         id: panel.id,
@@ -80,6 +83,16 @@ export class PanelFrameSource implements FrameSource {
         }),
       } satisfies Frame);
     }
+  }
+
+  /** La página procesada, si ya está. */
+  pageData(index: number): Manifest["pages"][number] | undefined {
+    return this.#pageData[index];
+  }
+
+  /** Cuántas páginas va a tener el tomo. */
+  get pageTotal(): number {
+    return Math.max(this.#expected, this.#pages);
   }
 
   /** No llegan más páginas: de acá en más el final de la fuente es el final del tomo. */
