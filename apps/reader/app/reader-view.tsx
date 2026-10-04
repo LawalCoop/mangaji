@@ -1034,6 +1034,29 @@ export default function ReaderView({ remote }: { remote?: RemoteBook } = {}) {
     [build, mount, teardown],
   );
 
+  /**
+   * Cierra el tomo y vuelve a la portada. Suelta todo —páginas, texturas, el procesamiento si
+   * estaba en curso— como al abrir otro; por dónde se iba ya quedó anotado.
+   */
+  const closeBook = useCallback(() => {
+    fetchAbort.current?.abort();
+    teardown();
+    liveRef.current = null;
+    bookRef.current = null;
+    resumeRef.current = null;
+    setResume(null);
+    setBuilt(null);
+    setEta(null);
+    setArchived(false);
+    setFetching(null);
+    setTitle("");
+    setStatus({ kind: "idle" });
+    // Sin el `?url=` que lo abrió: si no, recargar la portada lo volvería a abrir.
+    if (new URLSearchParams(window.location.search).has("url")) {
+      window.history.replaceState(null, "", window.location.pathname);
+    }
+  }, [teardown]);
+
   /** Monta una fuente ya abierta: un `.cbza` del dispositivo o un tomo del portal. */
   const openSource = useCallback(
     async (canvas: HTMLCanvasElement, source: ArchiveSource) => {
@@ -1517,7 +1540,7 @@ export default function ReaderView({ remote }: { remote?: RemoteBook } = {}) {
       {/* Retomar: dónde se sigue, con la salida para empezar de nuevo a mano. */}
       {resume && status.kind === "ready" && (
         // Con el botón de salir del portal arriba a la izquierda, el aviso baja para no taparlo.
-        <div className={`absolute inset-x-0 z-20 flex justify-center px-4 ${remote?.exit ? "top-[max(4.25rem,calc(env(safe-area-inset-top)+3.5rem))]" : "top-[max(1.5rem,env(safe-area-inset-top))]"}`}>
+        <div className={`absolute inset-x-0 z-20 flex justify-center px-4 top-[max(4.25rem,calc(env(safe-area-inset-top)+3.5rem))]`}>
           <span className="flex items-center gap-3 rounded-full border border-neutral-700/80 bg-neutral-900/90 py-1.5 pr-1.5 pl-4 text-xs text-neutral-200 backdrop-blur">
             {!resume.ready && <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-[#00D9F5]" />}
             {resume.ready ? t.reader.resumed(resume.page + 1) : t.reader.resuming(resume.page + 1)}
@@ -1533,7 +1556,7 @@ export default function ReaderView({ remote }: { remote?: RemoteBook } = {}) {
       )}
 
       {waiting && !resume && (
-        <div className={`pointer-events-none absolute inset-x-0 z-20 flex justify-center px-4 ${remote?.exit ? "top-[max(4.25rem,calc(env(safe-area-inset-top)+3.5rem))]" : "top-[max(1.5rem,env(safe-area-inset-top))]"}`}>
+        <div className={`pointer-events-none absolute inset-x-0 z-20 flex justify-center px-4 top-[max(4.25rem,calc(env(safe-area-inset-top)+3.5rem))]`}>
           <span className="flex items-center gap-2 rounded-full border border-neutral-700/80 bg-neutral-900/85 px-4 py-2 text-xs text-neutral-300 backdrop-blur">
             <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-[#00D9F5]" />
             {t.reader.waiting}
@@ -1592,6 +1615,22 @@ export default function ReaderView({ remote }: { remote?: RemoteBook } = {}) {
       )}
 
       {/* Salir del lector, junto con el resto de los controles. */}
+      {/* Cerrar el tomo y volver a la portada, junto con el resto de los controles. */}
+      {!remote && (status.kind === "ready" || status.kind === "processing") && (
+        <button
+          type="button"
+          onClick={closeBook}
+          onPointerDown={(e) => e.stopPropagation()}
+          aria-label={t.reader.close}
+          title={t.reader.close}
+          className={`absolute top-[max(0.75rem,env(safe-area-inset-top))] left-3 z-30 flex size-10 items-center justify-center rounded-full border border-neutral-700/80 bg-neutral-900/85 text-neutral-200 backdrop-blur transition-opacity duration-300 hover:bg-neutral-800 ${chrome || status.kind === "processing" ? "opacity-100" : "pointer-events-none opacity-0"}`}
+        >
+          <svg viewBox="0 0 24 24" aria-hidden className="size-5" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round">
+            <path d="M6 6l12 12M18 6 6 18" />
+          </svg>
+        </button>
+      )}
+
       {remote?.exit && status.kind === "ready" && (
         <button
           type="button"
