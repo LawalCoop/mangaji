@@ -1,6 +1,7 @@
-import { Application, BlurFilter, Container, Graphics, Sprite, Texture, TilingSprite } from "pixi.js";
+import { Application, BlurFilter, Container, Graphics, Sprite, Texture, TilingSprite, UPDATE_PRIORITY } from "pixi.js";
 import { Camera, type Transform } from "./camera";
 import type { Frame, Rect } from "./types";
+import { PAGE_SPAN } from "./memory";
 
 /**
  * La superficie de render. Dibuja un encuadre —un recorte de una página— aplicando la
@@ -13,7 +14,8 @@ import type { Frame, Rect } from "./types";
  */
 
 /** Texturas vivas alrededor de la página actual. Cada página son ~4 MP en VRAM. */
-const TEXTURE_LIMIT = 5;
+/** Páginas a cada lado de la actual que conservan su textura en la placa. */
+const TEXTURE_LIMIT = PAGE_SPAN;
 
 /**
  * Tono del papel de una página, tomado de sus bordes.
@@ -58,6 +60,8 @@ const SHADOW_REACH = 0.12;
 const SHADOW_PAD = 0.8;
 /** Con el mosaico de fondo, más: la sombra tiene que cubrir todo lo que se ve alrededor. */
 const SHADOW_PAD_BACKDROP = 1.4;
+/** A cuánto de la página se arma la sombra: es un degradé suave, alcanza con muy poco. */
+const SHADE_SCALE = 16;
 
 /**
  * El mosaico del fondo, en píxeles de pantalla: alto de cada tapa, separación y celda de la
@@ -165,9 +169,20 @@ export class Stage {
   #overlayCanvas: HTMLCanvasElement | null = null;
   /** La silueta de la viñeta con borde suave, que se recorta de la capa de encima. */
   #holeCanvas: HTMLCanvasElement | null = null;
+  /**
+   * La sombra, aparte del desenfoque: un degradé suave, así que se arma a muy baja
+   * resolución y cuesta poco rehacerla y subirla a la placa en cada viñeta.
+   */
+  #shadeSprite = new Sprite();
+  #shadeTexture: Texture | null = null;
+  #shadeCanvas: HTMLCanvasElement | null = null;
   /** Cercanía a la viñeta enfocada, para la sombra: blanco cerca, nada lejos. */
   #nearCanvas: HTMLCanvasElement | null = null;
-  #shadeCanvas: HTMLCanvasElement | null = null;
+  /** Papel alrededor de la hoja, para que la sombra siga afuera sin corte (sin fondo de tapas). */
+  #paperFrame = new Graphics();
+  /** Hay que volver a dibujar: algo cambió desde el último cuadro. */
+  #dirty = true;
+  #lastView = { x: NaN, y: NaN, scale: NaN };
   /** El tono del papel de la página actual, para oscurecer también lo que queda fuera de ella. */
   #paper = 0xffffff;
   #overlayTexture: Texture | null = null;
@@ -196,8 +211,25 @@ export class Stage {
 
   private constructor(app: Application) {
     this.#app = app;
-    this.#world.addChild(this.#art, this.#blurred, this.#dialogue);
+    this.#world.addChild(this.#paperFrame, this.#art, this.#blurred, this.#shadeSprite, this.#dialogue);
     this.#blurred.visible = false;
+    this.#shadeSprite.visible = false;
+    // Se dibuja solo cuando algo cambió: con la página quieta, esperando que se lea, no hay
+    // nada que dibujar, y redibujar sesenta veces por segundo varias capas del tamaño de la
+    // pantalla le quitaba al celular lo que necesita para mover la cámara sin tirones.
+    app.ticker.remove(app.render, app);
+    app.ticker.add(
+      () => {
+        if (!this.#dirty) return;
+        this.#dirty = false;
+        app.render();
+      },
+      undefined,
+      UPDATE_PRIORITY.LOW,
+    );
+    app.renderer.on("resize", () => {
+      this.#dirty = true;
+    });
     // Los efectos van fuera del mundo: se dibujan sobre la pantalla y no los arrastra la
     // cámara, que es lo que hace que un destello se sienta como un golpe y no como algo
     // pegado a la página.
@@ -241,6 +273,7 @@ export class Stage {
    * enfocada, así avanzar dentro de la misma página no re-sube el arte entero.
    */
   show(frame: Frame, bitmap: ImageBitmap): void {
+    this.#dirty = true;
     if (frame.page !== this.#page) {
       this.#bitmaps.set(frame.page, bitmap);
       this.#page = frame.page;
@@ -264,7 +297,7 @@ export class Stage {
     } else {
       this.#focusKey = "";
       this.#blurred.visible = false;
-      this.#app.renderer.background.color = this.#paper;
+      this.#clearShade();
     }
 
     this.#placeDialogue(frame);
@@ -276,6 +309,7 @@ export class Stage {
    * compita con la página.
    */
   setBackdrop(cover: ImageBitmap | null): void {
+    this.#dirty = true;
     this.#backdropTexture?.destroy(true);
     this.#backdropTexture = null;
     if (!cover) {
@@ -314,15 +348,28 @@ export class Stage {
   #fitBackdrop(): void {
     if (!this.#backdrop.visible) return;
     const { width, height } = this.#app.screen;
-    if (this.#backdrop.width !== width) this.#backdrop.width = width;
-    if (this.#backdrop.height !== height) this.#backdrop.height = height;
+    if (this.#backdrop.width !== width || this.#backdrop.height !== height) {
+      this.#backdrop.width = width;
+      this.#backdrop.height = height;
+      this.#dirty = true;
+    }
   }
 
   /** Aplica la cámara. Llamar después de `camera.update()`. */
   render(t: Transform = this.camera.transform): void {
     this.#fitBackdrop();
-    this.#world.position.set(t.x, t.y);
-    this.#world.scale.set(t.scale);
+    const v = this.#lastView;
+    if (t.x !== v.x || t.y !== v.y || t.scale !== v.scale) {
+      this.#world.position.set(t.x, t.y);
+      this.#world.scale.set(t.scale);
+      this.#lastView = { x: t.x, y: t.y, scale: t.scale };
+      this.#dirty = true;
+    }
+  }
+
+  /** Pide un cuadro: para cambios que no pasan por la cámara. */
+  invalidate(): void {
+    this.#dirty = true;
   }
 
   /** Rehace el foco cuando cambian sus ajustes sin cambiar de encuadre. */
@@ -341,6 +388,7 @@ export class Stage {
    * mejor: el desenfoque se lee como suciedad, no como algo que falta.
    */
   setDialogue(entries: { id: string; bitmap: ImageBitmap; rect: Rect }[]): void {
+    this.#dirty = true;
     // Con su textura: si no, cada página dejaba la de sus globos ocupando la placa.
     this.#dialogue.removeChildren().forEach((child) => child.destroy({ texture: true, textureSource: true }));
     this.#sprites.clear();
@@ -368,6 +416,7 @@ export class Stage {
    * golpe en un revoltijo.
    */
   playFx(kind: string, power: number, ms: number): void {
+    this.#dirty = true;
     if (kind === "shake") {
       this.camera.shake(power, ms);
       return;
@@ -384,11 +433,22 @@ export class Stage {
    * se abre sobre ella.
    */
   openCurtain(ms: number, color = 0x101014): void {
+    this.#dirty = true;
     this.#curtainState = { left: ms, total: Math.max(ms, 1), color };
   }
 
   /** Avanza los efectos en curso. Devuelve si queda alguno vivo. */
   updateFx(dtMs: number): boolean {
+    // Mientras haya un efecto, y un cuadro más al terminar para borrarlo.
+    const alive = this.#stepFx(dtMs);
+    if (alive || this.#fxAlive) this.#dirty = true;
+    this.#fxAlive = alive;
+    return alive;
+  }
+
+  #fxAlive = false;
+
+  #stepFx(dtMs: number): boolean {
     this.#flash.clear();
     this.#streaks.clear();
     this.#curtain.clear();
@@ -474,6 +534,7 @@ export class Stage {
 
   /** Muestra un bloque de diálogo. `progress` de 0 a 1 anima su entrada. */
   revealDialogue(id: string, progress: number): void {
+    this.#dirty = true;
     const sprite = this.#sprites.get(id);
     if (!sprite) return;
     const t = Math.min(Math.max(progress, 0), 1);
@@ -510,33 +571,46 @@ export class Stage {
     this.#blurredPages.clear();
     this.#overlayTexture?.destroy(true);
     this.#overlayTexture = null;
+    this.#shadeTexture?.destroy(true);
+    this.#shadeTexture = null;
+    this.#backdropTexture?.destroy(true);
+    this.#backdropTexture = null;
     this.#app.destroy(true, { children: true });
   }
 
   /**
-   * La sombra sobre la capa del entorno: nada junto a la viñeta, y de a poco
-   * más oscura con la distancia. La cercanía es la silueta engordada y muy desenfocada; la
-   * sombra, una capa negra a la que se le resta esa cercanía.
+   * La sombra: nada junto a la viñeta, y de a poco más oscura con la distancia, también fuera
+   * de la hoja. Es la silueta engordada y muy desenfocada restada de una capa negra; como es
+   * un degradé suave, se arma a un dieciseisavo y se estira, y rehacerla en cada viñeta no
+   * le cuesta nada al celular.
    */
-  #shade(ox: CanvasRenderingContext2D, frame: Frame, sw: number, sh: number, side: number, pad: number): void {
-    const canvas = (current: HTMLCanvasElement | null) => {
-      if (current && current.width === sw && current.height === sh) return current;
-      const c = document.createElement("canvas");
-      c.width = sw;
-      c.height = sh;
-      return c;
+  #composeShade(frame: Frame, width: number, height: number): void {
+    const side = Math.max(width, height);
+    const pad = Math.round(side * (this.#backdrop.visible ? SHADOW_PAD_BACKDROP : SHADOW_PAD));
+    const sw = Math.max(1, Math.round((width + 2 * pad) / SHADE_SCALE));
+    const sh = Math.max(1, Math.round((height + 2 * pad) / SHADE_SCALE));
+    const fresh = (c: HTMLCanvasElement | null) => {
+      if (c && c.width === sw && c.height === sh) return c;
+      const n = document.createElement("canvas");
+      n.width = sw;
+      n.height = sh;
+      return n;
     };
-    this.#nearCanvas = canvas(this.#nearCanvas);
-    this.#shadeCanvas = canvas(this.#shadeCanvas);
+    this.#nearCanvas = fresh(this.#nearCanvas);
+    const resized = this.#shadeCanvas?.width !== sw || this.#shadeCanvas?.height !== sh;
+    this.#shadeCanvas = fresh(this.#shadeCanvas);
+    if (resized || !this.#shadeTexture) {
+      this.#shadeTexture?.destroy(true);
+      this.#shadeTexture = Texture.from(this.#shadeCanvas);
+    }
 
-    // Hasta dónde llega la luz alrededor de la viñeta, en píxeles de la página.
     const reach = side * SHADOW_REACH;
     const nx = this.#nearCanvas.getContext("2d")!;
     nx.setTransform(1, 0, 0, 1, 0, 0);
     nx.filter = "none";
     nx.clearRect(0, 0, sw, sh);
-    nx.setTransform(1 / FOCUS_SCALE, 0, 0, 1 / FOCUS_SCALE, pad, pad);
-    nx.filter = `blur(${reach / FOCUS_SCALE / 2}px)`;
+    nx.setTransform(1 / SHADE_SCALE, 0, 0, 1 / SHADE_SCALE, pad / SHADE_SCALE, pad / SHADE_SCALE);
+    nx.filter = `blur(${reach / SHADE_SCALE / 2}px)`;
     nx.fillStyle = "#fff";
     nx.strokeStyle = "#fff";
     nx.lineJoin = "round";
@@ -557,8 +631,36 @@ export class Stage {
     dx.globalCompositeOperation = "destination-out";
     dx.drawImage(this.#nearCanvas, 0, 0);
     dx.globalCompositeOperation = "source-over";
+    this.#shadeTexture.source.update();
 
-    ox.drawImage(this.#shadeCanvas, 0, 0);
+    this.#shadeSprite.texture = this.#shadeTexture;
+    this.#shadeSprite.setSize(width + 2 * pad, height + 2 * pad);
+    this.#shadeSprite.position.set(-pad, -pad);
+    this.#shadeSprite.visible = true;
+
+    // El papel alrededor de la hoja, con el mismo apagado que el entorno de la página; con la
+    // tapa de fondo no, que la taparía: ahí la sombra cae sobre el mosaico.
+    const level = 1 - this.focusStrength;
+    this.#paperFrame.clear();
+    if (!this.#backdrop.visible) {
+      const paper = darken(this.#paper, 1 - level);
+      this.#paperFrame
+        .rect(-pad, -pad, width + 2 * pad, pad)
+        .rect(-pad, height, width + 2 * pad, pad)
+        .rect(-pad, 0, pad, height)
+        .rect(width, 0, pad, height)
+        .fill(paper);
+    }
+    // Más allá, el tono del borde: papel con la sombra entera y el apagado.
+    const far = 1 - (1 - this.focusShadow) * level;
+    this.#app.renderer.background.color = this.#backdrop.visible ? this.#paper : darken(this.#paper, far);
+  }
+
+  /** Saca la sombra: vuelve el fondo de papel liso. */
+  #clearShade(): void {
+    this.#shadeSprite.visible = false;
+    this.#paperFrame.clear();
+    this.#app.renderer.background.color = this.#paper;
   }
 
   /** Arma el foco de una viñeta: el entorno desenfocado, con el hueco de su silueta. */
@@ -566,14 +668,6 @@ export class Stage {
     const { width, height } = bitmap;
     const sw = Math.max(1, Math.round(width / FOCUS_SCALE));
     const sh = Math.max(1, Math.round(height / FOCUS_SCALE));
-    // Con sombra, la capa sale de la página: alrededor va papel que se oscurece con el mismo
-    // degradé, y así no hay corte entre la hoja y lo que queda afuera.
-    // Con la tapa de fondo, el margen va transparente —la sombra cae sobre el mosaico— y más
-    // grande, porque más allá el mosaico se ve tal cual.
-    const padShare = this.#backdrop.visible ? SHADOW_PAD_BACKDROP : SHADOW_PAD;
-    const pad = this.focusShadow > 0 ? Math.round((Math.max(width, height) * padShare) / FOCUS_SCALE) : 0;
-    const ow = sw + 2 * pad;
-    const oh = sh + 2 * pad;
 
     // La página desenfocada, una vez por página: está borrosa de todos modos, así que a un
     // cuarto se ve igual.
@@ -591,10 +685,10 @@ export class Stage {
     }
 
     let overlay = this.#overlayCanvas;
-    if (!overlay || overlay.width !== ow || overlay.height !== oh) {
+    if (!overlay || overlay.width !== sw || overlay.height !== sh) {
       overlay = document.createElement("canvas");
-      overlay.width = ow;
-      overlay.height = oh;
+      overlay.width = sw;
+      overlay.height = sh;
       this.#overlayCanvas = overlay;
       this.#overlayTexture?.destroy(true);
       this.#overlayTexture = Texture.from(overlay);
@@ -603,8 +697,8 @@ export class Stage {
     ox.setTransform(1, 0, 0, 1, 0, 0);
     ox.globalCompositeOperation = "source-over";
     ox.filter = "none";
-    ox.clearRect(0, 0, ow, oh);
-    ox.drawImage(page.canvas, pad, pad);
+    ox.clearRect(0, 0, sw, sh);
+    ox.drawImage(page.canvas, 0, 0);
 
     // El hueco: la silueta dilatada y con borde suave. Se dibuja en un lienzo aparte y recién
     // después se recorta de la capa: desenfocar y recortar en un mismo paso a veces no
@@ -613,18 +707,18 @@ export class Stage {
     // Trazar con grosor además de rellenar dilata la silueta, y así el desvanecido cae por
     // fuera de la viñeta en vez de repartirse a ambos lados de su borde.
     let hole = this.#holeCanvas;
-    if (!hole || hole.width !== ow || hole.height !== oh) {
+    if (!hole || hole.width !== sw || hole.height !== sh) {
       hole = document.createElement("canvas");
-      hole.width = ow;
-      hole.height = oh;
+      hole.width = sw;
+      hole.height = sh;
       this.#holeCanvas = hole;
     }
     const hx = hole.getContext("2d")!;
     const feather = this.focusFeather / FOCUS_SCALE;
     hx.setTransform(1, 0, 0, 1, 0, 0);
     hx.filter = "none";
-    hx.clearRect(0, 0, ow, oh);
-    hx.setTransform(1 / FOCUS_SCALE, 0, 0, 1 / FOCUS_SCALE, pad, pad);
+    hx.clearRect(0, 0, sw, sh);
+    hx.setTransform(1 / FOCUS_SCALE, 0, 0, 1 / FOCUS_SCALE, 0, 0);
     hx.filter = feather > 0 ? `blur(${feather / 3}px)` : "none";
     hx.fillStyle = "#fff";
     hx.strokeStyle = "#fff";
@@ -641,32 +735,19 @@ export class Stage {
     ox.globalCompositeOperation = "destination-out";
     ox.drawImage(hole, 0, 0);
     ox.globalCompositeOperation = "source-over";
-    if (pad > 0) {
-      // El papel de alrededor, después del hueco: si el hueco lo recortara, junto a la viñeta
-      // enfocada se vería el fondo oscuro por fuera de la hoja. Con mosaico, nada: se ve él.
-      if (!this.#backdrop.visible) {
-        ox.fillStyle = `#${this.#paper.toString(16).padStart(6, "0")}`;
-        ox.beginPath();
-        ox.rect(0, 0, ow, oh);
-        ox.rect(pad, pad, sw, sh);
-        ox.fill("evenodd");
-      }
-      this.#shade(ox, frame, ow, oh, Math.max(width, height), pad);
-    }
     this.#overlayTexture!.source.update();
 
     // Apagado con un tinte: equivale a la capa negra semitransparente de antes.
     this.#blurred.texture = this.#overlayTexture!;
-    this.#blurred.setSize(width + 2 * pad * FOCUS_SCALE, height + 2 * pad * FOCUS_SCALE);
-    this.#blurred.position.set(-pad * FOCUS_SCALE, -pad * FOCUS_SCALE);
+    this.#blurred.setSize(width, height);
     const level = Math.round(255 * (1 - this.focusStrength));
     this.#blurred.tint = (level << 16) | (level << 8) | level;
     this.#blurred.visible = true;
-    // Más allá de la capa, el tono de su borde: papel con la sombra entera y el tinte.
-    const far = 1 - (1 - this.focusShadow) * (1 - this.focusStrength);
-    this.#app.renderer.background.color = pad > 0 ? darken(this.#paper, far) : this.#paper;
 
+    if (this.focusShadow > 0) this.#composeShade(frame, width, height);
+    else this.#clearShade();
   }
+
 
 
   /**

@@ -1,9 +1,10 @@
 import { MANIFEST_FILENAME, type Manifest } from "@mangaji/format";
 import type { ArchiveSource } from "./archive";
 import { pageOfSprite } from "./live-archive";
+import { PAGE_SPAN } from "./memory";
 
 /** Cuántas páginas decodificadas se mantienen vivas alrededor de la actual. */
-const CACHE_LIMIT = 5;
+const CACHE_LIMIT = PAGE_SPAN;
 
 /**
  * Un tomo ya procesado que vive en un servidor: el manifest, el arte sin diálogo y los

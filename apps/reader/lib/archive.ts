@@ -1,5 +1,6 @@
 import { pageOfSprite } from "./live-archive";
 import { ProblemError } from "./notes";
+import { PAGE_SPAN } from "./memory";
 /**
  * Acceso al archivo de manga desde el hilo principal.
  *
@@ -26,7 +27,7 @@ export interface ArchiveSource {
 type Pending = { resolve: (v: unknown) => void; reject: (e: Error) => void };
 
 /** Cuántas páginas decodificadas se mantienen vivas alrededor de la actual. */
-const CACHE_LIMIT = 5;
+const CACHE_LIMIT = PAGE_SPAN;
 
 export class CbzSource implements ArchiveSource {
   #worker: Worker;

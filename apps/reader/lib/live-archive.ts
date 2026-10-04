@@ -1,6 +1,7 @@
 import type { ArchiveSource } from "./archive";
 import type { ProcessedPage } from "./process";
 import type { ShelvedPage } from "./shelf";
+import { PAGE_SPAN } from "./memory";
 
 /**
  * Un archivo que todavía se está escribiendo.
@@ -15,7 +16,7 @@ import type { ShelvedPage } from "./shelf";
  */
 
 /** Cuántas páginas decodificadas se mantienen vivas alrededor de la actual. */
-const CACHE_LIMIT = 5;
+const CACHE_LIMIT = PAGE_SPAN;
 
 export class LiveSource implements ArchiveSource {
   #pages: (ProcessedPage | ShelvedPage)[] = [];
