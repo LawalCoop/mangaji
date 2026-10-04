@@ -33,6 +33,10 @@ export type Mood = {
     wave: OscillatorType;
     /** Apertura del filtro en Hz. Bajo = velado y lejano; alto = presente y filoso. */
     bright: number;
+    /** Con qué instrumento suena la melodía y la armonía. */
+    instrument: "pad" | "keys" | "strings" | "brass";
+    /** La sala: cuánto dura la reverberación, en segundos, y cuánto se oye. */
+    room: { seconds: number; wet: number };
   };
 };
 
@@ -53,6 +57,8 @@ export const MOODS: Record<MoodId, Mood> = {
       drive: 0,
       wave: "sine",
       bright: 700,
+      instrument: "pad",
+      room: { seconds: 3.6, wet: 0.34 },
     },
   },
   chill: {
@@ -69,6 +75,8 @@ export const MOODS: Record<MoodId, Mood> = {
       drive: 0.1,
       wave: "triangle",
       bright: 1200,
+      instrument: "keys",
+      room: { seconds: 2.2, wet: 0.2 },
     },
   },
   tense: {
@@ -86,6 +94,8 @@ export const MOODS: Record<MoodId, Mood> = {
       drive: 0.35,
       wave: "sawtooth",
       bright: 900,
+      instrument: "strings",
+      room: { seconds: 2.8, wet: 0.24 },
     },
   },
   war: {
@@ -103,6 +113,8 @@ export const MOODS: Record<MoodId, Mood> = {
       drive: 0.85,
       wave: "sawtooth",
       bright: 2200,
+      instrument: "brass",
+      room: { seconds: 1.7, wet: 0.14 },
     },
   },
 };
