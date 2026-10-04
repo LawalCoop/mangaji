@@ -30,6 +30,7 @@ const ASSUMED_PAGE = { w: 1600, h: 2300 };
 const TRAVEL_MS = 520;
 const DIRECTED_KEY = "mangaji:directed";
 const SHADE_KEY = "mangaji:shade";
+const BACKDROP_KEY = "mangaji:backdrop";
 /** Con la sombra prendida, lo oscuro que llega a estar lo más lejano de la viñeta enfocada. */
 const SHADE = 0.72;
 /**
@@ -235,6 +236,47 @@ export default function ReaderView({ remote }: { remote?: RemoteBook } = {}) {
     eng.stage.refocus(eng.director.frame);
     eng.stage.render();
   }, [shade]);
+  /** Fondo: la tapa del tomo en trama, detrás de la página. Desde la barra, recordado. */
+  const [backdrop, setBackdropOn] = useState(false);
+  const backdropRef = useRef(false);
+  useEffect(() => {
+    try {
+      const on = localStorage.getItem(BACKDROP_KEY) === "1";
+      backdropRef.current = on;
+      setBackdropOn(on);
+    } catch {
+      // Sin almacenamiento: queda apagado.
+    }
+  }, []);
+  /** Pone o saca la tapa de fondo en el motor que esté andando. */
+  const applyBackdrop = useCallback(async (on: boolean) => {
+    const eng = engine.current;
+    if (!eng) return;
+    if (!on) eng.stage.setBackdrop(null);
+    else {
+      try {
+        // La tapa es la primera página; si no se puede leer, se queda sin fondo.
+        eng.stage.setBackdrop(await eng.source.bitmap(0));
+      } catch {
+        eng.stage.setBackdrop(null);
+      }
+    }
+    eng.stage.refocus(eng.director.frame);
+    eng.stage.render();
+  }, []);
+  useEffect(() => {
+    void applyBackdrop(backdrop);
+  }, [backdrop, applyBackdrop]);
+  const toggleBackdrop = useCallback(() => {
+    const on = !backdropRef.current;
+    backdropRef.current = on;
+    setBackdropOn(on);
+    try {
+      localStorage.setItem(BACKDROP_KEY, on ? "1" : "0");
+    } catch {
+      // Sin almacenamiento: dura lo que dure la pestaña.
+    }
+  }, []);
   const toggleShade = useCallback(() => {
     const on = !shadeRef.current;
     shadeRef.current = on;
@@ -710,6 +752,8 @@ export default function ReaderView({ remote }: { remote?: RemoteBook } = {}) {
             source.close();
           },
         };
+        // La tapa de fondo, si está prendida: con el motor ya armado.
+        if (backdropRef.current) void applyBackdrop(true);
 
         setStatus({ kind: "ready" });
         void draw(true);
@@ -1594,6 +1638,8 @@ export default function ReaderView({ remote }: { remote?: RemoteBook } = {}) {
           onToggleDirected={toggleDirected}
           shade={shade}
           onToggleShade={toggleShade}
+          backdrop={backdrop}
+          onToggleBackdrop={toggleBackdrop}
         />
       )}
     </main>

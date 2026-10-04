@@ -47,6 +47,8 @@ export type ToolbarProps = {
   directed: boolean;
   shade: boolean;
   onToggleShade: () => void;
+  backdrop: boolean;
+  onToggleBackdrop: () => void;
   onToggleDirected: () => void;
 };
 
@@ -207,6 +209,9 @@ export function Toolbar(props: ToolbarProps) {
             </Button>
             <Button onClick={props.onToggleShade} active={props.shade} title={T.shadeTitle}>
               {T.shade}
+            </Button>
+            <Button onClick={props.onToggleBackdrop} active={props.backdrop} title={T.backdropTitle}>
+              {T.backdrop}
             </Button>
           </Group>
         )}

@@ -57,6 +57,52 @@ const SHADOW_REACH = 0.12;
 /** Cuánto sale la capa de sombra fuera de la página, en proporción a su lado mayor. */
 const SHADOW_PAD = 0.8;
 
+/** Celda de la trama del fondo, en píxeles de pantalla. */
+const HALFTONE_CELL = 7;
+/** Cuánto contraste conserva la tapa en la trama: lo justo para adivinarla, no para mirarla. */
+const HALFTONE_CONTRAST = 0.65;
+
+/**
+ * La tapa como trama de puntos, a la manera de los tonos de imprenta del manga: puntos más
+ * grandes donde la tapa es más oscura, de un tono apenas más oscuro que el papel, en una
+ * grilla girada como la de una imprenta.
+ */
+function halftone(cover: ImageBitmap, paper: number, w: number, cell: number): HTMLCanvasElement {
+  const h = Math.round((w * cover.height) / cover.width);
+  const cols = Math.ceil(w / cell);
+  const rows = Math.ceil(h / cell);
+  const small = document.createElement("canvas");
+  small.width = cols;
+  small.height = rows;
+  const sx = small.getContext("2d", { willReadFrequently: true })!;
+  sx.drawImage(cover, 0, 0, cols, rows);
+  const px = sx.getImageData(0, 0, cols, rows).data;
+
+  const out = document.createElement("canvas");
+  out.width = w;
+  out.height = h;
+  const ox = out.getContext("2d")!;
+  ox.fillStyle = `#${paper.toString(16).padStart(6, "0")}`;
+  ox.fillRect(0, 0, w, h);
+  ox.fillStyle = `#${darken(paper, 0.3).toString(16).padStart(6, "0")}`;
+  for (let r = 0; r < rows; r++) {
+    for (let c = 0; c < cols; c++) {
+      const i = (r * cols + c) * 4;
+      const light = (px[i] * 0.299 + px[i + 1] * 0.587 + px[i + 2] * 0.114) / 255;
+      const soft = 0.5 + (light - 0.5) * HALFTONE_CONTRAST;
+      const radius = (cell / 2) * Math.sqrt(1 - soft) * 1.15;
+      if (radius < 0.4) continue;
+      // Filas corridas media celda: la grilla queda a 45°, como la trama de imprenta.
+      const x = (c + (r % 2 ? 0.5 : 0)) * cell;
+      const y = (r + 0.5) * cell;
+      ox.beginPath();
+      ox.arc(x, y, radius, 0, Math.PI * 2);
+      ox.fill();
+    }
+  }
+  return out;
+}
+
 /** Un color hacia el negro, en la proporción dada. */
 function darken(color: number, amount: number): number {
   const k = 1 - amount;
@@ -142,6 +188,14 @@ export class Stage {
   #blurredPages = new Map<number, { key: string; canvas: HTMLCanvasElement }>();
   #focusKey = "";
 
+  /**
+   * El fondo: la tapa del tomo en trama, quieta detrás de la página como un papel tapiz.
+   * Opcional ("fondo" en la barra); sin ella, el fondo es el color del papel.
+   */
+  #backdrop = new Sprite();
+  #backdropTexture: Texture | null = null;
+  #backdropSize = { w: 1, h: 1 };
+
   /** Capa de efectos, en coordenadas de pantalla. */
   #fx = new Container();
   #flash = new Graphics();
@@ -164,7 +218,8 @@ export class Stage {
     this.#invert.blendMode = "difference";
     this.#invert.visible = false;
     this.#fx.addChild(this.#streaks, this.#invert, this.#flash, this.#curtain);
-    app.stage.addChild(this.#world, this.#fx);
+    this.#backdrop.visible = false;
+    app.stage.addChild(this.#backdrop, this.#world, this.#fx);
   }
 
   static async create(canvas: HTMLCanvasElement): Promise<Stage> {
@@ -224,13 +279,53 @@ export class Stage {
       this.#focusKey = "";
       this.#blurred.visible = false;
       this.#app.renderer.background.color = this.#paper;
+      this.#backdrop.tint = 0xffffff;
     }
 
     this.#placeDialogue(frame);
   }
 
+  /**
+   * Pone de fondo la tapa en trama, o lo saca con `null`. La trama se arma una vez: puntos
+   * apenas más oscuros que el papel, con poco contraste, para que se lea como textura y no
+   * compita con la página.
+   */
+  setBackdrop(cover: ImageBitmap | null): void {
+    this.#backdropTexture?.destroy(true);
+    this.#backdropTexture = null;
+    if (!cover) {
+      this.#backdrop.visible = false;
+      return;
+    }
+    // Al tamaño con que se va a ver: si se estira, los puntos crecen y se pierde la tapa.
+    const { width, height } = this.#app.screen;
+    const k = Math.max(width / cover.width, height / cover.height);
+    const res = Math.min(window.devicePixelRatio || 1, 2);
+    const canvas = halftone(cover, this.#paper, Math.round(cover.width * k * res), HALFTONE_CELL * res);
+    this.#backdropTexture = Texture.from(canvas);
+    this.#backdropSize = { w: canvas.width, h: canvas.height };
+    this.#backdrop.texture = this.#backdropTexture;
+    this.#backdrop.visible = true;
+    this.#fitBackdrop();
+    this.#focusKey = "";
+  }
+
+  get hasBackdrop(): boolean {
+    return this.#backdrop.visible;
+  }
+
+  /** Cubre la pantalla entera, sin deformar, centrada. */
+  #fitBackdrop(): void {
+    if (!this.#backdrop.visible) return;
+    const { width, height } = this.#app.screen;
+    const k = Math.max(width / this.#backdropSize.w, height / this.#backdropSize.h);
+    this.#backdrop.setSize(this.#backdropSize.w * k, this.#backdropSize.h * k);
+    this.#backdrop.position.set((width - this.#backdropSize.w * k) / 2, (height - this.#backdropSize.h * k) / 2);
+  }
+
   /** Aplica la cámara. Llamar después de `camera.update()`. */
   render(t: Transform = this.camera.transform): void {
+    this.#fitBackdrop();
     this.#world.position.set(t.x, t.y);
     this.#world.scale.set(t.scale);
   }
@@ -478,7 +573,10 @@ export class Stage {
     const sh = Math.max(1, Math.round(height / FOCUS_SCALE));
     // Con sombra, la capa sale de la página: alrededor va papel que se oscurece con el mismo
     // degradé, y así no hay corte entre la hoja y lo que queda afuera.
-    const pad = this.focusShadow > 0 ? Math.round((Math.max(width, height) * SHADOW_PAD) / FOCUS_SCALE) : 0;
+    // Con la tapa de fondo no: el margen de papel la taparía. Ahí la página se apoya sobre el
+    // fondo, y es el fondo entero el que se oscurece.
+    const pad =
+      this.focusShadow > 0 && !this.#backdrop.visible ? Math.round((Math.max(width, height) * SHADOW_PAD) / FOCUS_SCALE) : 0;
     const ow = sw + 2 * pad;
     const oh = sh + 2 * pad;
 
@@ -568,8 +666,9 @@ export class Stage {
     this.#blurred.tint = (level << 16) | (level << 8) | level;
     this.#blurred.visible = true;
     // Más allá de la capa, el tono de su borde: papel con la sombra entera y el tinte.
-    this.#app.renderer.background.color =
-      pad > 0 ? darken(this.#paper, 1 - (1 - this.focusShadow) * (1 - this.focusStrength)) : this.#paper;
+    const far = 1 - (1 - this.focusShadow) * (1 - this.focusStrength);
+    this.#app.renderer.background.color = pad > 0 ? darken(this.#paper, far) : this.#paper;
+    this.#backdrop.tint = this.focusShadow > 0 ? darken(0xffffff, far) : 0xffffff;
   }
 
 
