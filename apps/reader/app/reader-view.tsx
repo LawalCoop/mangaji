@@ -736,7 +736,10 @@ export default function ReaderView({ remote }: { remote?: RemoteBook } = {}) {
             motionUntil.current = performance.now() + 1400 * moodRef.current.pace;
             stage.render();
           } catch (err) {
-            if (mine === token) setStatus({ kind: "error", problem: problemOf(err) });
+            if (mine === token) {
+              console.error("[mangaji]", err);
+              setStatus({ kind: "error", problem: problemOf(err) });
+            }
           }
         };
 
@@ -858,6 +861,7 @@ export default function ReaderView({ remote }: { remote?: RemoteBook } = {}) {
         setStatus({ kind: "ready" });
         void draw(true);
       } catch (err) {
+        console.error("[mangaji]", err);
         setStatus({ kind: "error", problem: problemOf(err) });
       }
     },
@@ -1128,6 +1132,7 @@ export default function ReaderView({ remote }: { remote?: RemoteBook } = {}) {
 
         await openSource(canvas, await CbzSource.open(input));
       } catch (err) {
+        console.error("[mangaji]", err);
         setStatus({ kind: "error", problem: problemOf(err) });
       }
     },
@@ -1200,7 +1205,10 @@ export default function ReaderView({ remote }: { remote?: RemoteBook } = {}) {
         if (cancelled) return source.close();
         await openSource(canvas, source);
       } catch (err) {
-        if (!cancelled) setStatus({ kind: "error", problem: problemOf(err) });
+        if (!cancelled) {
+          console.error("[mangaji]", err);
+          setStatus({ kind: "error", problem: problemOf(err) });
+        }
       }
     })();
     return () => {

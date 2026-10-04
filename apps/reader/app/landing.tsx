@@ -55,6 +55,11 @@ export function Landing({ status, message, onFile, onUrl, download }: Props) {
   const [linkOpen, setLinkOpen] = useState(false);
   // En el celular, una barra fija con el botón de abrir cuando el panel de carga no se ve.
   const dropZone = useRef<HTMLElement>(null);
+  const alertRef = useRef<HTMLParagraphElement>(null);
+  // Si se vuelve acá por un error, que se vea: el mensaje queda más abajo de la portada.
+  useEffect(() => {
+    if (status === "error" && message) alertRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
+  }, [status, message]);
   const [dockVisible, setDockVisible] = useState(false);
   useEffect(() => {
     const el = dropZone.current;
@@ -432,6 +437,7 @@ export function Landing({ status, message, onFile, onUrl, download }: Props) {
             </div>
 
             <p
+              ref={alertRef}
               className="text-center text-[12.5px] font-medium leading-relaxed sm:text-[14px] lg:col-span-2 lg:mx-auto lg:mt-10 lg:max-w-[46em]"
               style={{ color: "#5A5A62" }}
               role={status === "error" ? "alert" : undefined}
