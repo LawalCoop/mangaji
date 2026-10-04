@@ -17,6 +17,7 @@ import { shelf, shelvedPages, type ShelvedPage } from "../lib/shelf";
 import { directedShot, FIT_MARGIN, type DirectedShot, type Pan } from "../lib/directed";
 import type { ProcessedPage } from "../lib/process";
 import { Stage } from "../lib/stage";
+import { PAGES } from "../lib/memory";
 import type { Rect } from "../lib/types";
 import type { ProcessRequest, ProcessResponse } from "../lib/process.worker";
 import { Landing } from "./landing";
@@ -547,8 +548,7 @@ export default function ReaderView({ remote }: { remote?: RemoteBook } = {}) {
             progress: director.length > 1 ? director.index / (director.length - 1) : 1,
           });
 
-          source.prefetch(frame.page + 1);
-          source.prefetch(frame.page + 2);
+          for (let ahead = 1; ahead <= PAGES.prefetch; ahead++) source.prefetch(frame.page + ahead);
           // También el diálogo que viene: si llega recién al cambiar de página, la
           // transición se queda esperando a decodificarlo.
           for (let ahead = 1; ahead <= 8; ahead++) {

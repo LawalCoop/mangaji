@@ -1,7 +1,7 @@
 import type { ArchiveSource } from "./archive";
 import type { ProcessedPage } from "./process";
 import type { ShelvedPage } from "./shelf";
-import { PAGE_SPAN } from "./memory";
+import { outOfReach } from "./memory";
 
 /**
  * Un archivo que todavía se está escribiendo.
@@ -15,8 +15,6 @@ import { PAGE_SPAN } from "./memory";
  * `.cbza` terminado y leer uno que se está cocinando.
  */
 
-/** Cuántas páginas decodificadas se mantienen vivas alrededor de la actual. */
-const CACHE_LIMIT = PAGE_SPAN;
 
 export class LiveSource implements ArchiveSource {
   #pages: (ProcessedPage | ShelvedPage)[] = [];
@@ -108,11 +106,11 @@ export class LiveSource implements ArchiveSource {
    */
   #evictAround(index: number): void {
     for (const i of [...this.#cache.keys()]) {
-      if (Math.abs(i - index) > CACHE_LIMIT) this.release(i);
+      if (outOfReach(i, index)) this.release(i);
     }
     for (const [name, task] of this.#named) {
       const page = pageOfSprite(name);
-      if (page !== null && Math.abs(page - index) > CACHE_LIMIT) {
+      if (page !== null && outOfReach(page, index)) {
         this.#named.delete(name);
         void task.then((b) => b.close()).catch(() => {});
       }

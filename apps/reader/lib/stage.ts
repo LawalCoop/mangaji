@@ -1,7 +1,7 @@
 import { Application, BlurFilter, Container, Graphics, Sprite, Texture, TilingSprite, UPDATE_PRIORITY } from "pixi.js";
 import { Camera, type Transform } from "./camera";
 import type { Frame, Rect } from "./types";
-import { PAGE_SPAN } from "./memory";
+import { outOfReach } from "./memory";
 
 /**
  * La superficie de render. Dibuja un encuadre —un recorte de una página— aplicando la
@@ -14,8 +14,6 @@ import { PAGE_SPAN } from "./memory";
  */
 
 /** Texturas vivas alrededor de la página actual. Cada página son ~4 MP en VRAM. */
-/** Páginas a cada lado de la actual que conservan su textura en la placa. */
-const TEXTURE_LIMIT = PAGE_SPAN;
 
 /**
  * Tono del papel de una página, tomado de sus bordes.
@@ -777,16 +775,16 @@ export class Stage {
    */
   #evict(page: number): void {
     for (const [p, tex] of this.#textures) {
-      if (Math.abs(p - page) > TEXTURE_LIMIT) {
+      if (outOfReach(p, page)) {
         tex.destroy(true);
         this.#textures.delete(p);
       }
     }
     for (const p of this.#bitmaps.keys()) {
-      if (Math.abs(p - page) > TEXTURE_LIMIT) this.#bitmaps.delete(p);
+      if (outOfReach(p, page)) this.#bitmaps.delete(p);
     }
     for (const p of this.#blurredPages.keys()) {
-      if (Math.abs(p - page) > TEXTURE_LIMIT) this.#blurredPages.delete(p);
+      if (outOfReach(p, page)) this.#blurredPages.delete(p);
     }
   }
 }

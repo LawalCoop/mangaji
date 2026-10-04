@@ -1,10 +1,8 @@
 import { MANIFEST_FILENAME, type Manifest } from "@mangaji/format";
 import type { ArchiveSource } from "./archive";
 import { pageOfSprite } from "./live-archive";
-import { PAGE_SPAN } from "./memory";
+import { outOfReach } from "./memory";
 
-/** Cuántas páginas decodificadas se mantienen vivas alrededor de la actual. */
-const CACHE_LIMIT = PAGE_SPAN;
 
 /**
  * Un tomo ya procesado que vive en un servidor: el manifest, el arte sin diálogo y los
@@ -98,11 +96,11 @@ export class RemoteSource implements ArchiveSource {
   /** Lo que quedó lejos de donde se está leyendo se suelta, páginas y globos. */
   #evictAround(index: number): void {
     for (const i of [...this.#cache.keys()]) {
-      if (Math.abs(i - index) > CACHE_LIMIT) this.release(i);
+      if (outOfReach(i, index)) this.release(i);
     }
     for (const [name, task] of this.#named) {
       const page = pageOfSprite(name);
-      if (page !== null && Math.abs(page - index) > CACHE_LIMIT) {
+      if (page !== null && outOfReach(page, index)) {
         this.#named.delete(name);
         void task.then((b) => b.close()).catch(() => {});
       }

@@ -1,6 +1,6 @@
 import { pageOfSprite } from "./live-archive";
 import { ProblemError } from "./notes";
-import { PAGE_SPAN } from "./memory";
+import { outOfReach } from "./memory";
 /**
  * Acceso al archivo de manga desde el hilo principal.
  *
@@ -26,8 +26,6 @@ export interface ArchiveSource {
 
 type Pending = { resolve: (v: unknown) => void; reject: (e: Error) => void };
 
-/** Cuántas páginas decodificadas se mantienen vivas alrededor de la actual. */
-const CACHE_LIMIT = PAGE_SPAN;
 
 export class CbzSource implements ArchiveSource {
   #worker: Worker;
@@ -145,13 +143,13 @@ export class CbzSource implements ArchiveSource {
   /** Descarta lo que quedó lejos de donde está mirando el lector. */
   #evictAround(index: number): void {
     for (const i of [...this.#cache.keys()]) {
-      if (Math.abs(i - index) > CACHE_LIMIT) this.release(i);
+      if (outOfReach(i, index)) this.release(i);
     }
     // Los globos también: decodificados y acumulados durante todo el tomo, dejaban al
     // celular sin memoria.
     for (const [name, task] of this.#named) {
       const page = pageOfSprite(name);
-      if (page !== null && Math.abs(page - index) > CACHE_LIMIT) {
+      if (page !== null && outOfReach(page, index)) {
         this.#named.delete(name);
         void task.then((b) => b.close()).catch(() => {});
       }
