@@ -1,6 +1,7 @@
 import type { Detection } from "./detector";
 import type { Rect } from "./types";
 import { boxBlur, components, erode, type Point } from "./vision";
+import { liftHalo } from "./halo";
 
 /**
  * Separación del diálogo: el texto sale del arte y queda como sprite aparte.
@@ -431,8 +432,22 @@ export async function lift(
     w: Math.min(Math.ceil(w), cw),
     h: Math.min(Math.ceil(h), ch),
   };
+  // Sin globo detectado, ¿está en un globo que el modelo no vio? Un bolsillo de papel cerrado
+  // alrededor del texto lo delata. Ahí la caja del detector, muy justa en textos cortos
+  // ("¡AH!", "GAH"), se agranda un poco, y el borde del globo cerca no se toma por dibujo.
+  const pocket = !hosts.length && !text.light && inPaperPocket(ctx, text.bbox);
+  if (pocket) {
+    const grow = POCKET_GROW;
+    const sx = Math.max(0, seed.x - grow);
+    const sy = Math.max(0, seed.y - grow);
+    seed.w = Math.min(cw - sx, seed.w + (seed.x - sx) + grow);
+    seed.h = Math.min(ch - sy, seed.h + (seed.y - sy) + grow);
+    seed.x = sx;
+    seed.y = sy;
+  }
   const measured = inkOf(px, cw, ch, seed, text.light, trusted);
-  if (!measured) return null;
+  // Sin papel debajo y sin globo: puede ser texto con halo blanco sobre trama o dibujo.
+  if (!measured) return hosts.length ? null : liftWithHalo(ctx, text);
   const { alpha, paper } = measured;
 
   // Sin globo que lo contenga, un dibujo también puede pasar por texto: trama, líneas de
@@ -441,14 +456,19 @@ export async function lift(
   // más de la mitad.
   // Solo con tinta oscura sobre papel: en un recuadro de color lo que sigue de largo puede
   // ser el mismo recuadro, o el blanco de la página alrededor.
-  if (!hosts.length && typeof paper === "number" && edgeInk(alpha, cw, ch) > MAX_EDGE_INK) return null;
+  // Pero si son letras con halo blanco, lo que sigue de largo es lo de alrededor: se prueba así.
+  if (!hosts.length && !pocket && typeof paper === "number" && edgeInk(alpha, cw, ch) > MAX_EDGE_INK) return liftWithHalo(ctx, text);
 
   // Los colores de antes de borrar, que son los que se lleva el sprite: `erase` los pisa con
   // el papel, y leerlos después dejaba el diálogo escrito en blanco sobre el globo blanco.
   const before = new Uint8ClampedArray(px);
 
   // El globo que aloja a este texto, si hay alguno: adentro se borra sin reparos.
-  const inside = hosts.length ? union(hosts, x0, y0, cw, ch) : undefined;
+  const inside = hosts.length
+    ? union(hosts, x0, y0, cw, ch)
+    : pocket
+      ? pocketMask(pocket, x0, y0, cw, ch)
+      : undefined;
   const cover = erase(px, alpha, cw, ch, paper, inside, seed);
   ctx.putImageData(region, x0, y0);
 
@@ -459,6 +479,151 @@ export async function lift(
   image.data.set(data);
 
   return { image, rect: { x: x0, y: y0, w: cw, h: ch }, ink: taken / count };
+}
+
+/** Cuánto se agranda la caja de un texto que está en un globo no detectado. */
+const POCKET_GROW = 5;
+/** Ventana alrededor del texto donde se busca el globo: veces su lado mayor, y mínimo en px. */
+const POCKET_WINDOW = { times: 1.6, min: 36 };
+/** Tamaño de globo: el bolsillo de papel, en veces el área del texto. */
+const POCKET_AREA = { min: 1.2, max: 40 };
+/** A partir de qué nivel un píxel es papel para el bolsillo. */
+const POCKET_PAPER = 200;
+
+/**
+ * ¿El texto está adentro de un bolsillo de papel cerrado —un globo—? Se expande por el papel
+ * desde el borde de la caja del texto, sin cruzar tinta: si no llega al borde de una ventana
+ * alrededor y no es enorme, está encerrado.
+ */
+type Pocket = { inside: Uint8Array; x0: number; y0: number; w: number; h: number };
+
+function inPaperPocket(ctx: OffscreenCanvasRenderingContext2D, box: Detection["bbox"]): Pocket | null {
+  const pad = Math.max(POCKET_WINDOW.min, Math.max(box.w, box.h) * POCKET_WINDOW.times);
+  const x0 = Math.max(0, Math.floor(box.x - pad));
+  const y0 = Math.max(0, Math.floor(box.y - pad));
+  const x1 = Math.min(ctx.canvas.width, Math.ceil(box.x + box.w + pad));
+  const y1 = Math.min(ctx.canvas.height, Math.ceil(box.y + box.h + pad));
+  const w = x1 - x0;
+  const h = y1 - y0;
+  if (w < 4 || h < 4) return null;
+  const px = ctx.getImageData(x0, y0, w, h).data;
+  const paper = new Uint8Array(w * h);
+  for (let p = 0, i = 0; p < w * h; p++, i += 4) {
+    if (Math.max(px[i], px[i + 1], px[i + 2]) >= POCKET_PAPER) paper[p] = 1;
+  }
+  // Semillas: el papel en el borde de la caja del texto.
+  const seen = new Uint8Array(w * h);
+  const queue = new Int32Array(w * h);
+  let head = 0;
+  let tail = 0;
+  const bx0 = Math.max(0, Math.floor(box.x) - x0);
+  const by0 = Math.max(0, Math.floor(box.y) - y0);
+  const bx1 = Math.min(w - 1, Math.ceil(box.x + box.w) - x0);
+  const by1 = Math.min(h - 1, Math.ceil(box.y + box.h) - y0);
+  const push = (x: number, y: number) => {
+    const p = y * w + x;
+    if (paper[p] && !seen[p]) {
+      seen[p] = 1;
+      queue[tail++] = p;
+    }
+  };
+  for (let x = bx0; x <= bx1; x++) {
+    push(x, by0);
+    push(x, by1);
+  }
+  for (let y = by0; y <= by1; y++) {
+    push(bx0, y);
+    push(bx1, y);
+  }
+  if (!tail) return null;
+  const maxArea = box.w * box.h * POCKET_AREA.max;
+  while (head < tail) {
+    const p = queue[head++];
+    const x = p % w;
+    const y = (p - x) / w;
+    // Llegó al borde de la ventana: el papel sigue, no es un globo cerrado.
+    if (x === 0 || y === 0 || x === w - 1 || y === h - 1) return null;
+    if (tail > maxArea) return null;
+    push(x + 1, y);
+    push(x - 1, y);
+    push(x, y + 1);
+    push(x, y - 1);
+  }
+  if (tail < box.w * box.h * POCKET_AREA.min) return null;
+
+  // El interior: todo lo que no se alcanza desde el borde de la ventana sin pasar por el
+  // papel del bolsillo. Las letras quedan adentro; el contorno del globo, afuera.
+  const outside = new Uint8Array(w * h);
+  head = 0;
+  tail = 0;
+  const out = (x: number, y: number) => {
+    const p = y * w + x;
+    if (!seen[p] && !outside[p]) {
+      outside[p] = 1;
+      queue[tail++] = p;
+    }
+  };
+  for (let x = 0; x < w; x++) {
+    out(x, 0);
+    out(x, h - 1);
+  }
+  for (let y = 0; y < h; y++) {
+    out(0, y);
+    out(w - 1, y);
+  }
+  while (head < tail) {
+    const p = queue[head++];
+    const x = p % w;
+    const y = (p - x) / w;
+    if (x > 0) out(x - 1, y);
+    if (x < w - 1) out(x + 1, y);
+    if (y > 0) out(x, y - 1);
+    if (y < h - 1) out(x, y + 1);
+  }
+  const inside = new Uint8Array(w * h);
+  for (let p = 0; p < w * h; p++) inside[p] = outside[p] ? 0 : 1;
+  return { inside, x0, y0, w, h };
+}
+
+/** El interior del bolsillo, en las coordenadas de la región que se está levantando. */
+function pocketMask(pocket: Pocket, x0: number, y0: number, w: number, h: number): Uint8Array {
+  const mask = new Uint8Array(w * h);
+  for (let y = 0; y < h; y++) {
+    const py = y + y0 - pocket.y0;
+    if (py < 0 || py >= pocket.h) continue;
+    for (let x = 0; x < w; x++) {
+      const px = x + x0 - pocket.x0;
+      if (px >= 0 && px < pocket.w && pocket.inside[py * pocket.w + px]) mask[y * w + x] = 1;
+    }
+  }
+  return mask;
+}
+
+/** Aire alrededor del texto con halo: de ahí se copia el relleno. */
+const HALO_MARGIN = 56;
+
+/** El texto con halo (ver `halo.ts`): se recorta con su halo y el hueco se rellena con lo de alrededor. */
+function liftWithHalo(ctx: OffscreenCanvasRenderingContext2D, text: Detection): Sprite | null {
+  const { x, y, w, h } = text.bbox;
+  const x0 = Math.max(0, Math.floor(x) - HALO_MARGIN);
+  const y0 = Math.max(0, Math.floor(y) - HALO_MARGIN);
+  const cw = Math.min(ctx.canvas.width - x0, Math.ceil(x + w) - x0 + HALO_MARGIN);
+  const ch = Math.min(ctx.canvas.height - y0, Math.ceil(y + h) - y0 + HALO_MARGIN);
+  if (cw < 8 || ch < 8) return null;
+  const region = ctx.getImageData(x0, y0, cw, ch);
+  const seed = { x: Math.floor(x) - x0, y: Math.floor(y) - y0, w: Math.ceil(w), h: Math.ceil(h) };
+  const found = liftHalo(region.data, cw, ch, seed, ctx.canvas.height);
+  if (!found) return null;
+
+  const before = new Uint8ClampedArray(region.data);
+  region.data.set(found.filled);
+  ctx.putImageData(region, x0, y0);
+  const cover = new Float32Array(cw * ch).fill(1);
+  const { data, taken } = spriteOf(before, found.alpha, cover, cw, ch);
+  if (!taken) return null;
+  const image = new ImageData(cw, ch);
+  image.data.set(data);
+  return { image, rect: { x: x0, y: y0, w: cw, h: ch }, ink: found.ink };
 }
 
 type Rgb = [number, number, number];
