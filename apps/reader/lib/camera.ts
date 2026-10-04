@@ -81,7 +81,11 @@ export class Camera {
 
   /** Zoom manual anclado en un punto del viewport (la posición del cursor). */
   zoomAt(factor: number, px: number, py: number, limits = { min: 0.05, max: 8 }): void {
-    const next = clamp(this.#current.scale * factor, limits.min, limits.max);
+    // Los límites solo frenan: si la cámara ya estaba más allá —una viñeta chica encuadrada de
+    // cerca—, acercar no la tira para atrás ni alejar la empuja para adelante.
+    const cur = this.#current.scale;
+    const next =
+      factor > 1 ? Math.min(cur * factor, Math.max(limits.max, cur)) : Math.max(cur * factor, Math.min(limits.min, cur));
     const k = next / this.#current.scale;
     this.#current.x = px - (px - this.#current.x) * k;
     this.#current.y = py - (py - this.#current.y) * k;
@@ -107,8 +111,4 @@ export class Camera {
     if (done) this.cut(t);
     return true;
   }
-}
-
-function clamp(v: number, min: number, max: number): number {
-  return Math.min(max, Math.max(min, v));
 }

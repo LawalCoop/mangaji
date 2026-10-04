@@ -105,6 +105,20 @@ const HINT_KEY = "mangaji:gestures-seen";
 // Cuánto se destaca la viñeta activa lo fija ahora el mood, en `lib/mood.ts`.
 
 /** Traduce un movimiento de cámara del manifest a un par de encuadres concretos. */
+/**
+ * Hasta dónde se puede alejar y acercar a mano, según la página que se está leyendo: alejar
+ * hasta verla entera con aire alrededor —más lejos es mirar el fondo, y aparece el borde de
+ * la sombra—; acercar hasta unas veces esa vista, que ya muestra la trama de la impresión.
+ */
+const ZOOM = { out: 0.8, in: 6 };
+
+function zoomLimits(eng: { stage: { viewport: Viewport }; director: { frame: { page: number } }; sizes: { w: number; h: number }[] }) {
+  const { w, h } = eng.stage.viewport;
+  const page = eng.sizes[eng.director.frame.page] ?? ASSUMED_PAGE;
+  const whole = Math.min(w / page.w, h / page.h);
+  return { min: whole * ZOOM.out, max: whole * ZOOM.in };
+}
+
 function framing(cam: CameraMove | undefined, rect: Rect, view: Viewport) {
   const at = (zoom: number) => Camera.fit(rect, view, FIT_MARGIN * zoom);
   switch (cam?.kind) {
@@ -1155,7 +1169,7 @@ export default function ReaderView({ remote }: { remote?: RemoteBook } = {}) {
     const eng = engine.current;
     if (!eng) return;
     const { w, h } = eng.stage.viewport;
-    eng.stage.camera.zoomAt(factor, w / 2, h / 2);
+    eng.stage.camera.zoomAt(factor, w / 2, h / 2, zoomLimits(eng));
     eng.stage.render();
   }, []);
 
@@ -1401,7 +1415,7 @@ export default function ReaderView({ remote }: { remote?: RemoteBook } = {}) {
 
     if (g.pinch && pointers.current.size >= 2) {
       const next = pinchOf((e.currentTarget as HTMLElement).getBoundingClientRect());
-      if (g.pinch.dist > 0) eng.stage.camera.zoomAt(next.dist / g.pinch.dist, next.cx, next.cy);
+      if (g.pinch.dist > 0) eng.stage.camera.zoomAt(next.dist / g.pinch.dist, next.cx, next.cy, zoomLimits(eng));
       eng.stage.camera.nudge(next.cx - g.pinch.cx, next.cy - g.pinch.cy);
       g.pinch = next;
       return;
@@ -1475,6 +1489,7 @@ export default function ReaderView({ remote }: { remote?: RemoteBook } = {}) {
       e.deltaY < 0 ? 1.12 : 1 / 1.12,
       e.clientX - rect.left,
       e.clientY - rect.top,
+      zoomLimits(eng),
     );
   };
 
