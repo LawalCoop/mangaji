@@ -177,7 +177,9 @@ export function DemoView({
     /** Una fase que empieza: anuncio grande, se va, y queda la leyenda. */
     const phaseStart = async (id: keyof typeof D.phases, n: number) => {
       const ph = D.phases[id];
-      setCaption(ph);
+      // La leyenda de abajo repetiría lo que acaba de decir el anuncio: solo cuenta lo nuevo,
+      // viñeta por viñeta, durante la dirección de cámara.
+      setCaption(null);
       setAnnounce({ key: ++announceKey, kicker: n ? `0${n}` : "", title: ph.title, body: ph.body, tone: "cyan" });
       await sleep(SHOW.phase);
       setAnnounce(null);
@@ -383,8 +385,9 @@ export function DemoView({
       setPhase("done");
       frameRect({ x: 0, y: 0, w, h }, T.outro, 0.94);
       say(D.tagDone);
-      setCaption(D.phases.done);
-      await sleep(T.outro + 1200);
+      setCaption(null);
+      await sleep(T.outro);
+      await phaseStart("done", 0);
       if (index + 1 < frames.pageTotal) setIndex((i) => i + 1);
     };
 
