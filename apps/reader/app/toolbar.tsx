@@ -47,6 +47,8 @@ export type ToolbarProps = {
   directed: boolean;
   shade: boolean;
   onToggleShade: () => void;
+  playing: boolean;
+  onTogglePlay: () => void;
   backdrop: boolean;
   onToggleBackdrop: () => void;
   onToggleDirected: () => void;
@@ -206,6 +208,9 @@ export function Toolbar(props: ToolbarProps) {
             </Button>
             <Button onClick={props.onToggleDirected} active={props.directed} title={T.directedTitle}>
               {T.directed}
+            </Button>
+            <Button onClick={props.onTogglePlay} active={props.playing} title={T.playTitle}>
+              {props.playing ? T.pause : T.play}
             </Button>
             <Button onClick={props.onToggleShade} active={props.shade} title={T.shadeTitle}>
               {T.shade}

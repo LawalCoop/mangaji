@@ -236,3 +236,22 @@ describe("cortar un movimiento con un toque", () => {
     expect(director.index).toBe(1);
   });
 });
+
+describe("reproducción sola", () => {
+  it("se queda lo que dice playDuration y espera a que se pueda pasar", () => {
+    const director = new Director(makeSource([{ beats: [] }, { beats: [] }, { beats: [] }]), { autoplay: true });
+    director.playDuration = () => 1000;
+    let blocked = true;
+    director.canAdvance = () => !blocked;
+    director.tick(1500);
+    expect(director.index).toBe(0);
+    blocked = false;
+    director.tick(10);
+    expect(director.index).toBe(1);
+    director.tick(500);
+    expect(director.index).toBe(1);
+    director.tick(600);
+    expect(director.index).toBe(2);
+  });
+});
+

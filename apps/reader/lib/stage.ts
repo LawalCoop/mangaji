@@ -2,6 +2,7 @@ import { Application, BlurFilter, Container, Graphics, Sprite, Texture, TilingSp
 import { Camera, type Transform } from "./camera";
 import type { Frame, Rect } from "./types";
 import { directionOf, outOfReach, type Direction } from "./memory";
+import { CPU_2D } from "./canvas";
 
 /**
  * La superficie de render. Dibuja un encuadre —un recorte de una página— aplicando la
@@ -76,7 +77,7 @@ function screened(cover: ImageBitmap, w: number, h: number, cell: number): HTMLC
   const out = document.createElement("canvas");
   out.width = w;
   out.height = h;
-  const ox = out.getContext("2d")!;
+  const ox = out.getContext("2d", CPU_2D)!;
   ox.filter = `grayscale(1) brightness(${MOSAIC.brightness}) contrast(${MOSAIC.contrast})`;
   ox.drawImage(cover, 0, 0, w, h);
   ox.filter = "none";
@@ -330,7 +331,7 @@ export class Stage {
     const tile = document.createElement("canvas");
     tile.width = tileW + gap;
     tile.height = tileH + gap;
-    const tx = tile.getContext("2d")!;
+    const tx = tile.getContext("2d", CPU_2D)!;
     tx.fillStyle = `#${darken(this.#paper, MOSAIC.joint).toString(16).padStart(6, "0")}`;
     tx.fillRect(0, 0, tile.width, tile.height);
     tx.drawImage(art, gap / 2, gap / 2, tileW, tileH);
@@ -608,7 +609,7 @@ export class Stage {
     }
 
     const reach = side * SHADOW_REACH;
-    const nx = this.#nearCanvas.getContext("2d")!;
+    const nx = this.#nearCanvas.getContext("2d", CPU_2D)!;
     nx.setTransform(1, 0, 0, 1, 0, 0);
     nx.filter = "none";
     nx.clearRect(0, 0, sw, sh);
@@ -625,7 +626,7 @@ export class Stage {
     nx.stroke();
     nx.filter = "none";
 
-    const dx = this.#shadeCanvas.getContext("2d")!;
+    const dx = this.#shadeCanvas.getContext("2d", CPU_2D)!;
     dx.setTransform(1, 0, 0, 1, 0, 0);
     dx.globalCompositeOperation = "source-over";
     dx.clearRect(0, 0, sw, sh);
@@ -680,7 +681,7 @@ export class Stage {
       const canvas = document.createElement("canvas");
       canvas.width = sw;
       canvas.height = sh;
-      const cx = canvas.getContext("2d")!;
+      const cx = canvas.getContext("2d", CPU_2D)!;
       cx.filter = `blur(${this.focusBlur / FOCUS_SCALE}px)`;
       cx.drawImage(bitmap, 0, 0, sw, sh);
       page = { key: blurKey, canvas };
@@ -696,7 +697,7 @@ export class Stage {
       this.#overlayTexture?.destroy(true);
       this.#overlayTexture = Texture.from(overlay);
     }
-    const ox = overlay.getContext("2d")!;
+    const ox = overlay.getContext("2d", CPU_2D)!;
     ox.setTransform(1, 0, 0, 1, 0, 0);
     ox.globalCompositeOperation = "source-over";
     ox.filter = "none";
@@ -716,7 +717,7 @@ export class Stage {
       hole.height = sh;
       this.#holeCanvas = hole;
     }
-    const hx = hole.getContext("2d")!;
+    const hx = hole.getContext("2d", CPU_2D)!;
     const feather = this.focusFeather / FOCUS_SCALE;
     hx.setTransform(1, 0, 0, 1, 0, 0);
     hx.filter = "none";

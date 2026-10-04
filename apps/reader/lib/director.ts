@@ -48,6 +48,16 @@ export class Director {
    * movimiento de cámara— y no se revela ni se pasa de encuadre.
    */
   holdNext?: () => boolean;
+  /**
+   * Reproducción sola: si todavía no se puede pasar —la cámara está recorriendo la viñeta—,
+   * se espera en vez de cortarla.
+   */
+  canAdvance?: () => boolean;
+  /**
+   * Cuánto se queda cada encuadre al reproducir solo. Los tiempos de los beats están pensados
+   * para tocar —se lee más rápido de lo que se escribe—; solo, hace falta más para leer.
+   */
+  playDuration: (frame: Frame) => number = (frame) => frameDuration(frame, this.defaultHold);
   readonly defaultHold: number;
 
   constructor(source: FrameSource, opts: DirectorOptions = {}) {
@@ -233,8 +243,9 @@ export class Director {
   tick(dtMs: number): void {
     this.#elapsed += dtMs;
     this.#fireUpTo(this.#elapsed);
-    if (!this.#playing) return;
-    if (this.#elapsed >= frameDuration(this.frame, this.defaultHold)) this.next();
+    if (!this.#playing || this.#waiting) return;
+    if (this.canAdvance && !this.canAdvance()) return;
+    if (this.#elapsed >= this.playDuration(this.frame)) this.next();
   }
 
   #fireUpTo(t: number): void {

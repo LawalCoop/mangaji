@@ -4,7 +4,7 @@ import { MANIFEST_FILENAME, Page, safeParseManifest, type CameraMove } from "@ma
 import { useCallback, useEffect, useRef, useState } from "react";
 import { CbzSource, type ArchiveSource } from "../lib/archive";
 import { Camera, type Transform, type Viewport } from "../lib/camera";
-import { Director } from "../lib/director";
+import { Director, frameDuration } from "../lib/director";
 import { PageFrameSource, PanelFrameSource } from "../lib/frame-sources";
 import { LiveSource } from "../lib/live-archive";
 import { download, resolveLink, type DownloadProgress } from "../lib/remote";
@@ -18,11 +18,12 @@ import { directedShot, FIT_MARGIN, type DirectedShot, type Pan } from "../lib/di
 import type { ProcessedPage } from "../lib/process";
 import { Stage } from "../lib/stage";
 import { PAGES, directionOf, type Direction } from "../lib/memory";
-import type { Rect } from "../lib/types";
+import type { Frame, Rect } from "../lib/types";
 import type { ProcessRequest, ProcessResponse } from "../lib/process.worker";
 import { Landing } from "./landing";
 import { Processing, type LogLine, type Preview, type Stage as ProcessStage } from "./processing";
 import { Toolbar } from "./toolbar";
+import { CPU_2D } from "../lib/canvas";
 
 /** Hasta que la página se decodifica no se sabe su tamaño; esto evita un encuadre en cero. */
 const ASSUMED_PAGE = { w: 1600, h: 2300 };
@@ -30,6 +31,19 @@ const ASSUMED_PAGE = { w: 1600, h: 2300 };
 /** Duración del viaje de la cámara entre viñetas de la misma página. */
 const TRAVEL_MS = 520;
 const DIRECTED_KEY = "mangaji:directed";
+const PLAY_KEY = "mangaji:play";
+/**
+ * Reproducción sola: cuánto se queda cada viñeta. Lo que dura su diálogo, estirado —los tiempos
+ * de los beats son para quien toca—, más un respiro para mirar el dibujo; una viñeta sin texto
+ * se mira un rato y sigue.
+ */
+const PLAY = { stretch: 1.9, breath: 1400, mute: 2200 };
+
+function playTime(frame: Frame, fallback: number): number {
+  const reveals = frame.beats.filter((b) => b.reveal !== undefined).length;
+  const base = frameDuration(frame, fallback);
+  return reveals ? base * PLAY.stretch + PLAY.breath : PLAY.mute;
+}
 /** Lo más que se espera, en la pantalla de carga, a que se termine de dibujar lo encontrado. */
 const LIVE_SHOW_MAX = 2500;
 /** Y lo menos: una tapa trae una sola viñeta, y si no, ni se llega a ver. */
@@ -130,7 +144,7 @@ function thumbnail(bitmap: ImageBitmap): string {
   const canvas = document.createElement("canvas");
   canvas.width = w;
   canvas.height = Math.round((w * bitmap.height) / bitmap.width);
-  canvas.getContext("2d")!.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+  canvas.getContext("2d", CPU_2D)!.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
   return canvas.toDataURL("image/jpeg", 0.8);
 }
 
@@ -318,6 +332,30 @@ export default function ReaderView({ remote }: { remote?: RemoteBook } = {}) {
       // Sin almacenamiento: dura lo que dure la pestaña.
     }
   }, []);
+  /** Reproducir solo: globos, viñetas y páginas pasan sin tocar. Desde la barra, recordado. */
+  const [playing, setPlaying] = useState(false);
+  const playRef = useRef(false);
+  useEffect(() => {
+    try {
+      const on = localStorage.getItem(PLAY_KEY) === "1";
+      playRef.current = on;
+      setPlaying(on);
+    } catch {
+      // Sin almacenamiento: queda apagado.
+    }
+  }, []);
+  const setPlay = useCallback((on: boolean) => {
+    playRef.current = on;
+    setPlaying(on);
+    const director = engine.current?.director;
+    if (director) on ? director.play() : director.pause();
+    try {
+      localStorage.setItem(PLAY_KEY, on ? "1" : "0");
+    } catch {
+      // Sin almacenamiento: dura lo que dure la pestaña.
+    }
+  }, []);
+  const togglePlay = useCallback(() => setPlay(!playRef.current), [setPlay]);
   const toggleDirected = useCallback(() => {
     const on = !directedRef.current;
     directedRef.current = on;
@@ -527,6 +565,10 @@ export default function ReaderView({ remote }: { remote?: RemoteBook } = {}) {
         };
         // Tocar durante el paneo lo corta: la viñeta entera, con todo su diálogo. El toque
         // siguiente ya pasa de viñeta.
+        // Reproducción sola: más tiempo que tocando, y sin cortar un paneo a la mitad.
+        director.playDuration = (frame) => playTime(frame, director.defaultHold);
+        director.canAdvance = () => !pan || pan.done;
+        if (playRef.current) director.play();
         director.holdNext = () => {
           if (!finishPan()) return false;
           director.revealAll();
@@ -703,6 +745,11 @@ export default function ReaderView({ remote }: { remote?: RemoteBook } = {}) {
           // página siguiente. Pasa únicamente si se lee más rápido de lo que se procesa.
           if (ev.type === "waiting") {
             setWaiting(true);
+            return;
+          }
+          // Terminó el tomo: el botón vuelve a play, sin olvidar que se quería solo.
+          if (ev.type === "end") {
+            setPlaying(false);
             return;
           }
           if (ev.type !== "beat") return;
@@ -1362,6 +1409,9 @@ export default function ReaderView({ remote }: { remote?: RemoteBook } = {}) {
         case "f":
           fit();
           break;
+        case "p":
+          togglePlay();
+          break;
         case "+":
         case "=":
           zoom(1.25);
@@ -1750,6 +1800,8 @@ export default function ReaderView({ remote }: { remote?: RemoteBook } = {}) {
           onToggleDirected={toggleDirected}
           shade={shade}
           onToggleShade={toggleShade}
+          playing={playing}
+          onTogglePlay={togglePlay}
           backdrop={backdrop}
           onToggleBackdrop={toggleBackdrop}
         />

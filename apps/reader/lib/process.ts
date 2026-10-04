@@ -15,6 +15,7 @@ import { ENTER_MS, revealBeats } from "./beats";
 const BALLOON_TEXT_AREA = 0.12;
 import { readingOrder, type Box } from "./reading-order";
 import { polygonArea, type Point } from "./vision";
+import { CPU_2D } from "./canvas";
 
 /**
  * Convierte un CBZ en un `.cbza`: detecta viñetas y diálogo, decide el orden de lectura y la
@@ -406,12 +407,12 @@ async function mergeSprites(
   const rect = { x: x0, y: y0, w: x1 - x0, h: y1 - y0 };
 
   const canvas = new OffscreenCanvas(rect.w, rect.h);
-  const ctx = canvas.getContext("2d")!;
+  const ctx = canvas.getContext("2d", CPU_2D)!;
   for (const part of parts) {
     // `putImageData` ignora la transparencia acumulada, así que cada bloque va por su
     // propio lienzo y se dibuja encima respetando el alfa.
     const piece = new OffscreenCanvas(part.rect.w, part.rect.h);
-    piece.getContext("2d")!.putImageData(part.image, 0, 0);
+    piece.getContext("2d", CPU_2D)!.putImageData(part.image, 0, 0);
     ctx.drawImage(piece, part.rect.x - x0, part.rect.y - y0);
   }
 

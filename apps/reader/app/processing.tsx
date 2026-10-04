@@ -61,7 +61,7 @@ export function Processing({ title, stage, lines, progress, eta, preview }: Proc
 
   return (
     <div className="relative flex min-h-dvh w-full flex-col overflow-hidden bg-[#121214] px-4 py-6 sm:px-8">
-      {/* Líneas de velocidad girando: la página está en movimiento.
+      {/* Líneas de velocidad: la página está en movimiento.
           Gira un cuadrado mucho más grande que la pantalla, no la pantalla misma: un
           rectángulo del tamaño del viewport deja asomar sus esquinas al rotar. 160vmax
           cubre la distancia del centro a la esquina más lejana en cualquier proporción. */}
@@ -77,8 +77,9 @@ export function Processing({ title, stage, lines, progress, eta, preview }: Proc
             "repeating-conic-gradient(from 0deg, #ffffff 0deg 0.4deg, transparent 0.4deg 2.1deg)",
           maskImage: "radial-gradient(circle, transparent 15vmax, black 45vmax)",
           WebkitMaskImage: "radial-gradient(circle, transparent 15vmax, black 45vmax)",
-          transform: `translate(-50%, -50%) rotate(${tick * 1.6}deg)`,
-          transition: "transform 420ms linear",
+          // Quietas: girando, había que rehacer un degradé enorme con máscara a cada rato,
+          // justo mientras la IA ocupa la placa de video.
+          transform: "translate(-50%, -50%)",
         }}
       />
 
