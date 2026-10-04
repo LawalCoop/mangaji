@@ -59,48 +59,31 @@ const SHADOW_PAD = 0.8;
 /** Con el mosaico de fondo, más: la sombra tiene que cubrir todo lo que se ve alrededor. */
 const SHADOW_PAD_BACKDROP = 1.4;
 
-/** El mosaico del fondo: alto de cada tapa, separación y celda de la trama, en píxeles de pantalla. */
-const MOSAIC = { height: 260, gap: 24, cell: 4 };
-/** Cuánto contraste conserva la tapa en la trama. */
-const HALFTONE_CONTRAST = 0.85;
-/** Los puntos de la trama, cuánto más oscuros que el papel. */
-const HALFTONE_INK = 0.45;
+/**
+ * El mosaico del fondo, en píxeles de pantalla: alto de cada tapa, separación y celda de la
+ * trama; y la tapa en sí, apagada para quedar de fondo (brillo y contraste), con juntas
+ * oscuras entre una y otra.
+ */
+const MOSAIC = { height: 420, gap: 14, cell: 5, brightness: 0.6, contrast: 0.85, joint: 0.78 };
 
 /**
- * La tapa como trama de puntos, a la manera de los tonos de imprenta del manga: puntos más
- * grandes donde la tapa es más oscura, de un tono apenas más oscuro que el papel, en una
- * grilla girada como la de una imprenta.
+ * La tapa como fondo: en blanco y negro, apagada, con una trama de puntos suave encima que
+ * le da textura de imprenta sin taparla.
  */
-function halftone(cover: ImageBitmap, paper: number, w: number, cell: number): HTMLCanvasElement {
-  const h = Math.round((w * cover.height) / cover.width);
-  const cols = Math.ceil(w / cell);
-  const rows = Math.ceil(h / cell);
-  const small = document.createElement("canvas");
-  small.width = cols;
-  small.height = rows;
-  const sx = small.getContext("2d", { willReadFrequently: true })!;
-  sx.drawImage(cover, 0, 0, cols, rows);
-  const px = sx.getImageData(0, 0, cols, rows).data;
-
+function screened(cover: ImageBitmap, w: number, h: number, cell: number): HTMLCanvasElement {
   const out = document.createElement("canvas");
   out.width = w;
   out.height = h;
   const ox = out.getContext("2d")!;
-  ox.fillStyle = `#${paper.toString(16).padStart(6, "0")}`;
-  ox.fillRect(0, 0, w, h);
-  ox.fillStyle = `#${darken(paper, HALFTONE_INK).toString(16).padStart(6, "0")}`;
-  for (let r = 0; r < rows; r++) {
-    for (let c = 0; c < cols; c++) {
-      const i = (r * cols + c) * 4;
-      const light = (px[i] * 0.299 + px[i + 1] * 0.587 + px[i + 2] * 0.114) / 255;
-      const soft = 0.5 + (light - 0.5) * HALFTONE_CONTRAST;
-      const radius = (cell / 2) * Math.sqrt(1 - soft) * 1.15;
-      if (radius < 0.4) continue;
-      // Filas corridas media celda: la grilla queda a 45°, como la trama de imprenta.
-      const x = (c + (r % 2 ? 0.5 : 0)) * cell;
-      const y = (r + 0.5) * cell;
+  ox.filter = `grayscale(1) brightness(${MOSAIC.brightness}) contrast(${MOSAIC.contrast})`;
+  ox.drawImage(cover, 0, 0, w, h);
+  ox.filter = "none";
+  // La trama: puntos negros apenas visibles, en grilla a 45°.
+  ox.fillStyle = "rgba(0, 0, 0, 0.22)";
+  for (let r = 0, y = cell / 2; y < h; r++, y += cell) {
+    for (let x = r % 2 ? cell / 2 : 0; x < w; x += cell) {
       ox.beginPath();
-      ox.arc(x, y, radius, 0, Math.PI * 2);
+      ox.arc(x, y, cell * 0.28, 0, Math.PI * 2);
       ox.fill();
     }
   }
@@ -307,12 +290,12 @@ export class Stage {
     const tileH = Math.round(MOSAIC.height * res);
     const tileW = Math.round((tileH * cover.width) / cover.height);
     const gap = Math.round(MOSAIC.gap * res);
-    const art = halftone(cover, this.#paper, tileW, MOSAIC.cell * res);
+    const art = screened(cover, tileW, tileH, MOSAIC.cell * res);
     const tile = document.createElement("canvas");
     tile.width = tileW + gap;
     tile.height = tileH + gap;
     const tx = tile.getContext("2d")!;
-    tx.fillStyle = `#${this.#paper.toString(16).padStart(6, "0")}`;
+    tx.fillStyle = `#${darken(this.#paper, MOSAIC.joint).toString(16).padStart(6, "0")}`;
     tx.fillRect(0, 0, tile.width, tile.height);
     tx.drawImage(art, gap / 2, gap / 2, tileW, tileH);
     this.#backdropTexture = Texture.from(tile);
