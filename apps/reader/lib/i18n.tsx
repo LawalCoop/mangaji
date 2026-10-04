@@ -88,7 +88,17 @@ const es = {
   },
 
   processing: {
-    label: "PROCESANDO",
+    live: {
+      title: "Así lee la IA tu manga",
+      steps: [
+        { title: "Cargando la inteligencia artificial", body: "Dos redes neuronales, entrenadas con miles de páginas de manga, se preparan en tu navegador." },
+        { title: "Buscando viñetas y globos", body: "Recorre la página y marca la forma de cada viñeta, cada globo y cada texto." },
+        { title: "Ordenando y separando el diálogo", body: "Decide en qué orden se lee y separa las letras del dibujo, para que cada globo aparezca a su tiempo." },
+      ],
+      found: (panels: number, texts: number) =>
+        `${panels} ${panels === 1 ? "viñeta" : "viñetas"} y ${texts} ${texts === 1 ? "texto" : "textos"} en esta página`,
+    },
+     label: "PROCESANDO",
     headlineOpening: "Abriendo",
     headlineModels: "Cargando",
     headlinePage: "Leyendo la página",
@@ -323,7 +333,17 @@ const en: Messages = {
   },
 
   processing: {
-    label: "PROCESSING",
+    live: {
+      title: "How the AI reads your manga",
+      steps: [
+        { title: "Loading the artificial intelligence", body: "Two neural networks, trained on thousands of manga pages, get ready in your browser." },
+        { title: "Finding panels and balloons", body: "It scans the page and traces every panel, balloon and piece of text." },
+        { title: "Ordering and lifting the dialogue", body: "It works out the reading order and lifts the lettering off the art, so each balloon appears in its moment." },
+      ],
+      found: (panels: number, texts: number) =>
+        `${panels} ${panels === 1 ? "panel" : "panels"} and ${texts} ${texts === 1 ? "text" : "texts"} on this page`,
+    },
+     label: "PROCESSING",
     headlineOpening: "Opening",
     headlineModels: "Loading",
     headlinePage: "Reading the page",
@@ -557,7 +577,16 @@ const ja: Messages = {
   },
 
   processing: {
-    label: "処理中",
+    live: {
+      title: "AIがマンガを読むしくみ",
+      steps: [
+        { title: "AIを準備中", body: "何千ものマンガのページで学習した2つのニューラルネットワークを、ブラウザで準備しています。" },
+        { title: "コマとフキダシを探索中", body: "ページを走査して、コマ・フキダシ・文字の形をひとつずつ捉えます。" },
+        { title: "順番を決めてセリフを分離中", body: "読む順番を決め、絵から文字を切り離して、フキダシをタイミングよく出せるようにします。" },
+      ],
+      found: (panels: number, texts: number) => `このページにコマ${panels}・文字${texts}`,
+    },
+     label: "処理中",
     headlineOpening: "開いています",
     headlineModels: "読み込み中",
     headlinePage: "ページを解析中",

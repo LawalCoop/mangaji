@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { etaText, noteText, useI18n, type Messages } from "../lib/i18n";
 import type { Note } from "../lib/notes";
 import { TONE } from "./site";
+import { DetectScene, LiftScene, PrepareScene } from "./como-funciona/scenes";
 
 /**
  * Pantalla de procesamiento.
@@ -17,6 +18,9 @@ export type Stage =
   | { kind: "opening" }
   | { kind: "models"; note: Note }
   | { kind: "page"; index: number; total: number; note: Note };
+
+/** La página que se está procesando, en chico: ahí se dibuja lo que la IA encuentra. */
+export type Preview = { index: number; src: string; aspect: number };
 
 /** Una línea del registro; `page` si pasó procesando una página en particular. */
 export type LogLine = { note: Note; page?: number };
@@ -34,9 +38,10 @@ export type ProcessingProps = {
   progress: number | null;
   /** Segundos que faltan, o null mientras no hay con qué estimarlo. */
   eta: number | null;
+  preview?: Preview | null;
 };
 
-export function Processing({ title, stage, lines, progress, eta }: ProcessingProps) {
+export function Processing({ title, stage, lines, progress, eta, preview }: ProcessingProps) {
   const [tick, setTick] = useState(0);
   const logRef = useRef<HTMLDivElement>(null);
   const { t } = useI18n();
@@ -194,10 +199,12 @@ export function Processing({ title, stage, lines, progress, eta }: ProcessingPro
           </div>
         </section>
 
+        <Live stage={stage} preview={preview ?? null} />
+
         {/* El registro: qué fue encontrando, línea por línea. */}
         <section
           ref={logRef}
-          className="h-52 overflow-y-auto border-[4px] px-5 py-4 sm:rotate-[0.5deg]"
+          className="h-32 overflow-y-auto border-[4px] px-5 py-4 sm:h-40 sm:rotate-[0.5deg]"
           style={{ borderColor: INK, background: "#0F0F12" }}
         >
           <pre className="whitespace-pre-wrap text-[12px] leading-relaxed sm:text-[13px]">
@@ -240,4 +247,135 @@ function detail(t: Messages, stage: Stage | null): string {
     default:
       return t.processing.unpacking;
   }
+}
+
+/** En qué paso está: 0 los modelos, 1 buscando viñetas, 2 el diálogo. */
+function stepOf(stage: Stage | null): number {
+  if (!stage || stage.kind !== "page") return 0;
+  return stage.note.key === "liftingDialogue" ? 2 : 1;
+}
+
+/**
+ * Lo que está haciendo la IA, mientras se espera: la página que se procesa, con lo que va
+ * encontrando dibujado encima en el momento —las viñetas numeradas en orden de lectura, los
+ * textos—, y al lado los pasos, con el actual resaltado y su animación.
+ */
+function Live({ stage, preview }: { stage: Stage | null; preview: Preview | null }) {
+  const { t } = useI18n();
+  const L = t.processing.live;
+  const H = t.how;
+  const step = stepOf(stage);
+  const note = stage?.kind === "page" && preview && stage.index === preview.index ? stage.note : null;
+  const shapes = note?.key === "liftingDialogue" ? note.shapes : undefined;
+  const scanning = stage?.kind === "page" && !shapes;
+  const scenes = [
+    <PrepareScene key="p" label={H.steps[1].title} />,
+    <DetectScene key="d" label={H.steps[2].title} t={H.scene} />,
+    <LiftScene key="l" label={H.steps[5].title} t={H.scene} />,
+  ];
+
+  return (
+    <section
+      className="grid gap-5 border-[4px] p-4 sm:grid-cols-[minmax(0,15rem)_1fr] sm:p-6"
+      style={{ borderColor: INK, background: "#17171B" }}
+      aria-live="polite"
+    >
+      {/* La página, con lo que va encontrando. */}
+      <div className="mx-auto w-full max-w-[15rem]">
+        <div
+          className="relative overflow-hidden border-[3px]"
+          style={{ borderColor: INK, aspectRatio: preview ? `${preview.aspect}` : "0.7", background: PAPER }}
+        >
+          {preview ? (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img src={preview.src} alt="" className="absolute inset-0 size-full object-cover" />
+          ) : (
+            <div className="absolute inset-0" style={{ background: TONE, opacity: 0.5 }} />
+          )}
+          {scanning && <span aria-hidden className="live-scan absolute inset-x-0 h-10" />}
+          {shapes && (
+            <svg viewBox="0 0 1 1" preserveAspectRatio="none" className="absolute inset-0 size-full" aria-hidden>
+              {shapes.panels.map((poly, i) => (
+                <polygon
+                  key={`p${i}`}
+                  points={poly.map((pt) => pt.join(",")).join(" ")}
+                  fill="rgb(0 217 245 / 0.10)"
+                  stroke={CYAN}
+                  strokeWidth={3}
+                  vectorEffect="non-scaling-stroke"
+                  pathLength={1}
+                  className="live-draw"
+                  style={{ animationDelay: `${i * 220}ms` }}
+                />
+              ))}
+              {shapes.texts.map(([x, y, w, h], i) => (
+                <rect
+                  key={`t${i}`}
+                  x={x}
+                  y={y}
+                  width={w}
+                  height={h}
+                  fill="rgb(255 46 136 / 0.18)"
+                  stroke={MAGENTA}
+                  strokeWidth={2}
+                  vectorEffect="non-scaling-stroke"
+                  className="live-pop"
+                  style={{ animationDelay: `${shapes.panels.length * 220 + i * 60}ms` }}
+                />
+              ))}
+            </svg>
+          )}
+          {/* Los números aparte del SVG estirado: así quedan redondos. */}
+          {shapes?.panels.map((poly, i) => {
+            const cx = poly.reduce((a, p) => a + p[0], 0) / poly.length;
+            const cy = poly.reduce((a, p) => a + p[1], 0) / poly.length;
+            return (
+              <span
+                key={`n${i}`}
+                className="live-pop absolute flex size-6 -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full text-[12px] font-black"
+                style={{ left: `${cx * 100}%`, top: `${cy * 100}%`, background: CYAN, color: INK, animationDelay: `${i * 220 + 150}ms` }}
+              >
+                {i + 1}
+              </span>
+            );
+          })}
+        </div>
+        {shapes && (
+          <p className="mt-2 text-center text-[12px] font-medium" style={{ color: "#A6A6B0" }}>
+            {L.found(shapes.panels.length, shapes.texts.length)}
+          </p>
+        )}
+      </div>
+
+      {/* Los pasos, con el actual resaltado, y su animación. */}
+      <div className="min-w-0">
+        <h2 className="font-[family-name:var(--display)] text-[20px] uppercase tracking-wide" style={{ color: PAPER }}>
+          {L.title}
+        </h2>
+        <ol className="mt-3 space-y-2.5">
+          {L.steps.map((s, i) => (
+            <li key={s.title} className="flex gap-3 transition-opacity duration-300" style={{ opacity: i === step ? 1 : i < step ? 0.55 : 0.35 }}>
+              <span
+                className="mt-0.5 flex size-6 shrink-0 items-center justify-center font-[family-name:var(--display)] text-[13px]"
+                style={{ background: i === step ? CYAN : i < step ? PAPER : "transparent", color: INK, border: `2px solid ${i <= step ? "transparent" : "#6E6E78"}` }}
+              >
+                {i < step ? "✓" : i + 1}
+              </span>
+              <span>
+                <span className="block text-[15px] font-bold" style={{ color: PAPER }}>
+                  {s.title}
+                </span>
+                {i === step && (
+                  <span className="block text-[13px] leading-snug" style={{ color: "#A6A6B0" }}>
+                    {s.body}
+                  </span>
+                )}
+              </span>
+            </li>
+          ))}
+        </ol>
+        <div className="mt-4 max-w-[20rem] max-sm:mx-auto">{scenes[step]}</div>
+      </div>
+    </section>
+  );
 }

@@ -162,7 +162,24 @@ export async function processPage(
     ),
   );
 
-  report?.({ key: "liftingDialogue", n: panels.length });
+  if (report) {
+    // Lo encontrado, ya en orden de lectura, para que la pantalla de carga lo muestre.
+    const order = readingOrder(
+      panels.map((p) => p.bbox as Box),
+      { polygons: panels.map((p) => p.polygon) },
+    );
+    const r3 = (v: number) => Math.round(v * 1000) / 1000;
+    report({
+      key: "liftingDialogue",
+      n: panels.length,
+      shapes: {
+        panels: order.map((i) => panels[i].polygon.map(([x, y]) => [r3(x / width), r3(y / height)] as [number, number])),
+        texts: [...texts, ...balloons]
+          .filter((d) => !isFolio(d.bbox, panels, width, height))
+          .map((d) => [r3(d.bbox.x / width), r3(d.bbox.y / height), r3(d.bbox.w / width), r3(d.bbox.h / height)]),
+      },
+    });
+  }
 
   // Se levanta todo el texto de la página antes de repartirlo: hacerlo por viñeta deja
   // sin levantar los globos que quedan a caballo de un borde diagonal.

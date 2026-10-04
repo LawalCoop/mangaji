@@ -21,7 +21,7 @@ import { PAGES, directionOf, type Direction } from "../lib/memory";
 import type { Rect } from "../lib/types";
 import type { ProcessRequest, ProcessResponse } from "../lib/process.worker";
 import { Landing } from "./landing";
-import { Processing, type LogLine, type Stage as ProcessStage } from "./processing";
+import { Processing, type LogLine, type Preview, type Stage as ProcessStage } from "./processing";
 import { Toolbar } from "./toolbar";
 
 /** Hasta que la página se decodifica no se sabe su tamaño; esto evita un encuadre en cero. */
@@ -30,6 +30,10 @@ const ASSUMED_PAGE = { w: 1600, h: 2300 };
 /** Duración del viaje de la cámara entre viñetas de la misma página. */
 const TRAVEL_MS = 520;
 const DIRECTED_KEY = "mangaji:directed";
+/** Lo más que se espera, en la pantalla de carga, a que se termine de dibujar lo encontrado. */
+const LIVE_SHOW_MAX = 2500;
+/** Y lo menos: una tapa trae una sola viñeta, y si no, ni se llega a ver. */
+const LIVE_SHOW_MIN = 1800;
 const SHADE_KEY = "mangaji:shade";
 const BACKDROP_KEY = "mangaji:backdrop";
 /** Con la sombra prendida, lo oscuro que llega a estar lo más lejano de la viñeta enfocada. */
@@ -120,6 +124,16 @@ function zoomLimits(eng: { stage: { viewport: Viewport }; director: { frame: { p
   return { min: whole * ZOOM.out, max: whole * ZOOM.in };
 }
 
+/** Una página en chico, como imagen, para la pantalla de carga. */
+function thumbnail(bitmap: ImageBitmap): string {
+  const w = 480;
+  const canvas = document.createElement("canvas");
+  canvas.width = w;
+  canvas.height = Math.round((w * bitmap.height) / bitmap.width);
+  canvas.getContext("2d")!.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+  return canvas.toDataURL("image/jpeg", 0.8);
+}
+
 function framing(cam: CameraMove | undefined, rect: Rect, view: Viewport) {
   const at = (zoom: number) => Camera.fit(rect, view, FIT_MARGIN * zoom);
   switch (cam?.kind) {
@@ -195,6 +209,8 @@ export default function ReaderView({ remote }: { remote?: RemoteBook } = {}) {
   const [stage, setStage] = useState<ProcessStage | null>(null);
   const [lines, setLines] = useState<LogLine[]>([]);
   const [progress, setProgress] = useState<number | null>(null);
+  /** La página que se está procesando, en chico, para mostrarla mientras se espera. */
+  const [preview, setPreview] = useState<Preview | null>(null);
   /** Segundos que faltan para terminar de procesar el tomo. */
   const [eta, setEta] = useState<number | null>(null);
   /** Cuánto del tomo lleva procesado mientras se lee, o null si no hay nada en curso. */
@@ -805,6 +821,7 @@ export default function ReaderView({ remote }: { remote?: RemoteBook } = {}) {
     async (canvas: HTMLCanvasElement, file: File) => {
       setStatus({ kind: "processing" });
       setStage(null);
+      setPreview(null);
       setLines([{ note: { key: "unpacking" } }]);
       setProgress(0);
       setEta(null);
@@ -866,6 +883,8 @@ export default function ReaderView({ remote }: { remote?: RemoteBook } = {}) {
       const marks: number[] = [];
       const settle = new Map<number, () => void>();
       let mounted = false;
+      /** Hasta cuándo dejar a la vista lo que la IA encontró en la primera página. */
+      let liveUntil = 0;
       let failed: string | null = null;
 
       worker.onmessage = async (ev: MessageEvent<ProcessResponse>) => {
@@ -889,6 +908,11 @@ export default function ReaderView({ remote }: { remote?: RemoteBook } = {}) {
 
         if (msg.kind === "progress") {
           if (mounted) return;
+          // Lo que encontró en la página, que la pantalla de carga dibuja: hay que darle tiempo.
+          if (msg.note.key === "liftingDialogue" && msg.note.shapes) {
+            const { panels, texts } = msg.note.shapes;
+            liveUntil = performance.now() + Math.min(LIVE_SHOW_MAX, Math.max(LIVE_SHOW_MIN, panels.length * 220 + texts.length * 60 + 900));
+          }
           setStage({ kind: "page", index: msg.index, total, note: msg.note });
           setLines((l) => [...l, { note: msg.note, page: msg.index + 1 }]);
           if (msg.index === 0) {
@@ -942,6 +966,9 @@ export default function ReaderView({ remote }: { remote?: RemoteBook } = {}) {
         // debajo, sin que la lectura se corte.
         if (!mounted) {
           mounted = true;
+          // Que se llegue a ver lo que encontró la IA antes de abrir el lector.
+          const left = liveUntil - performance.now();
+          if (left > 0) await new Promise((resolve) => setTimeout(resolve, left));
           await mount(canvas, live, sizes, pageFrames, panelFrames);
         } else {
           engine.current?.director.grew();
@@ -981,6 +1008,9 @@ export default function ReaderView({ remote }: { remote?: RemoteBook } = {}) {
             await new Promise((resolve) => setTimeout(resolve, 80));
           }
           const bitmap = await cbz!.bitmap(index);
+          // Mientras se ve la pantalla de carga, la página en chico: ahí se muestra lo que la
+          // IA va encontrando. Antes de mandarla, que después ya no es nuestra.
+          if (!mounted) setPreview({ index, src: thumbnail(bitmap), aspect: bitmap.width / bitmap.height });
           const settled = new Promise<void>((resolve) => settle.set(index, resolve));
           // El bitmap se transfiere, no se copia; por eso se saca de la caché del archivo,
           // que si no queda apuntando a una imagen que ya no es suya.
@@ -1610,7 +1640,7 @@ export default function ReaderView({ remote }: { remote?: RemoteBook } = {}) {
 
       {status.kind === "processing" && (
         <div className="absolute inset-0 z-20 overflow-y-auto">
-          <Processing title={title} stage={stage} lines={lines} progress={progress} eta={eta} />
+          <Processing title={title} stage={stage} lines={lines} progress={progress} eta={eta} preview={preview} />
         </div>
       )}
 

@@ -17,7 +17,15 @@ export type Note =
   | { key: "loadingPanels" }
   | { key: "loadingDialogue" }
   | { key: "findingPanels" }
-  | { key: "liftingDialogue"; n: number };
+  | {
+      key: "liftingDialogue";
+      n: number;
+      /**
+       * Lo que encontró en la página, para mostrarlo mientras se espera: las viñetas en orden
+       * de lectura y las cajas de texto, en fracciones del ancho y el alto de la página.
+       */
+      shapes?: { panels: [number, number][][]; texts: [number, number, number, number][] };
+    };
 
 /** Un error que se le explica a quien lee, en vez de mostrarle el mensaje técnico. */
 export type Problem =
