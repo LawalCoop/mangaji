@@ -54,6 +54,8 @@ function paperColor(bitmap: ImageBitmap): number {
 const FOCUS_SCALE = 4;
 /** Cuánto de la página (su lado mayor) llega la luz alrededor de la viñeta, con la sombra. */
 const SHADOW_REACH = 0.12;
+/** Cuánto sale la capa de sombra fuera de la página, en proporción a su lado mayor. */
+const SHADOW_PAD = 0.8;
 
 /** Un color hacia el negro, en la proporción dada. */
 function darken(color: number, amount: number): number {
@@ -426,7 +428,7 @@ export class Stage {
    * más oscura con la distancia. La cercanía es la silueta engordada y muy desenfocada; la
    * sombra, una capa negra a la que se le resta esa cercanía.
    */
-  #shade(ox: CanvasRenderingContext2D, frame: Frame, sw: number, sh: number, side: number): void {
+  #shade(ox: CanvasRenderingContext2D, frame: Frame, sw: number, sh: number, side: number, pad: number): void {
     const canvas = (current: HTMLCanvasElement | null) => {
       if (current && current.width === sw && current.height === sh) return current;
       const c = document.createElement("canvas");
@@ -443,7 +445,7 @@ export class Stage {
     nx.setTransform(1, 0, 0, 1, 0, 0);
     nx.filter = "none";
     nx.clearRect(0, 0, sw, sh);
-    nx.setTransform(1 / FOCUS_SCALE, 0, 0, 1 / FOCUS_SCALE, 0, 0);
+    nx.setTransform(1 / FOCUS_SCALE, 0, 0, 1 / FOCUS_SCALE, pad, pad);
     nx.filter = `blur(${reach / FOCUS_SCALE / 2}px)`;
     nx.fillStyle = "#fff";
     nx.strokeStyle = "#fff";
@@ -474,6 +476,11 @@ export class Stage {
     const { width, height } = bitmap;
     const sw = Math.max(1, Math.round(width / FOCUS_SCALE));
     const sh = Math.max(1, Math.round(height / FOCUS_SCALE));
+    // Con sombra, la capa sale de la página: alrededor va papel que se oscurece con el mismo
+    // degradé, y así no hay corte entre la hoja y lo que queda afuera.
+    const pad = this.focusShadow > 0 ? Math.round((Math.max(width, height) * SHADOW_PAD) / FOCUS_SCALE) : 0;
+    const ow = sw + 2 * pad;
+    const oh = sh + 2 * pad;
 
     // La página desenfocada, una vez por página: está borrosa de todos modos, así que a un
     // cuarto se ve igual.
@@ -491,10 +498,10 @@ export class Stage {
     }
 
     let overlay = this.#overlayCanvas;
-    if (!overlay || overlay.width !== sw || overlay.height !== sh) {
+    if (!overlay || overlay.width !== ow || overlay.height !== oh) {
       overlay = document.createElement("canvas");
-      overlay.width = sw;
-      overlay.height = sh;
+      overlay.width = ow;
+      overlay.height = oh;
       this.#overlayCanvas = overlay;
       this.#overlayTexture?.destroy(true);
       this.#overlayTexture = Texture.from(overlay);
@@ -503,8 +510,8 @@ export class Stage {
     ox.setTransform(1, 0, 0, 1, 0, 0);
     ox.globalCompositeOperation = "source-over";
     ox.filter = "none";
-    ox.clearRect(0, 0, sw, sh);
-    ox.drawImage(page.canvas, 0, 0);
+    ox.clearRect(0, 0, ow, oh);
+    ox.drawImage(page.canvas, pad, pad);
 
     // El hueco: la silueta dilatada y con borde suave. Se dibuja en un lienzo aparte y recién
     // después se recorta de la capa: desenfocar y recortar en un mismo paso a veces no
@@ -513,18 +520,18 @@ export class Stage {
     // Trazar con grosor además de rellenar dilata la silueta, y así el desvanecido cae por
     // fuera de la viñeta en vez de repartirse a ambos lados de su borde.
     let hole = this.#holeCanvas;
-    if (!hole || hole.width !== sw || hole.height !== sh) {
+    if (!hole || hole.width !== ow || hole.height !== oh) {
       hole = document.createElement("canvas");
-      hole.width = sw;
-      hole.height = sh;
+      hole.width = ow;
+      hole.height = oh;
       this.#holeCanvas = hole;
     }
     const hx = hole.getContext("2d")!;
     const feather = this.focusFeather / FOCUS_SCALE;
     hx.setTransform(1, 0, 0, 1, 0, 0);
     hx.filter = "none";
-    hx.clearRect(0, 0, sw, sh);
-    hx.setTransform(1 / FOCUS_SCALE, 0, 0, 1 / FOCUS_SCALE, 0, 0);
+    hx.clearRect(0, 0, ow, oh);
+    hx.setTransform(1 / FOCUS_SCALE, 0, 0, 1 / FOCUS_SCALE, pad, pad);
     hx.filter = feather > 0 ? `blur(${feather / 3}px)` : "none";
     hx.fillStyle = "#fff";
     hx.strokeStyle = "#fff";
@@ -541,18 +548,30 @@ export class Stage {
     ox.globalCompositeOperation = "destination-out";
     ox.drawImage(hole, 0, 0);
     ox.globalCompositeOperation = "source-over";
-    if (this.focusShadow > 0) this.#shade(ox, frame, sw, sh, Math.max(width, height));
+    if (pad > 0) {
+      // El papel de alrededor, después del hueco: si el hueco lo recortara, junto a la viñeta
+      // enfocada se vería el fondo oscuro por fuera de la hoja.
+      ox.fillStyle = `#${this.#paper.toString(16).padStart(6, "0")}`;
+      ox.beginPath();
+      ox.rect(0, 0, ow, oh);
+      ox.rect(pad, pad, sw, sh);
+      ox.fill("evenodd");
+      this.#shade(ox, frame, ow, oh, Math.max(width, height), pad);
+    }
     this.#overlayTexture!.source.update();
-    // Fuera de la página también: si no, más allá del borde quedaba el papel claro.
-    this.#app.renderer.background.color = this.focusShadow > 0 ? darken(this.#paper, this.focusShadow) : this.#paper;
 
     // Apagado con un tinte: equivale a la capa negra semitransparente de antes.
     this.#blurred.texture = this.#overlayTexture!;
-    this.#blurred.setSize(width, height);
+    this.#blurred.setSize(width + 2 * pad * FOCUS_SCALE, height + 2 * pad * FOCUS_SCALE);
+    this.#blurred.position.set(-pad * FOCUS_SCALE, -pad * FOCUS_SCALE);
     const level = Math.round(255 * (1 - this.focusStrength));
     this.#blurred.tint = (level << 16) | (level << 8) | level;
     this.#blurred.visible = true;
+    // Más allá de la capa, el tono de su borde: papel con la sombra entera y el tinte.
+    this.#app.renderer.background.color =
+      pad > 0 ? darken(this.#paper, 1 - (1 - this.focusShadow) * (1 - this.focusStrength)) : this.#paper;
   }
+
 
   /**
    * Marca qué diálogo pertenece a la viñeta activa. El de las otras se atenúa para que no
