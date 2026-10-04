@@ -6,6 +6,8 @@ import type { ArchiveSource } from "../lib/archive";
 import type { PanelFrameSource } from "../lib/frame-sources";
 import { useI18n } from "../lib/i18n";
 import { CPU_2D } from "../lib/canvas";
+import { directedShot } from "../lib/directed";
+import type { Frame } from "../lib/types";
 
 /**
  * Modo demo (`?demo=on`): para dejar de fondo en una charla o en un stand.
@@ -41,21 +43,35 @@ const T = {
 };
 
 /**
- * Por debajo, la "viñeta" la armó el pipeline para no dejar la página sin encuadre (un dibujo
- * a sangre, una tapa): la confianza del modelo no dice nada y se muestra como página entera.
+ * Una "viñeta" que cubre casi toda la hoja con poca confianza la armó el pipeline para no
+ * dejar la página sin encuadre (un dibujo a sangre, una tapa): se muestra como página entera.
  */
-const LOW_CONF = 0.4;
+function isWhole(panel: Panel, w: number, h: number): boolean {
+  return panel.confidence < 0.4 && (panel.bbox[2] * panel.bbox[3]) / (w * h) > 0.8;
+}
 
-/** Un panel se recorre con paneo si encuadrarlo entero le haría perder mucho detalle. */
-const PAN_RATIO = 1.7;
-/** Cuánto más cerca que la viñeta entera se recorre, como mucho. */
-const PAN_MAX_ZOOM = 1.8;
+/** Desde cuánta tensión se anuncia "escena tensa", y hasta cuánta "tranquila". */
+const TENSE = 0.62;
+const CALM = 0.12;
 
 type Phase = "scan" | "panels" | "texts" | "lift" | "direct" | "done" | "waiting";
 
 type Tag = { key: number; text: string; tone: "cyan" | "magenta" };
 
 type Camera = { x: number; y: number; scale: number; ms: number };
+
+type Announce = {
+  key: number;
+  kicker: string;
+  title: string;
+  body: string;
+  tone: "cyan" | "magenta";
+  /** Para los paneos: hacia dónde va la cámara. */
+  arrow?: "left" | "down";
+};
+
+/** Cuánto queda un anuncio en el centro, y cuánto una decisión de cámara. */
+const SHOW = { phase: 2300, decision: 2400 };
 
 /** Los globos de una página, una vez cada uno (uno a caballo de dos viñetas figura en las dos). */
 function balloonsOf(page: Page) {
@@ -105,6 +121,10 @@ export function DemoView({
   const [tags, setTags] = useState<Tag[]>([]);
   const [effect, setEffect] = useState<"shake" | "flash" | "speedlines" | null>(null);
   const [view, setView] = useState({ w: 1, h: 1 });
+  /** El anuncio grande del centro: una fase que empieza o una decisión de cámara. */
+  const [announce, setAnnounce] = useState<Announce | null>(null);
+  /** La leyenda grande de abajo: qué está pasando ahora. */
+  const [caption, setCaption] = useState<{ title: string; body: string } | null>(null);
 
   const stageRef = useRef<HTMLDivElement>(null);
   const queueRef = useRef<HTMLDivElement>(null);
@@ -153,8 +173,27 @@ export function DemoView({
       if (cancelled) throw new Error("cancelado");
     };
 
+    let announceKey = 0;
+    /** Una fase que empieza: anuncio grande, se va, y queda la leyenda. */
+    const phaseStart = async (id: keyof typeof D.phases, n: number) => {
+      const ph = D.phases[id];
+      setCaption(ph);
+      setAnnounce({ key: ++announceKey, kicker: n ? `0${n}` : "", title: ph.title, body: ph.body, tone: "cyan" });
+      await sleep(SHOW.phase);
+      setAnnounce(null);
+      await sleep(250);
+    };
+    /** Una decisión de cámara, en grande. */
+    const decide = async (d: { title: string; body: string }, tone: Announce["tone"], arrow?: Announce["arrow"]) => {
+      setAnnounce({ key: ++announceKey, kicker: D.decision, title: d.title, body: d.body, tone, arrow });
+      await sleep(SHOW.decision);
+      setAnnounce(null);
+    };
+
     const run = async () => {
       setPhase("waiting");
+      setAnnounce(null);
+      setCaption(null);
       setPage(null);
       setArt(null);
       setSprites({});
@@ -206,21 +245,24 @@ export function DemoView({
 
       // 1. Escaneo.
       setPhase("scan");
+      await phaseStart("scan", 1);
       say(D.tagScan(w, h));
       await sleep(T.scan);
 
       // 2. Viñetas.
       setPhase("panels");
+      await phaseStart("panels", 2);
       for (let i = 1; i <= data.panels.length; i++) {
         setPanelsShown(i);
         const p = data.panels[i - 1];
-        say(p.confidence >= LOW_CONF ? D.tagPanel(i, Math.round(p.confidence * 100)) : D.tagWhole);
+        say(isWhole(p, w, h) ? D.tagWhole : D.tagPanel(i, Math.round(p.confidence * 100)));
         await sleep(T.panelEach);
       }
       await sleep(T.panelsHold);
 
       // 3. Textos.
       setPhase("texts");
+      await phaseStart("texts", 3);
       for (let i = 1; i <= list.length; i++) {
         setTextsShown(i);
         await sleep(T.textEach);
@@ -230,6 +272,7 @@ export function DemoView({
 
       // 4. Levantar el diálogo a la cola.
       setPhase("lift");
+      await phaseStart("lift", 4);
       setLifted(true);
       for (const b of list) {
         if (!urls[b.id]) continue;
@@ -246,55 +289,93 @@ export function DemoView({
 
       // 5. Dirección de cámara.
       setPhase("direct");
+      await phaseStart("direct", 5);
       say(D.tagDirect);
+      let toldMood = false;
+      // Los mismos encuadres que arma el lector para esta página, en el mismo orden.
+      const pageFrames: Frame[] = [];
+      for (let k = 0; k < frames.length; k++) {
+        const f = frames.at(k);
+        if (f.page === index) pageFrames.push(f);
+      }
+      const reveal = (id: string) => {
+        if (!urls[id]) return;
+        setQueued((q) => q.filter((x) => x !== id));
+        setPlaced((s) => new Set(s).add(id));
+      };
       for (let i = 0; i < data.panels.length; i++) {
         const panel = data.panels[i];
+        const frame = pageFrames[i];
         setCurrent(i);
-        const [x, y, pw, ph] = panel.bbox;
         const tension = panel.look?.tension;
         const fx = effectOf(panel);
-        // ¿Entra entera sin perder detalle, o se recorre?
-        const fit = Math.min(view.w / pw, view.h / ph);
-        const fillW = view.w / pw;
-        const fillH = view.h / ph;
-        const pan = Math.max(fillW, fillH) / fit > PAN_RATIO;
+        const order = [...panel.balloons].sort((a, b2) => a.order - b2.order).map((b) => b.id);
+        const mine = order.filter((id) => urls[id]).length;
+        setCaption({
+          title: D.panelOf(i + 1, data.panels.length),
+          body: mine ? D.balloonsBack(mine) : D.phases.direct.body,
+        });
 
-        if (pan) {
-          // Del comienzo de la lectura al final: derecha a izquierda si es ancha, arriba abajo si es alta.
-          const wide = pw / ph > view.w / view.h;
-          // Acercándose, pero no tanto que se pierda de qué se trata la viñeta.
-          const scale = Math.min(wide ? fillH * 0.92 : fillW * 0.92, fit * PAN_MAX_ZOOM);
-          const start = wide
-            ? { x: view.w - (x + pw) * scale, y: view.h / 2 - (y + ph / 2) * scale }
-            : { x: view.w / 2 - (x + pw / 2) * scale, y: -y * scale + view.h * 0.04 };
-          const end = wide
-            ? { x: -x * scale, y: start.y }
-            : { x: start.x, y: view.h - (y + ph) * scale - view.h * 0.04 };
-          setCamera({ ...start, scale, ms: T.enter });
-          say(D.tagPan(wide));
-          await sleep(T.enter);
-          setCamera({ ...end, scale, ms: T.pan });
-        } else {
+        // El plano de la cámara β del lector, tal cual.
+        const shot = frame ? directedShot(frame, view) : null;
+        if (!shot) {
+          const [x, y, pw, ph] = panel.bbox;
           frameRect({ x, y, w: pw, h: ph }, T.enter);
           await sleep(T.enter);
+          for (const id of order) {
+            reveal(id);
+            await sleep(T.balloon);
+          }
+          await sleep(T.panelHold);
+          continue;
         }
 
+        setCamera({ ...shot.from, ms: T.enter });
+        await sleep(T.enter);
         if (tension !== undefined) say(D.tagTension(Math.round(tension * 100)));
-        if (fx) {
-          say(D.tagEffect(fx.kind), "magenta");
-          setEffect(fx.kind);
-          await sleep(650);
-          setEffect(null);
-        }
 
-        // Los globos de esta viñeta salen de la cola, en orden.
-        for (const b of [...panel.balloons].sort((a, b2) => a.order - b2.order)) {
-          if (!urls[b.id]) continue;
-          setQueued((q) => q.filter((id) => id !== b.id));
-          setPlaced((s) => new Set(s).add(b.id));
-          await sleep(T.balloon);
+        if (shot.pan) {
+          const { start, end, stops } = shot.pan;
+          const dx = Math.abs(end.x - start.x) / view.w;
+          const dy = Math.abs(end.y - start.y) / view.h;
+          const wide = dx >= dy;
+          say(D.tagPan(wide));
+          await decide(wide ? D.panWide : D.panTall, "cyan", wide ? "left" : "down");
+          // El recorrido, con los globos apareciendo donde los pone el lector.
+          const ms = Math.max(shot.pan.ms, T.pan) * shot.pace;
+          setCamera({ ...end, ms });
+          const at = new Map(stops.map((st) => [st.id, st.at]));
+          const timeline = order.map((id, k) => ({ id, t: (at.get(id) ?? (k + 1) / (order.length + 1)) * ms })).sort((p, q) => p.t - q.t);
+          let elapsed = 0;
+          for (const { id, t } of timeline) {
+            await sleep(Math.max(0, t - elapsed));
+            elapsed = Math.max(elapsed, t);
+            reveal(id);
+          }
+          await sleep(Math.max(0, ms - elapsed) + 400);
+          setCamera({ ...shot.final, ms: T.enter });
+          await sleep(T.enter);
+        } else {
+          for (const step of shot.steps) setCamera({ ...step.to, ms: step.ms });
+          const shakes = shot.shake > 0 || fx?.kind === "shake";
+          if (fx || shakes) {
+            const kind = fx?.kind ?? "shake";
+            say(D.tagEffect(kind), "magenta");
+            await decide(kind === "shake" ? D.fxShake : kind === "flash" ? D.fxFlash : D.fxLines, "magenta");
+            setEffect(kind);
+            await sleep(650);
+            setEffect(null);
+          } else if (tension !== undefined && (tension >= TENSE || tension <= CALM) && !toldMood) {
+            // Una vez por página, para no cansar: cómo leyó la escena.
+            toldMood = true;
+            await decide(tension >= TENSE ? D.tense : D.calm, tension >= TENSE ? "magenta" : "cyan");
+          }
+          for (const id of order) {
+            reveal(id);
+            await sleep(T.balloon * shot.pace);
+          }
         }
-        await sleep(pan ? Math.max(T.panelHold, T.pan - panel.balloons.length * T.balloon) : T.panelHold);
+        await sleep(T.panelHold);
       }
 
       // 6. Página lista.
@@ -302,6 +383,7 @@ export function DemoView({
       setPhase("done");
       frameRect({ x: 0, y: 0, w, h }, T.outro, 0.94);
       say(D.tagDone);
+      setCaption(D.phases.done);
       await sleep(T.outro + 1200);
       if (index + 1 < frames.pageTotal) setIndex((i) => i + 1);
     };
@@ -357,13 +439,13 @@ export function DemoView({
         <p className="min-w-0 flex-1 truncate font-mono text-[11px] text-neutral-500">
           {title} · {D.page(index + 1, frames.pageTotal)}
         </p>
-        <ol className="flex gap-1 font-mono text-[10px] sm:text-[11px]">
+        <ol className="flex gap-1 font-mono text-[11px] sm:text-[14px]">
           {steps.map((s, i) => {
             const state = order.indexOf(s.id) < at ? "done" : s.id === phase ? "now" : "later";
             return (
               <li
                 key={s.id}
-                className="flex items-center gap-1.5 border px-2 py-1 uppercase tracking-wider transition-colors duration-300"
+                className="flex items-center gap-1.5 border px-2.5 py-1.5 font-bold uppercase tracking-wider transition-colors duration-300"
                 style={{
                   borderColor: state === "now" ? CYAN : "#26262E",
                   color: state === "now" ? "#07070A" : state === "done" ? "#9A9AA6" : "#4A4A55",
@@ -469,7 +551,7 @@ export function DemoView({
                     opacity: current !== null && current !== i ? 0.3 : 1,
                   }}
                 >
-                  {i + 1} · {p.confidence >= LOW_CONF ? `${Math.round(p.confidence * 100)}%` : D.whole}
+                  {i + 1} · {isWhole(p, w, h) ? D.whole : `${Math.round(p.confidence * 100)}%`}
                 </span>
               ))}
             </div>
@@ -487,8 +569,58 @@ export function DemoView({
             </div>
           )}
 
+          {/* El anuncio grande: se lee de lejos. */}
+          {announce && (
+            <div className="pointer-events-none absolute inset-0 z-20 flex items-center justify-center p-6">
+              <div
+                key={announce.key}
+                className="demo-announce max-w-[min(56rem,92%)] border-l-[10px] bg-[#07070A]/88 px-8 py-7 backdrop-blur-md sm:px-12 sm:py-9"
+                style={{ borderColor: announce.tone === "cyan" ? CYAN : MAGENTA, boxShadow: "0 30px 80px -20px rgb(0 0 0 / 0.9)" }}
+              >
+                {announce.kicker && (
+                  <p
+                    className="font-mono font-bold tracking-[0.3em] uppercase"
+                    style={{ color: announce.tone === "cyan" ? CYAN : MAGENTA, fontSize: "clamp(0.9rem, 1.8vw, 1.4rem)" }}
+                  >
+                    {announce.kicker}
+                  </p>
+                )}
+                <p
+                  className="mt-2 flex items-center gap-6 font-[family-name:var(--display)] whitespace-pre-line uppercase leading-[0.95] text-white"
+                  style={{ fontSize: "clamp(2.2rem, 6vw, 5.5rem)" }}
+                >
+                  {announce.title}
+                  {announce.arrow && (
+                    <span className={`demo-arrow-${announce.arrow} inline-block`} style={{ color: CYAN }}>
+                      {announce.arrow === "left" ? "←" : "↓"}
+                    </span>
+                  )}
+                </p>
+                <p className="mt-4 max-w-[44rem] text-neutral-300" style={{ fontSize: "clamp(1rem, 2.1vw, 1.6rem)" }}>
+                  {announce.body}
+                </p>
+              </div>
+            </div>
+          )}
+
+          {/* La leyenda grande de abajo: qué está pasando ahora. */}
+          {caption && !announce && (
+            <div className="pointer-events-none absolute inset-x-0 bottom-0 z-10 bg-gradient-to-t from-black/90 via-black/70 to-transparent px-6 pt-16 pb-5 sm:px-10">
+              <p
+                key={caption.title}
+                className="demo-tag font-[family-name:var(--display)] uppercase leading-none text-white"
+                style={{ fontSize: "clamp(1.6rem, 3.6vw, 3.2rem)" }}
+              >
+                {caption.title}
+              </p>
+              <p className="mt-2 text-neutral-300" style={{ fontSize: "clamp(0.95rem, 1.6vw, 1.35rem)" }}>
+                {caption.body}
+              </p>
+            </div>
+          )}
+
           {/* El registro: lo último que pasó, como una consola. */}
-          <div className="pointer-events-none absolute bottom-3 left-3 flex max-w-[min(26rem,80%)] flex-col gap-1.5">
+          <div className="pointer-events-none absolute top-3 right-3 z-10 flex max-w-[min(26rem,70%)] flex-col items-end gap-1.5 opacity-80">
             {tags.map((tag) => (
               <span
                 key={tag.key}
