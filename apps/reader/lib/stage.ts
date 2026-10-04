@@ -1,4 +1,4 @@
-import { Application, BlurFilter, Container, Graphics, Sprite, Texture } from "pixi.js";
+import { Application, BlurFilter, Container, Graphics, Sprite, Texture, TilingSprite } from "pixi.js";
 import { Camera, type Transform } from "./camera";
 import type { Frame, Rect } from "./types";
 
@@ -56,11 +56,15 @@ const FOCUS_SCALE = 4;
 const SHADOW_REACH = 0.12;
 /** Cuánto sale la capa de sombra fuera de la página, en proporción a su lado mayor. */
 const SHADOW_PAD = 0.8;
+/** Con el mosaico de fondo, más: la sombra tiene que cubrir todo lo que se ve alrededor. */
+const SHADOW_PAD_BACKDROP = 1.4;
 
-/** Celda de la trama del fondo, en píxeles de pantalla. */
-const HALFTONE_CELL = 7;
-/** Cuánto contraste conserva la tapa en la trama: lo justo para adivinarla, no para mirarla. */
-const HALFTONE_CONTRAST = 0.65;
+/** El mosaico del fondo: alto de cada tapa, separación y celda de la trama, en píxeles de pantalla. */
+const MOSAIC = { height: 260, gap: 24, cell: 4 };
+/** Cuánto contraste conserva la tapa en la trama. */
+const HALFTONE_CONTRAST = 0.85;
+/** Los puntos de la trama, cuánto más oscuros que el papel. */
+const HALFTONE_INK = 0.45;
 
 /**
  * La tapa como trama de puntos, a la manera de los tonos de imprenta del manga: puntos más
@@ -84,7 +88,7 @@ function halftone(cover: ImageBitmap, paper: number, w: number, cell: number): H
   const ox = out.getContext("2d")!;
   ox.fillStyle = `#${paper.toString(16).padStart(6, "0")}`;
   ox.fillRect(0, 0, w, h);
-  ox.fillStyle = `#${darken(paper, 0.3).toString(16).padStart(6, "0")}`;
+  ox.fillStyle = `#${darken(paper, HALFTONE_INK).toString(16).padStart(6, "0")}`;
   for (let r = 0; r < rows; r++) {
     for (let c = 0; c < cols; c++) {
       const i = (r * cols + c) * 4;
@@ -189,12 +193,11 @@ export class Stage {
   #focusKey = "";
 
   /**
-   * El fondo: la tapa del tomo en trama, quieta detrás de la página como un papel tapiz.
-   * Opcional ("fondo" en la barra); sin ella, el fondo es el color del papel.
+   * El fondo: la tapa del tomo en trama, chica y repetida en mosaico, quieta detrás de la
+   * página como un papel tapiz. Opcional ("fondo" en la barra); sin ella, el color del papel.
    */
-  #backdrop = new Sprite();
+  #backdrop = new TilingSprite();
   #backdropTexture: Texture | null = null;
-  #backdropSize = { w: 1, h: 1 };
 
   /** Capa de efectos, en coordenadas de pantalla. */
   #fx = new Container();
@@ -279,7 +282,6 @@ export class Stage {
       this.#focusKey = "";
       this.#blurred.visible = false;
       this.#app.renderer.background.color = this.#paper;
-      this.#backdrop.tint = 0xffffff;
     }
 
     this.#placeDialogue(frame);
@@ -295,16 +297,27 @@ export class Stage {
     this.#backdropTexture = null;
     if (!cover) {
       this.#backdrop.visible = false;
+      this.#focusKey = "";
       return;
     }
-    // Al tamaño con que se va a ver: si se estira, los puntos crecen y se pierde la tapa.
-    const { width, height } = this.#app.screen;
-    const k = Math.max(width / cover.width, height / cover.height);
+    // La baldosa al tamaño con que se va a ver: si se estira, los puntos crecen y se pierde
+    // la tapa. Con un margen de papel alrededor, para que se lea como tapas una al lado de la
+    // otra y no como una sola imagen cortada.
     const res = Math.min(window.devicePixelRatio || 1, 2);
-    const canvas = halftone(cover, this.#paper, Math.round(cover.width * k * res), HALFTONE_CELL * res);
-    this.#backdropTexture = Texture.from(canvas);
-    this.#backdropSize = { w: canvas.width, h: canvas.height };
+    const tileH = Math.round(MOSAIC.height * res);
+    const tileW = Math.round((tileH * cover.width) / cover.height);
+    const gap = Math.round(MOSAIC.gap * res);
+    const art = halftone(cover, this.#paper, tileW, MOSAIC.cell * res);
+    const tile = document.createElement("canvas");
+    tile.width = tileW + gap;
+    tile.height = tileH + gap;
+    const tx = tile.getContext("2d")!;
+    tx.fillStyle = `#${this.#paper.toString(16).padStart(6, "0")}`;
+    tx.fillRect(0, 0, tile.width, tile.height);
+    tx.drawImage(art, gap / 2, gap / 2, tileW, tileH);
+    this.#backdropTexture = Texture.from(tile);
     this.#backdrop.texture = this.#backdropTexture;
+    this.#backdrop.tileScale.set(1 / res);
     this.#backdrop.visible = true;
     this.#fitBackdrop();
     this.#focusKey = "";
@@ -314,13 +327,12 @@ export class Stage {
     return this.#backdrop.visible;
   }
 
-  /** Cubre la pantalla entera, sin deformar, centrada. */
+  /** El mosaico cubre la pantalla entera. */
   #fitBackdrop(): void {
     if (!this.#backdrop.visible) return;
     const { width, height } = this.#app.screen;
-    const k = Math.max(width / this.#backdropSize.w, height / this.#backdropSize.h);
-    this.#backdrop.setSize(this.#backdropSize.w * k, this.#backdropSize.h * k);
-    this.#backdrop.position.set((width - this.#backdropSize.w * k) / 2, (height - this.#backdropSize.h * k) / 2);
+    if (this.#backdrop.width !== width) this.#backdrop.width = width;
+    if (this.#backdrop.height !== height) this.#backdrop.height = height;
   }
 
   /** Aplica la cámara. Llamar después de `camera.update()`. */
@@ -573,10 +585,10 @@ export class Stage {
     const sh = Math.max(1, Math.round(height / FOCUS_SCALE));
     // Con sombra, la capa sale de la página: alrededor va papel que se oscurece con el mismo
     // degradé, y así no hay corte entre la hoja y lo que queda afuera.
-    // Con la tapa de fondo no: el margen de papel la taparía. Ahí la página se apoya sobre el
-    // fondo, y es el fondo entero el que se oscurece.
-    const pad =
-      this.focusShadow > 0 && !this.#backdrop.visible ? Math.round((Math.max(width, height) * SHADOW_PAD) / FOCUS_SCALE) : 0;
+    // Con la tapa de fondo, el margen va transparente —la sombra cae sobre el mosaico— y más
+    // grande, porque más allá el mosaico se ve tal cual.
+    const padShare = this.#backdrop.visible ? SHADOW_PAD_BACKDROP : SHADOW_PAD;
+    const pad = this.focusShadow > 0 ? Math.round((Math.max(width, height) * padShare) / FOCUS_SCALE) : 0;
     const ow = sw + 2 * pad;
     const oh = sh + 2 * pad;
 
@@ -648,12 +660,14 @@ export class Stage {
     ox.globalCompositeOperation = "source-over";
     if (pad > 0) {
       // El papel de alrededor, después del hueco: si el hueco lo recortara, junto a la viñeta
-      // enfocada se vería el fondo oscuro por fuera de la hoja.
-      ox.fillStyle = `#${this.#paper.toString(16).padStart(6, "0")}`;
-      ox.beginPath();
-      ox.rect(0, 0, ow, oh);
-      ox.rect(pad, pad, sw, sh);
-      ox.fill("evenodd");
+      // enfocada se vería el fondo oscuro por fuera de la hoja. Con mosaico, nada: se ve él.
+      if (!this.#backdrop.visible) {
+        ox.fillStyle = `#${this.#paper.toString(16).padStart(6, "0")}`;
+        ox.beginPath();
+        ox.rect(0, 0, ow, oh);
+        ox.rect(pad, pad, sw, sh);
+        ox.fill("evenodd");
+      }
       this.#shade(ox, frame, ow, oh, Math.max(width, height), pad);
     }
     this.#overlayTexture!.source.update();
@@ -668,7 +682,7 @@ export class Stage {
     // Más allá de la capa, el tono de su borde: papel con la sombra entera y el tinte.
     const far = 1 - (1 - this.focusShadow) * (1 - this.focusStrength);
     this.#app.renderer.background.color = pad > 0 ? darken(this.#paper, far) : this.#paper;
-    this.#backdrop.tint = this.focusShadow > 0 ? darken(0xffffff, far) : 0xffffff;
+
   }
 
 
