@@ -12,7 +12,20 @@ const touch = typeof matchMedia !== "undefined" && matchMedia("(pointer: coarse)
 
 export const PAGES = touch ? { behind: 1, ahead: 4, prefetch: 3 } : { behind: 5, ahead: 5, prefetch: 2 };
 
-/** Si una página quedó lejos de la que se lee y se puede soltar. */
-export function outOfReach(page: number, current: number): boolean {
-  return page < current - PAGES.behind || page > current + PAGES.ahead;
+/** Hacia dónde se viene leyendo: 1 adelante, -1 para atrás. */
+export type Direction = 1 | -1;
+
+/**
+ * Si una página quedó lejos de la que se lee y se puede soltar. Volviendo para atrás la
+ * ventana se da vuelta: se guardan las de atrás, que son las que vienen.
+ */
+export function outOfReach(page: number, current: number, direction: Direction = 1): boolean {
+  const before = direction > 0 ? PAGES.behind : PAGES.ahead;
+  const after = direction > 0 ? PAGES.ahead : PAGES.behind;
+  return page < current - before || page > current + after;
+}
+
+/** La dirección según la página nueva y la anterior; si es la misma, la que venía. */
+export function directionOf(next: number, previous: number, current: Direction): Direction {
+  return next > previous ? 1 : next < previous ? -1 : current;
 }

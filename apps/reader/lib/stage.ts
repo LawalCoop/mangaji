@@ -1,7 +1,7 @@
 import { Application, BlurFilter, Container, Graphics, Sprite, Texture, TilingSprite, UPDATE_PRIORITY } from "pixi.js";
 import { Camera, type Transform } from "./camera";
 import type { Frame, Rect } from "./types";
-import { outOfReach } from "./memory";
+import { directionOf, outOfReach, type Direction } from "./memory";
 
 /**
  * La superficie de render. Dibuja un encuadre —un recorte de una página— aplicando la
@@ -251,6 +251,10 @@ export class Stage {
       // —con el desenfoque del foco encima— sin diferencia que se vea a esa distancia.
       resolution: Math.min(window.devicePixelRatio || 1, 2),
       preference: "webgl",
+      // Las texturas las suelta el escenario según la página que se lee. El recolector de Pixi
+      // descargaba las que llevaban un rato sin usarse y, al volver, las subía de nuevo desde
+      // una imagen ya cerrada: la página quedaba vacía.
+      textureGCActive: false,
     });
     return new Stage(app);
   }
@@ -374,7 +378,8 @@ export class Stage {
   refocus(frame: Frame): void {
     this.#focusKey = "";
     const bitmap = this.#bitmaps.get(frame.page);
-    if (bitmap) this.show(frame, bitmap);
+    // Cerrada no sirve: queda lo que está a la vista hasta la próxima página.
+    if (bitmap && bitmap.width > 0) this.show(frame, bitmap);
   }
 
   /**
@@ -763,7 +768,11 @@ export class Stage {
 
   #texture(page: number, bitmap: ImageBitmap): Texture {
     const cached = this.#textures.get(page);
-    if (cached) return cached;
+    // Solo si es de esta misma imagen: si la página se volvió a decodificar —la anterior se
+    // soltó para ahorrar memoria—, la textura vieja apunta a una imagen cerrada y al volver
+    // a esa página se veía el globo flotando sin el dibujo.
+    if (cached && cached.source.resource === bitmap) return cached;
+    cached?.destroy(true);
     const tex = Texture.from(bitmap);
     this.#textures.set(page, tex);
     return tex;
@@ -773,18 +782,23 @@ export class Stage {
    * Libera texturas lejanas. Destruye también el ImageBitmap de origen: para entonces ya
    * está subido a la GPU, y el ArchiveSource tolera que se lo cierren por debajo.
    */
+  #direction: Direction = 1;
+  #lastPage = 0;
+
   #evict(page: number): void {
+    this.#direction = directionOf(page, this.#lastPage, this.#direction);
+    this.#lastPage = page;
     for (const [p, tex] of this.#textures) {
-      if (outOfReach(p, page)) {
+      if (outOfReach(p, page, this.#direction)) {
         tex.destroy(true);
         this.#textures.delete(p);
       }
     }
     for (const p of this.#bitmaps.keys()) {
-      if (outOfReach(p, page)) this.#bitmaps.delete(p);
+      if (outOfReach(p, page, this.#direction)) this.#bitmaps.delete(p);
     }
     for (const p of this.#blurredPages.keys()) {
-      if (outOfReach(p, page)) this.#blurredPages.delete(p);
+      if (outOfReach(p, page, this.#direction)) this.#blurredPages.delete(p);
     }
   }
 }

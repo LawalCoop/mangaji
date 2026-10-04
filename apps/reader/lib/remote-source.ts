@@ -1,7 +1,7 @@
 import { MANIFEST_FILENAME, type Manifest } from "@mangaji/format";
 import type { ArchiveSource } from "./archive";
 import { pageOfSprite } from "./live-archive";
-import { outOfReach } from "./memory";
+import { directionOf, outOfReach, type Direction } from "./memory";
 
 
 /**
@@ -17,6 +17,9 @@ export class RemoteSource implements ArchiveSource {
   #url: (name: string) => string;
   #names: Set<string>;
   #cache = new Map<number, Promise<ImageBitmap>>();
+  /** La página que se está leyendo, y hacia dónde se viene leyendo. */
+  #current = 0;
+  #direction: Direction = 1;
   #named = new Map<string, Promise<ImageBitmap>>();
   #abort = new AbortController();
 
@@ -64,19 +67,34 @@ export class RemoteSource implements ArchiveSource {
     return task;
   }
 
+  /** La página que se va a mostrar: también marca dónde se está leyendo, para saber qué soltar. */
   bitmap(index: number): Promise<ImageBitmap> {
+    this.#direction = directionOf(index, this.#current, this.#direction);
+    this.#current = index;
+    this.#evictAround(index);
+    return this.#load(index);
+  }
+
+  /** Decodifica la página, o la devuelve de la caché si sigue viva. */
+  #load(index: number): Promise<ImageBitmap> {
     const hit = this.#cache.get(index);
-    if (hit) return hit;
+    // Una imagen cerrada —la soltó quien la usaba— tiene ancho cero: se decodifica de nuevo.
+    if (hit) return hit.then((b) => (b.width > 0 ? b : (this.#cache.delete(index), this.#load(index))));
     const task = this.#decode(this.entryName(index));
     this.#cache.set(index, task);
     task.catch(() => this.#cache.delete(index));
-    this.#evictAround(index);
     return task;
   }
 
+  /**
+   * Prepara una página antes de llegar. No suelta nada: lo que se suelta se decide por la
+   * página que se lee, no por la que se prepara (preparando la que viene se soltaba la que
+   * estaba a la vista).
+   */
   prefetch(index: number): void {
     if (index < 0 || index >= this.pageCount || this.#cache.has(index)) return;
-    void this.bitmap(index).catch(() => {});
+    if (outOfReach(index, this.#current, this.#direction)) return;
+    void this.#load(index).catch(() => {});
   }
 
   release(index: number): void {
@@ -96,11 +114,11 @@ export class RemoteSource implements ArchiveSource {
   /** Lo que quedó lejos de donde se está leyendo se suelta, páginas y globos. */
   #evictAround(index: number): void {
     for (const i of [...this.#cache.keys()]) {
-      if (outOfReach(i, index)) this.release(i);
+      if (outOfReach(i, index, this.#direction)) this.release(i);
     }
     for (const [name, task] of this.#named) {
       const page = pageOfSprite(name);
-      if (page !== null && outOfReach(page, index)) {
+      if (page !== null && outOfReach(page, index, this.#direction)) {
         this.#named.delete(name);
         void task.then((b) => b.close()).catch(() => {});
       }

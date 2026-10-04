@@ -17,7 +17,7 @@ import { shelf, shelvedPages, type ShelvedPage } from "../lib/shelf";
 import { directedShot, FIT_MARGIN, type DirectedShot, type Pan } from "../lib/directed";
 import type { ProcessedPage } from "../lib/process";
 import { Stage } from "../lib/stage";
-import { PAGES } from "../lib/memory";
+import { PAGES, directionOf, type Direction } from "../lib/memory";
 import type { Rect } from "../lib/types";
 import type { ProcessRequest, ProcessResponse } from "../lib/process.worker";
 import { Landing } from "./landing";
@@ -526,6 +526,9 @@ export default function ReaderView({ remote }: { remote?: RemoteBook } = {}) {
          * volver a aparecer.
          */
         const revealed = new Set<string>();
+        /** Hacia dónde se viene leyendo, para preparar las páginas de ese lado. */
+        let readingDirection: Direction = 1;
+        let lastPage = 0;
         const draw = async (immediate: boolean) => {
           const mine = ++token;
           const frame = director.frame;
@@ -548,7 +551,6 @@ export default function ReaderView({ remote }: { remote?: RemoteBook } = {}) {
             progress: director.length > 1 ? director.index / (director.length - 1) : 1,
           });
 
-          for (let ahead = 1; ahead <= PAGES.prefetch; ahead++) source.prefetch(frame.page + ahead);
           // También el diálogo que viene: si llega recién al cambiar de página, la
           // transición se queda esperando a decodificarlo.
           for (let ahead = 1; ahead <= 8; ahead++) {
@@ -575,6 +577,11 @@ export default function ReaderView({ remote }: { remote?: RemoteBook } = {}) {
               ).values(),
             ];
 
+            // Si la página tarda —se soltó para ahorrar memoria y hay que decodificarla de
+            // nuevo—, se avisa como cuando se lee más rápido de lo que se procesa.
+            const slow = window.setTimeout(() => {
+              if (mine === token) setWaiting(true);
+            }, 250);
             const [bitmap, dialogue] = await Promise.all([
               source.bitmap(frame.page),
               Promise.all(
@@ -584,8 +591,17 @@ export default function ReaderView({ remote }: { remote?: RemoteBook } = {}) {
                   bitmap: await source.bitmapOf(layer.src),
                 })),
               ),
-            ]);
+            ]).finally(() => window.clearTimeout(slow));
             if (mine !== token) return;
+            setWaiting(false);
+
+            // Las que vienen, en la dirección en que se lee (volviendo, las de atrás), y una
+            // para el otro lado: cambiar de idea no tiene que hacer esperar. Después de pedir
+            // esta, que es la que le dice a la fuente dónde se está leyendo.
+            readingDirection = directionOf(frame.page, lastPage, readingDirection);
+            lastPage = frame.page;
+            for (let k = 1; k <= PAGES.prefetch; k++) source.prefetch(frame.page + k * readingDirection);
+            source.prefetch(frame.page - readingDirection);
 
             sizes[frame.page] = { w: bitmap.width, h: bitmap.height };
             const fresh = director.frame;
@@ -1615,7 +1631,19 @@ export default function ReaderView({ remote }: { remote?: RemoteBook } = {}) {
       )}
 
       {/* Salir del lector, junto con el resto de los controles. */}
-      {/* Cerrar el tomo y volver a la portada, junto con el resto de los controles. */}
+      {/* Cerrar el tomo y volver a la portada, junto con el resto de los controles; al lado,
+          la marca, que con el tomo abierto no aparecía en ningún lado. */}
+      {!remote && (status.kind === "ready" || status.kind === "processing") && (
+        <span
+          aria-hidden
+          className={`pointer-events-none absolute top-[max(0.75rem,env(safe-area-inset-top))] left-15 z-30 flex h-10 items-center transition-opacity duration-300 ${chrome || status.kind === "processing" ? "opacity-100" : "opacity-0"}`}
+        >
+          <span className="trim-caps font-[family-name:var(--display)] text-[22px] leading-none text-neutral-100 [text-shadow:0_1px_8px_rgb(0_0_0/0.7)]">
+            MANGAJI
+          </span>
+          <span className="ml-2 h-4 w-[3px] bg-[#FF2E88]" />
+        </span>
+      )}
       {!remote && (status.kind === "ready" || status.kind === "processing") && (
         <button
           type="button"

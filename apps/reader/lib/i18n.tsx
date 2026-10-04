@@ -131,7 +131,7 @@ const es = {
   },
 
   reader: {
-    waiting: "preparando la página que sigue…",
+    waiting: "preparando la página…",
     close: "Cerrar el tomo",
     resumed: (page: number) => `Seguís en la página ${page}`,
     resuming: (page: number) => `Ibas por la página ${page}: te llevo apenas esté lista`,
@@ -366,7 +366,7 @@ const en: Messages = {
   },
 
   reader: {
-    waiting: "getting the next page ready…",
+    waiting: "getting the page ready…",
     close: "Close the volume",
     resumed: (page: number) => `Picking up at page ${page}`,
     resuming: (page: number) => `You were on page ${page}: I'll take you there as soon as it's ready`,
@@ -602,7 +602,7 @@ const ja: Messages = {
   },
 
   reader: {
-    waiting: "次のページを準備中…",
+    waiting: "ページを準備中…",
     close: "本を閉じる",
     resumed: (page: number) => `${page} ページから続きを読めます`,
     resuming: (page: number) => `${page} ページまで読んでいました。準備ができたら移動します`,
