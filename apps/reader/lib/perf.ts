@@ -40,6 +40,8 @@ const windows: { t: number; frames: number; janks: number; worst: number; aiMs: 
 let ai: { stage: string; since: number } | null = null;
 /** Lo que tardó cada inferencia, por modelo y backend ("panels@webgpu"). */
 const models = new Map<string, number[]>();
+/** Cuánto duró cada etapa del procesamiento de una página, sumado. */
+const stages = new Map<string, { ms: number; count: number }>();
 let aiTotal = 0;
 let frames = 0;
 let started = 0;
@@ -134,7 +136,13 @@ export const perf = {
   ai(stage: string | null): void {
     if (!on) return;
     const now = performance.now();
-    if (ai) aiTotal += now - ai.since;
+    if (ai) {
+      aiTotal += now - ai.since;
+      const s = stages.get(ai.stage) ?? { ms: 0, count: 0 };
+      s.ms += now - ai.since;
+      s.count++;
+      stages.set(ai.stage, s);
+    }
     ai = stage ? { stage, since: now } : null;
     push({ t: now, tag: stage ? `ia:${stage}` : "ia:lista" });
   },
@@ -195,6 +203,9 @@ export const perf = {
         seconds: Math.round((performance.now() - started) / 1000),
         frames,
         aiSeconds: Math.round((aiTotal + (ai ? performance.now() - ai.since : 0)) / 1000),
+        stages: Object.fromEntries(
+          [...stages].map(([name, s]) => [name, { count: s.count, avgMs: Math.round(s.ms / s.count) }]),
+        ),
         models: Object.fromEntries(
           [...models].map(([name, list]) => {
             const sorted = [...list].sort((a, b) => a - b);

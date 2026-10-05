@@ -13,7 +13,8 @@ import { processPage, type ProcessedPage } from "./process";
  */
 
 export type ProcessRequest =
-  | { kind: "page"; index: number; bitmap: ImageBitmap }
+  /** `patient`: hay margen, y las inferencias pueden esperar a que la cámara se quede quieta. */
+  | { kind: "page"; index: number; bitmap: ImageBitmap; patient?: boolean }
   /** El tamaño del modelo de viñetas: más chico en las placas de video lentas. */
   | { kind: "panels"; size: number }
   /** La cámara se va a mover durante `ms`: las inferencias esperan a que termine. */
@@ -26,7 +27,7 @@ export type ProcessResponse =
   | { kind: "download"; fraction: number }
   | { kind: "progress"; index: number; note: Note }
   /** Cuánto tardó una inferencia y dónde corrió, para el diagnóstico (`?perf=on`). */
-  | { kind: "timing"; model: "panels" | "text"; ms: number; size: number; backend: string }
+  | { kind: "timing"; model: "panels" | "text" | "wait"; ms: number; size: number; backend: string }
   | { kind: "page"; page: ProcessedPage }
   | { kind: "error"; index: number; message: string };
 
@@ -54,11 +55,20 @@ function post(msg: ProcessResponse, transfer: Transferable[] = []): void {
 let movingUntil = 0;
 const QUIET_MAX_MS = 3000;
 
+/** Si la página en curso puede esperar: la que se va a leer enseguida, no. */
+let patient = false;
+
 Detector.pause = async () => {
-  const limit = performance.now() + QUIET_MAX_MS;
+  if (!patient) return;
+  const t0 = performance.now();
+  const limit = t0 + QUIET_MAX_MS;
   for (;;) {
     const wait = Math.min(movingUntil, limit) - performance.now();
-    if (wait <= 0) return;
+    if (wait <= 0) {
+      const waited = performance.now() - t0;
+      if (waited > 1) post({ kind: "timing", model: "wait", ms: waited, size: 0, backend: "-" });
+      return;
+    }
     await new Promise((resolve) => setTimeout(resolve, wait));
   }
 };
@@ -100,6 +110,7 @@ self.onmessage = (ev: MessageEvent<ProcessRequest>) => {
 
 async function work(msg: Extract<ProcessRequest, { kind: "page" }>): Promise<void> {
   try {
+    patient = msg.patient ?? false;
     const detector = await ready();
     // Se pidió otro tamaño con los modelos ya cargados: se cambia acá, entre páginas.
     if (panelSize !== undefined && detector.panelSize !== panelSize) await detector.usePanels(panelSize);

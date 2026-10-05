@@ -92,7 +92,12 @@ function rememberPanels(size: number): void {
   }
 }
 
-const MOTION_AHEAD = 1;
+/**
+ * Las páginas que vienen enseguida —la siguiente a la que se lee y la otra— se procesan sin
+ * esperar a que la cámara se quede quieta: si no, el lector llegaba a ellas y se quedaba
+ * varios segundos en "preparando la página". Un tirón molesta menos que quedarse frenado.
+ */
+const URGENT_AHEAD = 2;
 /** Lo máximo que espera, para que un lector que avanza sin parar no frene el tomo. */
 const MOTION_WAIT_MAX = 2000;
 /** En el celular se espera más a que se quede quieta: la página siguiente igual está lista. */
@@ -1058,7 +1063,7 @@ export default function ReaderView({ remote }: { remote?: RemoteBook } = {}) {
         const msg = ev.data;
 
         if (msg.kind === "timing") {
-          perf.model(`${msg.model}-${msg.size}@${msg.backend}`, msg.ms);
+          perf.model(msg.model === "wait" ? "espera a la cámara" : `${msg.model}-${msg.size}@${msg.backend}`, msg.ms);
           // Una placa de video lenta queda tomada todo lo que dura la búsqueda de viñetas, y
           // la lectura va a tirones mientras: con dos búsquedas lentas se baja un escalón de
           // tamaño, y el aparato lo recuerda. Solo cuentan las del tamaño en uso: una que ya
@@ -1182,6 +1187,7 @@ export default function ReaderView({ remote }: { remote?: RemoteBook } = {}) {
           // quieto; con pocas, solo a que la cámara termine de moverse. Si el lector ya está
           // esperando la página siguiente, no se espera nada.
           const waitStart = performance.now();
+          perf.ai("en espera");
           for (;;) {
             const eng = engine.current;
             if (!eng || eng.director.waiting) break;
@@ -1195,7 +1201,7 @@ export default function ReaderView({ remote }: { remote?: RemoteBook } = {}) {
               if (index - (engine.current?.director.frame.page ?? 0) <= BATCH.resume) break;
               continue;
             }
-            if (ahead < MOTION_AHEAD) break;
+            if (ahead <= URGENT_AHEAD) break;
             // En el celular una página tarda varios segundos y no se puede cortar: si arranca
             // apenas se queda quieta la cámara, el próximo paneo o sacudón la agarra a mitad y
             // va a tirones. Ahí se espera a que lleve un rato quieta, como quien está leyendo.
@@ -1213,7 +1219,10 @@ export default function ReaderView({ remote }: { remote?: RemoteBook } = {}) {
           // El bitmap se transfiere, no se copia; por eso se saca de la caché del archivo,
           // que si no queda apuntando a una imagen que ya no es suya.
           perf.ai("enviada");
-          worker.postMessage({ kind: "page", index, bitmap } satisfies ProcessRequest, [bitmap]);
+          // Con margen por delante, la IA cede la placa durante los movimientos de cámara; si
+          // la página se va a leer enseguida, no espera nada.
+          const patient = index - (engine.current?.director.frame.page ?? 0) > URGENT_AHEAD;
+          worker.postMessage({ kind: "page", index, bitmap, patient } satisfies ProcessRequest, [bitmap]);
           cbz!.release(index);
           await Promise.race([settled, stopped]);
           if (abandon.signal.aborted) break;
