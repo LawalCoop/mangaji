@@ -63,6 +63,33 @@ const SHADE = 0.72;
  * Con estas páginas listas por delante, el procesamiento espera a que la cámara pare. Si el
  * lector ya está esperando la página siguiente, no espera.
  */
+/**
+ * Cuándo la placa de video es lenta para el modelo de viñetas: si dos búsquedas tardan más
+ * de esto, se pasa al modelo de 960. Medido: una compu con Intel Iris Xe tarda medio
+ * segundo y no se traba; un celular con Mali-G57, seis segundos y la lectura va a tirones.
+ */
+const SLOW_PANELS_MS = 2000;
+const SLOW_PANELS_RUNS = 2;
+const SMALL_PANELS = 960;
+const PANELS_KEY = "mangaji:panels-size";
+
+function rememberedPanels(): number | null {
+  try {
+    const v = Number(localStorage.getItem(PANELS_KEY));
+    return v > 0 ? v : null;
+  } catch {
+    return null;
+  }
+}
+
+function rememberPanels(size: number): void {
+  try {
+    localStorage.setItem(PANELS_KEY, String(size));
+  } catch {
+    // Sin almacenamiento se vuelve a medir la próxima vez.
+  }
+}
+
 const MOTION_AHEAD = 1;
 /** Lo máximo que espera, para que un lector que avanza sin parar no frene el tomo. */
 const MOTION_WAIT_MAX = 2000;
@@ -1007,6 +1034,10 @@ export default function ReaderView({ remote }: { remote?: RemoteBook } = {}) {
         type: "module",
       });
       workerRef.current = worker;
+      // El tamaño que ya se eligió en este aparato, antes de cargar los modelos.
+      const panelSize = rememberedPanels();
+      if (panelSize) worker.postMessage({ kind: "panels", size: panelSize } satisfies ProcessRequest);
+      let slowPanels = 0;
       // Si se cierra el tomo, el bucle de abajo tiene que terminar y soltar el archivo: si no,
       // se quedaba esperando para siempre con el tomo entero descomprimido en memoria.
       const abandon = new AbortController();
@@ -1024,7 +1055,18 @@ export default function ReaderView({ remote }: { remote?: RemoteBook } = {}) {
         const msg = ev.data;
 
         if (msg.kind === "timing") {
-          perf.model(`${msg.model}@${msg.backend}`, msg.ms);
+          perf.model(`${msg.model}-${msg.size}@${msg.backend}`, msg.ms);
+          // Una placa de video lenta queda tomada todo lo que dura la búsqueda de viñetas, y
+          // la lectura va a tirones mientras: con dos búsquedas lentas se pasa al modelo
+          // chico, y el aparato lo recuerda.
+          if (msg.model === "panels" && msg.backend === "webgpu" && msg.size > SMALL_PANELS) {
+            if (msg.ms > SLOW_PANELS_MS) slowPanels++;
+            if (slowPanels >= SLOW_PANELS_RUNS) {
+              rememberPanels(SMALL_PANELS);
+              worker.postMessage({ kind: "panels", size: SMALL_PANELS } satisfies ProcessRequest);
+              slowPanels = -Infinity;
+            }
+          }
           return;
         }
 

@@ -30,6 +30,17 @@ export type Detection = {
 };
 
 const SIZE = 1280;
+
+/**
+ * El modelo de viñetas exportado a cada tamaño. El de 1280 es el de siempre; el de 960
+ * mira la página más chica y hace la mitad de trabajo: lo usan las placas de video lentas
+ * (en un celular con Mali-G57 el de 1280 la tomaba seis segundos por página, y la lectura
+ * iba a tirones todo ese rato). Medido en 104 páginas, encuentra el 99,6 % de las mismas
+ * viñetas y deja sin levantar alrededor del 3 % de los diálogos.
+ */
+function panelsUrl(size: number): string {
+  return asset(size === SIZE ? "/models/panels.onnx" : `/models/panels-${size}.onnx`);
+}
 const CLASSES: DetectionClass[] = ["frame", "text", "balloon"];
 
 /**
@@ -115,7 +126,7 @@ export class Detector {
   static pause: (() => Promise<void>) | null = null;
 
   /** Cuánto tardó cada inferencia, para el diagnóstico de rendimiento. */
-  static timing: ((model: "panels" | "text", ms: number) => void) | null = null;
+  static timing: ((model: "panels" | "text", ms: number, size: number) => void) | null = null;
 
   /**
    * Baja los modelos y arma las sesiones.
@@ -123,7 +134,11 @@ export class Detector {
    * `onDownload` recibe cuánto de los modelos llegó, de 0 a 1: la primera vez son unos
    * 50 MB y es lo que más tarda antes de poder leer, así que tiene que verse avanzar.
    */
-  static async load(onProgress?: Progress, onDownload?: (fraction: number) => void): Promise<Detector> {
+  static async load(
+    onProgress?: Progress,
+    onDownload?: (fraction: number) => void,
+    panelSize = SIZE,
+  ): Promise<Detector> {
     const ort = await import("onnxruntime-web");
     configure(ort);
 
@@ -144,7 +159,7 @@ export class Detector {
     // Se bajan acá y no dentro de onnxruntime, que no avisa cuánto lleva.
     onProgress?.({ key: "downloadingModels" });
     const [panelBytes, textBytes] = await downloadAll(
-      [asset("/models/panels.onnx"), asset("/models/bubbles.onnx")],
+      [panelsUrl(panelSize), asset("/models/bubbles.onnx")],
       onDownload,
     );
 
@@ -156,7 +171,30 @@ export class Detector {
     // 640 px, así que en el procesador anda bien.
     const text = await ort.InferenceSession.create(textBytes, { ...options, executionProviders: ["wasm"] });
 
-    return new Detector(ort, panels, text);
+    return new Detector(ort, panels, text, panelSize);
+  }
+
+  /** El lado con que mira el modelo de viñetas. */
+  get panelSize(): number {
+    return this.#size;
+  }
+
+  /**
+   * Cambia el modelo de viñetas por el exportado a otro tamaño, en el mismo backend. Entre
+   * páginas: con una inferencia en curso la sesión vieja no se puede soltar.
+   */
+  async usePanels(size: number): Promise<void> {
+    if (size === this.#size) return;
+    const [bytes] = await downloadAll([panelsUrl(size)]);
+    const next = await this.#ort.InferenceSession.create(bytes, {
+      executionProviders: [Detector.backend],
+      graphOptimizationLevel: "all",
+      logSeverityLevel: 3,
+    });
+    const old = this.#panels;
+    this.#panels = next;
+    this.#size = size;
+    await old.release();
   }
 
   /**
@@ -201,7 +239,7 @@ export class Detector {
     await Detector.pause?.();
     const t0 = performance.now();
     const panelOut = await this.#panels.run({ [this.#panels.inputNames[0]]: tensor });
-    Detector.timing?.("panels", performance.now() - t0);
+    Detector.timing?.("panels", performance.now() - t0, this.#size);
     const fromPanels = decodeSegmentation(panelOut, image, scale, validW, validH, this.#size);
 
     // El de texto ve la página estirada a 640×640 y devuelve las cajas ya en la medida de la
@@ -212,7 +250,7 @@ export class Detector {
       await Detector.pause?.();
       const t0 = performance.now();
       const out = await this.#text.run({ images: new this.#ort.Tensor("float32", planes, [1, 3, TEXT_SIZE, TEXT_SIZE]), orig_target_sizes: size });
-      Detector.timing?.("text", performance.now() - t0);
+      Detector.timing?.("text", performance.now() - t0, TEXT_SIZE);
       return out;
     };
     let fromText = decodeText(await text(page), image.width, image.height);

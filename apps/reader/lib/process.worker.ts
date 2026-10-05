@@ -14,6 +14,8 @@ import { processPage, type ProcessedPage } from "./process";
 
 export type ProcessRequest =
   | { kind: "page"; index: number; bitmap: ImageBitmap }
+  /** El tamaño del modelo de viñetas: más chico en las placas de video lentas. */
+  | { kind: "panels"; size: number }
   /** La cámara se va a mover durante `ms`: las inferencias esperan a que termine. */
   | { kind: "motion"; ms: number }
   | { kind: "close" };
@@ -24,16 +26,19 @@ export type ProcessResponse =
   | { kind: "download"; fraction: number }
   | { kind: "progress"; index: number; note: Note }
   /** Cuánto tardó una inferencia y dónde corrió, para el diagnóstico (`?perf=on`). */
-  | { kind: "timing"; model: "panels" | "text"; ms: number; backend: string }
+  | { kind: "timing"; model: "panels" | "text"; ms: number; size: number; backend: string }
   | { kind: "page"; page: ProcessedPage }
   | { kind: "error"; index: number; message: string };
 
 let loading: Promise<Detector> | null = null;
+/** El tamaño pedido para el modelo de viñetas; `undefined`, el de siempre. */
+let panelSize: number | undefined;
 
 function ready(): Promise<Detector> {
   loading ??= Detector.load(
     (note) => post({ kind: "models", note }),
     (fraction) => post({ kind: "download", fraction }),
+    panelSize,
   );
   return loading;
 }
@@ -58,14 +63,19 @@ Detector.pause = async () => {
   }
 };
 
-Detector.timing = (model, ms) =>
-  post({ kind: "timing", model, ms, backend: model === "panels" ? Detector.backend : "wasm" });
+Detector.timing = (model, ms, size) =>
+  post({ kind: "timing", model, ms, size, backend: model === "panels" ? Detector.backend : "wasm" });
 
 /** La página en curso: al cerrar se espera a que termine antes de soltar los modelos. */
 let current: Promise<unknown> = Promise.resolve();
 
 self.onmessage = (ev: MessageEvent<ProcessRequest>) => {
   const msg = ev.data;
+
+  if (msg.kind === "panels") {
+    panelSize = msg.size;
+    return;
+  }
 
   if (msg.kind === "motion") {
     movingUntil = Math.max(movingUntil, performance.now() + msg.ms);
@@ -91,6 +101,8 @@ self.onmessage = (ev: MessageEvent<ProcessRequest>) => {
 async function work(msg: Extract<ProcessRequest, { kind: "page" }>): Promise<void> {
   try {
     const detector = await ready();
+    // Se pidió otro tamaño con los modelos ya cargados: se cambia acá, entre páginas.
+    if (panelSize !== undefined && detector.panelSize !== panelSize) await detector.usePanels(panelSize);
     const page = await processPage(detector, msg.bitmap, msg.index, (note) =>
       post({ kind: "progress", index: msg.index, note }),
     );
