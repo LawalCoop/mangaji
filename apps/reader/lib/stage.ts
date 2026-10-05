@@ -2,6 +2,7 @@ import { Application, BlurFilter, Container, Graphics, Sprite, Texture, TilingSp
 import { Camera, type Transform } from "./camera";
 import type { Frame, Rect } from "./types";
 import { directionOf, outOfReach, type Direction } from "./memory";
+import { perf } from "./perf";
 import { CPU_2D } from "./canvas";
 
 /**
@@ -262,6 +263,12 @@ export class Stage {
       // una imagen ya cerrada: la página quedaba vacía.
       textureGCActive: false,
     });
+    if (perf.on) {
+      const gl = (app.renderer as unknown as { gl?: WebGLRenderingContext }).gl;
+      const ext = gl?.getExtension("WEBGL_debug_renderer_info");
+      perf.info("gpu", ext ? gl!.getParameter(ext.UNMASKED_RENDERER_WEBGL) : null);
+      perf.info("canvas", `${app.renderer.width}x${app.renderer.height}`);
+    }
     return new Stage(app);
   }
 
@@ -290,7 +297,7 @@ export class Stage {
       this.#evict(frame.page);
       // El fondo toma el tono del papel: cuando el encuadre se sale de la hoja, en vez de
       // un corte contra el negro parece que la página siguiera.
-      this.#paper = paperColor(bitmap);
+      this.#paper = this.#paperOf(frame.page, bitmap);
       this.#app.renderer.background.color = this.#paper;
     }
 
@@ -323,7 +330,18 @@ export class Stage {
     if (bitmap.width === 0 || page === this.#page || outOfReach(page, this.#page, this.#direction)) return;
     const tex = this.#texture(page, bitmap);
     this.#app.renderer.texture.initSource(tex.source);
+    this.#paperOf(page, bitmap);
     if (this.focusStrength > 0) this.#blurredPage(page, bitmap);
+  }
+
+  /** El tono del papel de cada página: medirlo achica la página entera, mejor una vez. */
+  #papers = new Map<number, { bitmap: ImageBitmap; color: number }>();
+  #paperOf(page: number, bitmap: ImageBitmap): number {
+    const known = this.#papers.get(page);
+    if (known && known.bitmap === bitmap) return known.color;
+    const color = paperColor(bitmap);
+    this.#papers.set(page, { bitmap, color });
+    return color;
   }
 
   /**
@@ -442,6 +460,7 @@ export class Stage {
    */
   playFx(kind: string, power: number, ms: number): void {
     this.#dirty = true;
+    perf.mark(`fx:${kind}`);
     if (kind === "shake") {
       this.camera.shake(power, ms);
       return;
@@ -861,6 +880,9 @@ export class Stage {
     }
     for (const p of this.#blurredPages.keys()) {
       if (outOfReach(p, page, this.#direction)) this.#blurredPages.delete(p);
+    }
+    for (const p of this.#papers.keys()) {
+      if (outOfReach(p, page, this.#direction)) this.#papers.delete(p);
     }
   }
 }

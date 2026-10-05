@@ -7,6 +7,7 @@ import { Camera, type Transform, type Viewport } from "../lib/camera";
 import { Director, frameDuration } from "../lib/director";
 import { PageFrameSource, PanelFrameSource } from "../lib/frame-sources";
 import { LiveSource } from "../lib/live-archive";
+import { perf } from "../lib/perf";
 import { download, resolveLink, type DownloadProgress } from "../lib/remote";
 import { problemText, useI18n } from "../lib/i18n";
 import { ProblemError, problemOf, type Problem } from "../lib/notes";
@@ -25,6 +26,7 @@ import { Processing, type LogLine, type Preview, type Stage as ProcessStage } fr
 import { Toolbar } from "./toolbar";
 import { DemoView } from "./demo-view";
 import { CPU_2D } from "../lib/canvas";
+import { PerfHud } from "./perf-hud";
 
 /** Hasta que la página se decodifica no se sabe su tamaño; esto evita un encuadre en cero. */
 const ASSUMED_PAGE = { w: 1600, h: 2300 };
@@ -208,6 +210,8 @@ export default function ReaderView({ remote }: { remote?: RemoteBook } = {}) {
     panelFrames: PanelFrameSource | null;
     /** El paneo de la cámara β, para pausarlo y moverlo con el dedo. */
     pan: { hold: (on: boolean) => boolean; scrub: (dx: number, dy: number) => void; step: (dp: number) => void };
+    /** Deja lista una página que acaba de llegar, si es la que sigue. */
+    arrived: (page: number) => void;
     dispose: () => void;
   } | null>(null);
   /** El archivo que se está escribiendo, para poder guardarlo cuando esté completo. */
@@ -225,6 +229,9 @@ export default function ReaderView({ remote }: { remote?: RemoteBook } = {}) {
     const v = new URLSearchParams(window.location.search).get("demo");
     setDemo(v === "on" || v === "1");
   }, []);
+  /** Diagnóstico de rendimiento (`?perf=on`): se decide en el navegador, después de hidratar. */
+  const [perfOn, setPerfOn] = useState(false);
+  useEffect(() => setPerfOn(perf.on), []);
   const [title, setTitle] = useState("");
   /** El tomo abierto, para anotar por dónde se va. */
   const bookRef = useRef<string | null>(null);
@@ -520,7 +527,7 @@ export default function ReaderView({ remote }: { remote?: RemoteBook } = {}) {
         // llegan tarde cuando el lector ya avanzó.
         let token = 0;
         let shownPage = -1;
-        let savedPage = -1;
+        let lastSaved = -1;
         /** La apertura ocurre una sola vez, al abrir el archivo. */
         let opening = true;
         /** Cámara experimental: los tramos a tiempo del plano, uno detrás del otro. */
@@ -613,13 +620,32 @@ export default function ReaderView({ remote }: { remote?: RemoteBook } = {}) {
         /** Hacia dónde se viene leyendo, para preparar las páginas de ese lado. */
         let readingDirection: Direction = 1;
         let lastPage = 0;
+        /**
+         * La página que sigue se deja lista —subida a la placa, con su fondo desenfocado—
+         * cuando la cámara se quedó quieta. Si todavía no salió de la IA, se vuelve a intentar
+         * cuando llega.
+         */
+        let preparing = 0;
+        const prepareNext = () => {
+          const mine = ++preparing;
+          const next = director.frame.page + readingDirection;
+          if (next < 0 || next >= sizes.length) return;
+          window.setTimeout(() => {
+            if (mine !== preparing) return;
+            source
+              .peek(next)
+              .then((b) => mine === preparing && perf.time("preparar", () => stage.prepare(next, b)))
+              .catch(() => {});
+          }, Math.max(0, motionUntil.current - performance.now()));
+        };
+
         const draw = async (immediate: boolean) => {
           const mine = ++token;
           const frame = director.frame;
           const pos = director.positionInPage;
           // Una vez por página: es una escritura al disco, y la viñeta cambia seguido.
-          if (bookRef.current && resumeRef.current === null && frame.page !== savedPage) {
-            savedPage = frame.page;
+          if (bookRef.current && resumeRef.current === null && frame.page !== lastSaved) {
+            lastSaved = frame.page;
             savePage(bookRef.current, frame.page, sizes.length);
             remoteRef.current?.onPage?.(frame.page, sizes.length);
           }
@@ -699,14 +725,15 @@ export default function ReaderView({ remote }: { remote?: RemoteBook } = {}) {
             shownPage = fresh.page;
 
             // A partir de acá, sin esperas: imagen, diálogo y cámara en el mismo cuadro.
-            stage.show(fresh, bitmap);
+            perf.mark(samePage ? "viñeta" : "página");
+            perf.time("mostrar", () => stage.show(fresh, bitmap));
 
             revealing.clear();
             if (!samePage) {
               // Los sprites se rehacen solo al cambiar de hoja; dentro de la misma página
               // se dejan como están, y así el diálogo ya leído conserva su lugar.
               revealed.clear();
-              stage.setDialogue(dialogue);
+              perf.time("globos", () => stage.setDialogue(dialogue));
             }
             for (const id of revealed) stage.revealDialogue(id, 1);
 
@@ -750,7 +777,10 @@ export default function ReaderView({ remote }: { remote?: RemoteBook } = {}) {
               stage.camera.cut(from);
               queued = steps(shot, 0);
               if (shot.pan) pan = { ...shot.pan, p: 0, delay: 0, final: shot.final, done: false, held: false };
-              if (shot.pan && shot.shake) stage.camera.shake(shot.shake, 500);
+              if (shot.pan && shot.shake) {
+                perf.mark("sacudón");
+                stage.camera.shake(shot.shake, 500);
+              }
             } else {
               // Página nueva: se entra con el movimiento que pida el beat.
               stage.camera.cut(from);
@@ -767,17 +797,7 @@ export default function ReaderView({ remote }: { remote?: RemoteBook } = {}) {
               } satisfies ProcessRequest);
             stage.render();
 
-            // La página que sigue se deja lista cuando la cámara se quedó quieta.
-            const next = fresh.page + readingDirection;
-            if (next >= 0 && next < sizes.length) {
-              window.setTimeout(() => {
-                if (mine !== token) return;
-                source
-                  .peek(next)
-                  .then((b) => mine === token && stage.prepare(next, b))
-                  .catch(() => {});
-              }, motionUntil.current - performance.now());
-            }
+            prepareNext();
           } catch (err) {
             if (mine === token) {
               console.error("[mangaji]", err);
@@ -831,6 +851,7 @@ export default function ReaderView({ remote }: { remote?: RemoteBook } = {}) {
           }
         });
 
+        perf.reset();
         const offTick = stage.onTick((dt) => {
           // El ritmo del mood se aplica al reloj del director: así escala todo de una vez
           // —pausas, tiempos de lectura, apariciones— en vez de retocar cada duración.
@@ -851,7 +872,10 @@ export default function ReaderView({ remote }: { remote?: RemoteBook } = {}) {
             step.left -= dt;
             if (step.left <= 0) {
               stage.camera.glide(step.to, step.ms);
-              if (step.shake) stage.camera.shake(step.shake, 500);
+              if (step.shake) {
+                perf.mark("sacudón");
+                stage.camera.shake(step.shake, 500);
+              }
               queued.shift();
             }
           }
@@ -890,6 +914,9 @@ export default function ReaderView({ remote }: { remote?: RemoteBook } = {}) {
           pageFrames,
           panelFrames,
           pan: panControl,
+          arrived: (page) => {
+            if (page === director.frame.page + readingDirection) prepareNext();
+          },
           dispose: () => {
             window.removeEventListener("resize", onResize);
             offTick();
@@ -1002,6 +1029,7 @@ export default function ReaderView({ remote }: { remote?: RemoteBook } = {}) {
         }
 
         if (msg.kind === "models") {
+          if (msg.note.key === "gpu" || msg.note.key === "noGpu") perf.info("ia", msg.note.key);
           // Con el lector abierto la pantalla de carga ya no se ve: actualizarla era
           // trabajo de React por cada página, justo mientras se lee.
           if (mounted) return;
@@ -1013,6 +1041,7 @@ export default function ReaderView({ remote }: { remote?: RemoteBook } = {}) {
         }
 
         if (msg.kind === "progress") {
+          perf.ai(msg.note.key);
           if (mounted) return;
           // Lo que encontró en la página, que la pantalla de carga dibuja: hay que darle tiempo.
           if (msg.note.key === "liftingDialogue" && msg.note.shapes) {
@@ -1028,12 +1057,14 @@ export default function ReaderView({ remote }: { remote?: RemoteBook } = {}) {
           return;
         }
 
+        perf.ai(null);
         if (msg.kind === "error") {
           failed = msg.message;
           settle.get(msg.index)?.();
           return;
         }
 
+        perf.mark("página procesada");
         await accept(msg.page);
       };
 
@@ -1078,6 +1109,7 @@ export default function ReaderView({ remote }: { remote?: RemoteBook } = {}) {
           await mount(canvas, live, sizes, pageFrames, panelFrames);
         } else {
           engine.current?.director.grew();
+          engine.current?.arrived(done.index);
           if (engine.current) tryResume(engine.current.director);
         }
 
@@ -1127,6 +1159,7 @@ export default function ReaderView({ remote }: { remote?: RemoteBook } = {}) {
           const settled = new Promise<void>((resolve) => settle.set(index, resolve));
           // El bitmap se transfiere, no se copia; por eso se saca de la caché del archivo,
           // que si no queda apuntando a una imagen que ya no es suya.
+          perf.ai("enviada");
           worker.postMessage({ kind: "page", index, bitmap } satisfies ProcessRequest, [bitmap]);
           cbz!.release(index);
           await Promise.race([settled, stopped]);
@@ -1895,6 +1928,7 @@ export default function ReaderView({ remote }: { remote?: RemoteBook } = {}) {
           onToggleBackdrop={toggleBackdrop}
         />
       )}
+      {perfOn && <PerfHud />}
     </main>
   );
 }
