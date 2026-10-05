@@ -487,8 +487,15 @@ const POCKET_GROW = 5;
 const POCKET_WINDOW = { times: 3, min: 60 };
 /** Tamaño de globo: el bolsillo de papel, en veces el área del texto. */
 const POCKET_AREA = { min: 0.5, max: 40 };
-/** Qué tan poco redondo puede ser el contorno de un globo (1 es un círculo). */
-const POCKET_ROUNDNESS = 3;
+/** Cuánto se meten las semillas del bolsillo dentro de la caja del texto. */
+const POCKET_INSET = 0.2;
+/**
+ * Qué tan poco redondo puede ser el contorno de un globo (1 es un círculo): liso, sin más
+ * pruebas; con puntas, si además tiene un contorno de tinta.
+ */
+const POCKET_ROUNDNESS = { smooth: 3, spiky: 10 };
+/** El contorno de tinta de un globo: qué tan oscuro, y qué parte del borde. */
+const POCKET_OUTLINE = { ink: 110, share: 0.65 };
 /** Qué parte del interior del globo tiene que ser papel (lo demás, las letras). */
 const POCKET_PAPER_SHARE = 0.75;
 /** A partir de qué nivel un píxel es papel para el bolsillo. */
@@ -520,10 +527,13 @@ function inPaperPocket(ctx: OffscreenCanvasRenderingContext2D, box: Detection["b
   const queue = new Int32Array(w * h);
   let head = 0;
   let tail = 0;
-  const bx0 = Math.max(0, Math.floor(box.x) - x0);
-  const by0 = Math.max(0, Math.floor(box.y) - y0);
-  const bx1 = Math.min(w - 1, Math.ceil(box.x + box.w) - x0);
-  const by1 = Math.min(h - 1, Math.ceil(box.y + box.h) - y0);
+  // Las semillas, un poco adentro de la caja: la caja del detector suele pasarse del borde
+  // del globo, y desde ahí el papel de afuera se colaba en el bolsillo.
+  const inset = Math.max(2, Math.round(Math.min(box.w, box.h) * POCKET_INSET));
+  const bx0 = Math.max(0, Math.floor(box.x) - x0 + inset);
+  const by0 = Math.max(0, Math.floor(box.y) - y0 + inset);
+  const bx1 = Math.min(w - 1, Math.ceil(box.x + box.w) - x0 - inset);
+  const by1 = Math.min(h - 1, Math.ceil(box.y + box.h) - y0 - inset);
   const push = (x: number, y: number) => {
     const p = y * w + x;
     if (paper[p] && !seen[p]) {
@@ -604,7 +614,30 @@ function inPaperPocket(ctx: OffscreenCanvasRenderingContext2D, box: Detection["b
       if (x === 0 || y === 0 || x === w - 1 || y === h - 1 || !inside[p - 1] || !inside[p + 1] || !inside[p - w] || !inside[p + w]) perimeter++;
     }
   }
-  if ((perimeter * perimeter) / (4 * Math.PI * area) > POCKET_ROUNDNESS) return null;
+  // Un globo es una forma lisa con un contorno de tinta. Las letras con halo blanco sobre un
+  // fondo oscuro —un título de capítulo, un grito sobre el dibujo— también dejan un
+  // "bolsillo" de papel, pero lleno de entrantes y sin contorno: borrar ahí dejaría manchones
+  // blancos. Un globo de grito, con puntas, es poco redondo pero tiene su contorno de tinta.
+  const roundness = (perimeter * perimeter) / (4 * Math.PI * area);
+  if (roundness > POCKET_ROUNDNESS.spiky) return null;
+  if (roundness > POCKET_ROUNDNESS.smooth) {
+    let ring = 0;
+    let dark = 0;
+    // Una franja de dos píxeles alrededor: el contorno escaneado tiene un borde gris de uno.
+    for (let y = 2; y < h - 2; y++) {
+      for (let x = 2; x < w - 2; x++) {
+        const p = y * w + x;
+        if (inside[p]) continue;
+        let near = false;
+        for (let dy = -2; dy <= 2 && !near; dy++) for (let dx = -2; dx <= 2; dx++) if (inside[p + dy * w + dx]) { near = true; break; }
+        if (!near) continue;
+        ring++;
+        const i = p * 4;
+        if (Math.max(px[i], px[i + 1], px[i + 2]) < POCKET_OUTLINE.ink) dark++;
+      }
+    }
+    if (!ring || dark / ring < POCKET_OUTLINE.share) return null;
+  }
   // Y adentro es casi todo papel: si entre las letras hay trama o dibujo, son halos.
   if (reached / area < POCKET_PAPER_SHARE) return null;
   return { inside, x0, y0, w, h };
@@ -629,7 +662,22 @@ const HALO_MARGIN = 56;
 
 /** El texto con halo (ver `halo.ts`): se recorta con su halo y el hueco se rellena con lo de alrededor. */
 function liftWithHalo(ctx: OffscreenCanvasRenderingContext2D, text: Detection): Sprite | null {
-  const { x, y, w, h } = text.bbox;
+  // Con la caja del detector, y si no empalma, con la caja un poco más justa: una caja
+  // generosa agarra trazos del dibujo alrededor, que también tienen halo y no se pueden tapar.
+  for (const inset of HALO_INSETS) {
+    const { x, y, w, h } = text.bbox;
+    const box = { x: x + w * inset, y: y + h * inset, w: w * (1 - 2 * inset), h: h * (1 - 2 * inset) };
+    const sprite = liftHaloBox(ctx, box);
+    if (sprite) return sprite;
+  }
+  return null;
+}
+
+/** Cuánto se achica la caja en cada intento, por lado. */
+const HALO_INSETS = [0, 0.08, 0.15];
+
+function liftHaloBox(ctx: OffscreenCanvasRenderingContext2D, bbox: Detection["bbox"]): Sprite | null {
+  const { x, y, w, h } = bbox;
   const x0 = Math.max(0, Math.floor(x) - HALO_MARGIN);
   const y0 = Math.max(0, Math.floor(y) - HALO_MARGIN);
   const cw = Math.min(ctx.canvas.width - x0, Math.ceil(x + w) - x0 + HALO_MARGIN);

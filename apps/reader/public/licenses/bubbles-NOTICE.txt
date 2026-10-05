@@ -1,0 +1,7 @@
+models/bubbles.onnx
+
+Detector de texto y globos de cómic: es el archivo `detector-v4-s_int8.onnx` de
+ogkalu/comic-text-and-bubble-detector (RT-DETR-v2), sin modificaciones.
+https://huggingface.co/ogkalu/comic-text-and-bubble-detector
+
+Distribuido bajo la licencia Apache 2.0 (ver bubbles-LICENSE.txt).

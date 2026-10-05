@@ -41,9 +41,11 @@ const CLASSES: DetectionClass[] = ["frame", "text", "balloon"];
  * que solo las usa para cubrir zonas que ninguna viñeta segura reclama.
  */
 const CONF: Record<DetectionClass, number> = { frame: SHAPE_CONF, balloon: 0.25, text: 0.05 };
-const TEXT_MODEL_CONF = 0.1;
-/** Umbral de la pasada sobre la página invertida, que además exige fondo oscuro. */
-export const INVERTED_TEXT_CONF = 0.08;
+const TEXT_MODEL_CONF = 0.3;
+/** Cuánto se agranda cada caja de texto, por lado, en proporción a su tamaño. */
+const TEXT_GROW = 0.08;
+/** Lado del cuadrado que ve el detector de texto. */
+const TEXT_SIZE = 640;
 /** Con esta fracción de la página en manchas negras se busca también letra blanca sobre negro. */
 export const INVERT_DARK_SHARE = 0.03;
 /** Con esta fracción de la página en colores fuertes se busca también texto por brillo. */
@@ -125,14 +127,19 @@ export class Detector {
     // Se bajan acá y no dentro de onnxruntime, que no avisa cuánto lleva.
     onProgress?.({ key: "downloadingModels" });
     const [panelBytes, textBytes] = await downloadAll(
-      [asset("/models/panels.onnx"), asset("/models/text.onnx")],
+      [asset("/models/panels.onnx"), asset("/models/bubbles.onnx")],
       onDownload,
     );
 
     onProgress?.({ key: "loadingPanels" });
     const panels = await ort.InferenceSession.create(panelBytes, options);
     onProgress?.({ key: "loadingDialogue" });
-    const text = await ort.InferenceSession.create(textBytes, options);
+    // El de texto viene cuantizado a 8 bits, y la placa de video no corre todas esas
+    // operaciones: las que no puede, que vayan al procesador.
+    const text = await ort.InferenceSession.create(textBytes, {
+      ...options,
+      executionProviders: Detector.backend === "webgpu" ? ["webgpu", "wasm"] : ["wasm"],
+    });
 
     return new Detector(ort, panels, text);
   }
@@ -176,28 +183,27 @@ export class Detector {
     // rechaza la segunda con "Session already started". Tampoco habría nada que ganar, porque
     // las dos sesiones comparten los mismos hilos.
     const panelOut = await this.#panels.run({ [this.#panels.inputNames[0]]: tensor });
-    const textOut = await this.#text.run({ [this.#text.inputNames[0]]: tensor });
-
     const fromPanels = decodeSegmentation(panelOut, image, scale, validW, validH);
-    let fromText = decodeBoxes(textOut, scale, image.width, image.height);
+
+    // El de texto ve la página estirada a 640×640 y devuelve las cajas ya en la medida de la
+    // página. Distingue el texto suelto, sobre el dibujo, que el de viñetas casi no ve.
+    const page = this.#prepareText(image);
+    const size = new this.#ort.Tensor("int64", BigInt64Array.from([BigInt(image.width), BigInt(image.height)]), [1, 2]);
+    const text = (planes: Float32Array) =>
+      this.#text.run({ images: new this.#ort.Tensor("float32", planes, [1, 3, TEXT_SIZE, TEXT_SIZE]), orig_target_sizes: size });
+    let fromText = decodeText(await text(page), image.width, image.height);
 
     // Los modelos aprendieron letra oscura sobre blanco: la letra blanca sobre negro —un
     // grito dentro de una mancha negra— no la ven. Con la página invertida pasa a ser letra
     // oscura sobre blanco y el de texto la encuentra. Solo en páginas con bastante negro:
     // en las demás no hay nada que buscar y sería una inferencia más por página.
     if (darkShare(image) >= INVERT_DARK_SHARE) {
-      const planes = tensor.data as Float32Array;
-      const inverted = new Float32Array(planes.length);
-      for (let i = 0; i < planes.length; i++) inverted[i] = 1 - planes[i];
-      const invertedOut = await this.#text.run({
-        [this.#text.inputNames[0]]: new this.#ort.Tensor("float32", inverted, [1, 3, SIZE, SIZE]),
-      });
+      const inverted = new Float32Array(page.length);
+      for (let i = 0; i < page.length; i++) inverted[i] = 1 - page[i];
       // Solo lo que de verdad es letra clara sobre fondo oscuro. En negativo, una trama de
       // puntos sobre blanco —la letra de una onomatopeya— también parece texto, y se borraba
       // dejando un rectángulo blanco en el dibujo.
-      // Con un umbral más bajo que el de la pasada normal: el filtro de fondo oscuro ya es
-      // exigente, y la confianza en negativo sale más justa.
-      const light = decodeBoxes(invertedOut, scale, image.width, image.height, INVERTED_TEXT_CONF)
+      const light = decodeText(await text(inverted), image.width, image.height)
         .filter((d) => onDark(image, d.bbox))
         .map((d) => ({ ...d, light: true }));
       fromText = mergeText(fromText, light);
@@ -207,20 +213,21 @@ export class Detector {
     // sobre blanco y negro. Mirando solo el brillo, el rojo pasa a ser papel y la letra queda
     // negra sobre blanco. Solo en páginas con bastante color.
     if (colorShare(image) >= COLOR_PAGE_SHARE) {
-      const planes = tensor.data as Float32Array;
-      const plane = SIZE * SIZE;
-      const light = new Float32Array(planes.length);
+      const plane = TEXT_SIZE * TEXT_SIZE;
+      const light = new Float32Array(page.length);
       for (let i = 0; i < plane; i++) {
-        const v = Math.max(planes[i], planes[plane + i], planes[2 * plane + i]);
+        const v = Math.max(page[i], page[plane + i], page[2 * plane + i]);
         light[i] = light[plane + i] = light[2 * plane + i] = v;
       }
-      const lightOut = await this.#text.run({
-        [this.#text.inputNames[0]]: new this.#ort.Tensor("float32", light, [1, 3, SIZE, SIZE]),
-      });
-      fromText = mergeText(fromText, decodeBoxes(lightOut, scale, image.width, image.height));
+      fromText = mergeText(fromText, decodeText(await text(light), image.width, image.height));
     }
 
     return mergeText(fromPanels, fromText).sort((a, b) => b.conf - a.conf);
+  }
+
+  /** Para el de texto: la página estirada a 640×640, sin normalizar (así se entrenó). */
+  #prepareText(image: ImageData): Float32Array {
+    return resizeToPlanes(image.data, image.width, image.height, TEXT_SIZE, TEXT_SIZE, TEXT_SIZE, 0);
   }
 
   /** Escala a 1280 manteniendo proporción y rellena; la imagen se ancla arriba a la izquierda. */
@@ -310,30 +317,35 @@ export function decodeSegmentation(
 }
 
 /** Salida del modelo de texto: `[1, 300, 6]`, solo cajas. */
-export function decodeBoxes(
+/**
+ * Salida del detector de texto (RT-DETR, ogkalu/comic-text-and-bubble-detector): cajas ya en
+ * la medida de la página, con clase 0 globo, 1 texto en globo y 2 texto suelto. Se usa el
+ * texto; los globos los da el modelo de viñetas, con su forma.
+ */
+export function decodeText(
   output: Ort.InferenceSession.OnnxValueMapType,
-  scale: number,
   width: number,
   height: number,
   minConf = TEXT_MODEL_CONF,
 ): Detection[] {
-  const preds = output[Object.keys(output)[0]];
-  const rows = preds.data as Float32Array;
-  const [, count, stride] = preds.dims as number[];
-
+  const labels = output.labels.data as BigInt64Array;
+  const boxes = output.boxes.data as Float32Array;
+  const scores = output.scores.data as Float32Array;
   const out: Detection[] = [];
-  for (let i = 0; i < count; i++) {
-    const base = i * stride;
-    const conf = rows[base + 4];
-    // Este modelo solo tiene dos clases y la que interesa es el texto.
-    if (conf < minConf || rows[base + 5] !== 1) continue;
-
-    const x1 = Math.max(0, rows[base] / scale);
-    const y1 = Math.max(0, rows[base + 1] / scale);
-    const x2 = Math.min(width, rows[base + 2] / scale);
-    const y2 = Math.min(height, rows[base + 3] / scale);
+  for (let i = 0; i < scores.length; i++) {
+    const conf = scores[i];
+    if (conf < minConf || Number(labels[i]) === 0) continue;
+    // Las cajas de este modelo son justas y a veces cortan la última letra de cada renglón:
+    // se agrandan un poco, que la extracción ya sabe ignorar el aire de más.
+    const bw = boxes[i * 4 + 2] - boxes[i * 4];
+    const bh = boxes[i * 4 + 3] - boxes[i * 4 + 1];
+    const px = Math.max(3, bw * TEXT_GROW);
+    const py = Math.max(3, bh * TEXT_GROW);
+    const x1 = Math.max(0, boxes[i * 4] - px);
+    const y1 = Math.max(0, boxes[i * 4 + 1] - py);
+    const x2 = Math.min(width, boxes[i * 4 + 2] + px);
+    const y2 = Math.min(height, boxes[i * 4 + 3] + py);
     if (x2 - x1 < 2 || y2 - y1 < 2) continue;
-
     out.push({
       cls: "text",
       conf,
