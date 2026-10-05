@@ -77,6 +77,10 @@ export class LiveSource implements ArchiveSource {
     return this.#load(index);
   }
 
+  peek(index: number): Promise<ImageBitmap> {
+    return this.#load(index);
+  }
+
   /** Decodifica la página, o la devuelve de la caché si sigue viva. */
   #load(index: number): Promise<ImageBitmap> {
     const hit = this.#cache.get(index);

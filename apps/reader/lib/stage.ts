@@ -277,6 +277,8 @@ export class Stage {
    */
   show(frame: Frame, bitmap: ImageBitmap): void {
     this.#dirty = true;
+    // Una imagen cerrada no se puede dibujar: queda lo que está a la vista hasta la próxima.
+    if (bitmap.width === 0) return;
     if (frame.page !== this.#page) {
       this.#bitmaps.set(frame.page, bitmap);
       this.#page = frame.page;
@@ -313,6 +315,7 @@ export class Stage {
    */
   setBackdrop(cover: ImageBitmap | null): void {
     this.#dirty = true;
+    if (cover && cover.width === 0) return;
     this.#backdropTexture?.destroy(true);
     this.#backdropTexture = null;
     if (!cover) {

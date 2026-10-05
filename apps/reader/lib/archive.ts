@@ -17,6 +17,11 @@ export interface ArchiveSource {
   bitmapOf(name: string): Promise<ImageBitmap>;
   /** Decodifica (o devuelve de caché) la página. Cancelable cerrando la fuente. */
   bitmap(index: number): Promise<ImageBitmap>;
+  /**
+   * La página, para mirarla aparte (la tapa de fondo, la demo): no cambia cuál se está
+   * leyendo, así que no suelta nada. Quien la usa no la cierra.
+   */
+  peek(index: number): Promise<ImageBitmap>;
   /** Sugerencia de precarga; los errores se ignoran a propósito. */
   prefetch(index: number): void;
   /** Libera la página de la caché. Una página son ~4 MP: sin esto la memoria crece sin techo. */
@@ -111,6 +116,10 @@ export class CbzSource implements ArchiveSource {
     this.#direction = directionOf(index, this.#current, this.#direction);
     this.#current = index;
     this.#evictAround(index);
+    return this.#load(index);
+  }
+
+  peek(index: number): Promise<ImageBitmap> {
     return this.#load(index);
   }
 

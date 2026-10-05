@@ -308,7 +308,7 @@ export default function ReaderView({ remote }: { remote?: RemoteBook } = {}) {
     else {
       try {
         // La tapa es la primera página; si no se puede leer, se queda sin fondo.
-        eng.stage.setBackdrop(await eng.source.bitmap(0));
+        eng.stage.setBackdrop(await eng.source.peek(0));
       } catch {
         eng.stage.setBackdrop(null);
       }

@@ -217,7 +217,9 @@ export function DemoView({
       const [w, h] = data.size;
 
       // El arte (sin texto) y los globos, como imágenes.
-      const bitmap = await source.bitmap(index);
+      let bitmap = await source.peek(index);
+      // Si el lector la soltó justo, se pide de nuevo.
+      if (bitmap.width === 0) bitmap = await source.peek(index);
       const canvas = document.createElement("canvas");
       canvas.width = w;
       canvas.height = h;
