@@ -1023,6 +1023,11 @@ export default function ReaderView({ remote }: { remote?: RemoteBook } = {}) {
       worker.onmessage = async (ev: MessageEvent<ProcessResponse>) => {
         const msg = ev.data;
 
+        if (msg.kind === "timing") {
+          perf.model(`${msg.model}@${msg.backend}`, msg.ms);
+          return;
+        }
+
         if (msg.kind === "download") {
           advance(unpacked + (PREP.downloaded - unpacked) * msg.fraction);
           return;

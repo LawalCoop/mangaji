@@ -94,11 +94,14 @@ export class Detector {
   #panels: Ort.InferenceSession;
   #text: Ort.InferenceSession;
   #ort: typeof Ort;
+  /** El lado del cuadrado que ve el modelo de viñetas: el de la exportación. */
+  #size: number;
 
-  private constructor(ort: typeof Ort, panels: Ort.InferenceSession, text: Ort.InferenceSession) {
+  private constructor(ort: typeof Ort, panels: Ort.InferenceSession, text: Ort.InferenceSession, size = SIZE) {
     this.#ort = ort;
     this.#panels = panels;
     this.#text = text;
+    this.#size = size;
   }
 
   /** El backend elegido: `webgpu` es unas quince veces más rápido que `wasm`. */
@@ -110,6 +113,9 @@ export class Detector {
    * la página se procesa de a tramos, entre movimiento y movimiento.
    */
   static pause: (() => Promise<void>) | null = null;
+
+  /** Cuánto tardó cada inferencia, para el diagnóstico de rendimiento. */
+  static timing: ((model: "panels" | "text", ms: number) => void) | null = null;
 
   /**
    * Baja los modelos y arma las sesiones.
@@ -163,6 +169,7 @@ export class Detector {
     textBytes: Uint8Array,
     executionProviders: string[] = ["cpu"],
     extra: Partial<Ort.InferenceSession.SessionOptions> = {},
+    panelSize = SIZE,
   ): Promise<Detector> {
     const options: Ort.InferenceSession.SessionOptions = {
       executionProviders,
@@ -172,7 +179,7 @@ export class Detector {
     };
     const panels = await ort.InferenceSession.create(panelBytes, options);
     const text = await ort.InferenceSession.create(textBytes, options);
-    return new Detector(ort, panels, text);
+    return new Detector(ort, panels, text, panelSize);
   }
 
   async release(): Promise<void> {
@@ -192,8 +199,10 @@ export class Detector {
     // rechaza la segunda con "Session already started". Tampoco habría nada que ganar, porque
     // las dos sesiones comparten los mismos hilos.
     await Detector.pause?.();
+    const t0 = performance.now();
     const panelOut = await this.#panels.run({ [this.#panels.inputNames[0]]: tensor });
-    const fromPanels = decodeSegmentation(panelOut, image, scale, validW, validH);
+    Detector.timing?.("panels", performance.now() - t0);
+    const fromPanels = decodeSegmentation(panelOut, image, scale, validW, validH, this.#size);
 
     // El de texto ve la página estirada a 640×640 y devuelve las cajas ya en la medida de la
     // página. Distingue el texto suelto, sobre el dibujo, que el de viñetas casi no ve.
@@ -201,7 +210,10 @@ export class Detector {
     const size = new this.#ort.Tensor("int64", BigInt64Array.from([BigInt(image.width), BigInt(image.height)]), [1, 2]);
     const text = async (planes: Float32Array) => {
       await Detector.pause?.();
-      return this.#text.run({ images: new this.#ort.Tensor("float32", planes, [1, 3, TEXT_SIZE, TEXT_SIZE]), orig_target_sizes: size });
+      const t0 = performance.now();
+      const out = await this.#text.run({ images: new this.#ort.Tensor("float32", planes, [1, 3, TEXT_SIZE, TEXT_SIZE]), orig_target_sizes: size });
+      Detector.timing?.("text", performance.now() - t0);
+      return out;
     };
     let fromText = decodeText(await text(page), image.width, image.height);
 
@@ -242,15 +254,16 @@ export class Detector {
     return resizeToPlanes(image.data, image.width, image.height, TEXT_SIZE, TEXT_SIZE, TEXT_SIZE, 0);
   }
 
-  /** Escala a 1280 manteniendo proporción y rellena; la imagen se ancla arriba a la izquierda. */
+  /** Escala al lado del modelo manteniendo proporción y rellena; se ancla arriba a la izquierda. */
   #prepare(image: ImageData) {
-    const scale = Math.min(SIZE / image.width, SIZE / image.height);
+    const size = this.#size;
+    const scale = Math.min(size / image.width, size / image.height);
     const validW = Math.round(image.width * scale);
     const validH = Math.round(image.height * scale);
-    const chw = resizeToPlanes(image.data, image.width, image.height, validW, validH, SIZE, PAD);
+    const chw = resizeToPlanes(image.data, image.width, image.height, validW, validH, size, PAD);
 
     return {
-      tensor: new this.#ort.Tensor("float32", chw, [1, 3, SIZE, SIZE]),
+      tensor: new this.#ort.Tensor("float32", chw, [1, 3, size, size]),
       scale,
       validW,
       validH,
@@ -272,6 +285,7 @@ export function decodeSegmentation(
   scale: number,
   validW: number,
   validH: number,
+  size = SIZE,
 ): Detection[] {
   const names = Object.keys(output);
   const preds = output[names[0]];
@@ -282,8 +296,8 @@ export function decodeSegmentation(
   const protoData = protos.data as Float32Array;
 
   const out: Detection[] = [];
-  const vw = Math.round((validW * protoW) / SIZE);
-  const vh = Math.round((validH * protoH) / SIZE);
+  const vw = Math.round((validW * protoW) / size);
+  const vh = Math.round((validH * protoH) / size);
 
   for (let i = 0; i < count; i++) {
     const base = i * stride;
@@ -298,10 +312,10 @@ export function decodeSegmentation(
 
     // La máscara: sigmoide de la combinación de prototipos, recortada a la caja para que
     // no sangre a las viñetas vecinas.
-    const bx1 = Math.max(0, Math.floor((x1 * protoW) / SIZE));
-    const by1 = Math.max(0, Math.floor((y1 * protoH) / SIZE));
-    const bx2 = Math.min(vw, Math.ceil((x2 * protoW) / SIZE));
-    const by2 = Math.min(vh, Math.ceil((y2 * protoH) / SIZE));
+    const bx1 = Math.max(0, Math.floor((x1 * protoW) / size));
+    const by1 = Math.max(0, Math.floor((y1 * protoH) / size));
+    const bx2 = Math.min(vw, Math.ceil((x2 * protoW) / size));
+    const by2 = Math.min(vh, Math.ceil((y2 * protoH) / size));
     if (bx2 <= bx1 || by2 <= by1) continue;
 
     const small = new Float32Array(vw * vh);

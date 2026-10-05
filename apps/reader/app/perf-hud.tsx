@@ -32,6 +32,7 @@ export function PerfHud() {
         {live.fps} cps · {live.janks} tirones · {live.seconds}s
       </div>
       <div>IA: {live.ai ?? "quieta"}{live.heap !== null && ` · ${live.heap} MB`}</div>
+      {live.panels && <div>viñetas: {live.panels}</div>}
       <button type="button" onClick={copy} className="mt-1 rounded bg-white/20 px-2 py-0.5">
         {copied === "yes" ? "Informe copiado" : "Copiar informe"}
       </button>

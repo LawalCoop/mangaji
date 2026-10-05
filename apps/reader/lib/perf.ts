@@ -38,6 +38,8 @@ const janks: Jank[] = [];
 /** Por cada ventana de diez segundos: cuadros, tirones y cuánto estuvo procesando la IA. */
 const windows: { t: number; frames: number; janks: number; worst: number; aiMs: number }[] = [];
 let ai: { stage: string; since: number } | null = null;
+/** Lo que tardó cada inferencia, por modelo y backend ("panels@webgpu"). */
+const models = new Map<string, number[]>();
 let aiTotal = 0;
 let frames = 0;
 let started = 0;
@@ -137,6 +139,15 @@ export const perf = {
     push({ t: now, tag: stage ? `ia:${stage}` : "ia:lista" });
   },
 
+  /** Lo que tardó una inferencia: es lo que la placa queda tomada sin poder dibujar. */
+  model(name: string, ms: number): void {
+    if (!on) return;
+    const list = models.get(name) ?? [];
+    list.push(Math.round(ms));
+    models.set(name, list);
+    push({ t: performance.now(), tag: name, ms });
+  },
+
   /** Datos del aparato que se conocen recién más tarde (la placa, el backend de la IA). */
   info(key: string, value: unknown): void {
     if (on) info[key] = value;
@@ -156,6 +167,7 @@ export const perf = {
       janks: janks.length,
       ai: ai?.stage ?? null,
       heap: heap(),
+      panels: [...models].filter(([k]) => k.startsWith("panels")).map(([k, l]) => `${k.split("@")[1]} ${l[l.length - 1]}ms`)[0] ?? null,
     };
   },
 
@@ -183,6 +195,21 @@ export const perf = {
         seconds: Math.round((performance.now() - started) / 1000),
         frames,
         aiSeconds: Math.round((aiTotal + (ai ? performance.now() - ai.since : 0)) / 1000),
+        models: Object.fromEntries(
+          [...models].map(([name, list]) => {
+            const sorted = [...list].sort((a, b) => a - b);
+            return [
+              name,
+              {
+                runs: list.length,
+                median: sorted[Math.floor(sorted.length / 2)],
+                min: sorted[0],
+                max: sorted[sorted.length - 1],
+                all: list,
+              },
+            ];
+          }),
+        ),
         windows: windows.map((w) => ({ ...w, aiMs: Math.round(w.aiMs) })),
         janks: explained,
       },

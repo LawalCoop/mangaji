@@ -23,6 +23,8 @@ export type ProcessResponse =
   /** Cuánto de los modelos se bajó, de 0 a 1. */
   | { kind: "download"; fraction: number }
   | { kind: "progress"; index: number; note: Note }
+  /** Cuánto tardó una inferencia y dónde corrió, para el diagnóstico (`?perf=on`). */
+  | { kind: "timing"; model: "panels" | "text"; ms: number; backend: string }
   | { kind: "page"; page: ProcessedPage }
   | { kind: "error"; index: number; message: string };
 
@@ -55,6 +57,9 @@ Detector.pause = async () => {
     await new Promise((resolve) => setTimeout(resolve, wait));
   }
 };
+
+Detector.timing = (model, ms) =>
+  post({ kind: "timing", model, ms, backend: model === "panels" ? Detector.backend : "wasm" });
 
 /** La página en curso: al cerrar se espera a que termine antes de soltar los modelos. */
 let current: Promise<unknown> = Promise.resolve();
