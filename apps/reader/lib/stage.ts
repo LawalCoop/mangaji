@@ -53,6 +53,8 @@ function paperColor(bitmap: ImageBitmap): number {
 }
 /** A qué fracción de la resolución se arman el desenfoque y la máscara del foco. */
 const FOCUS_SCALE = 4;
+/** A cuánto de la página se arma la máscara de la viñeta enfocada. */
+const HOLE_SCALE = 16;
 /** Cuánto de la página (su lado mayor) llega la luz alrededor de la viñeta, con la sombra. */
 const SHADOW_REACH = 0.12;
 /** Cuánto sale la capa de sombra fuera de la página, en proporción a su lado mayor. */
@@ -713,24 +715,29 @@ export class Stage {
     //
     // Trazar con grosor además de rellenar dilata la silueta, y así el desvanecido cae por
     // fuera de la viñeta en vez de repartirse a ambos lados de su borde.
+    // La máscara de la viñeta es un borde suave: se arma a un dieciseisavo, con un desenfoque
+    // chico, y se estira al pegarla. A un cuarto con un desenfoque grande tardaba decenas de
+    // milisegundos por viñeta en el celular, y eso era un tirón en cada cambio.
+    const hw = Math.max(1, Math.round(width / HOLE_SCALE));
+    const hh = Math.max(1, Math.round(height / HOLE_SCALE));
     let hole = this.#holeCanvas;
-    if (!hole || hole.width !== sw || hole.height !== sh) {
+    if (!hole || hole.width !== hw || hole.height !== hh) {
       hole = document.createElement("canvas");
-      hole.width = sw;
-      hole.height = sh;
+      hole.width = hw;
+      hole.height = hh;
       this.#holeCanvas = hole;
     }
     const hx = hole.getContext("2d", CPU_2D)!;
-    const feather = this.focusFeather / FOCUS_SCALE;
+    const feather = this.focusFeather / HOLE_SCALE;
     hx.setTransform(1, 0, 0, 1, 0, 0);
     hx.filter = "none";
-    hx.clearRect(0, 0, sw, sh);
-    hx.setTransform(1 / FOCUS_SCALE, 0, 0, 1 / FOCUS_SCALE, 0, 0);
+    hx.clearRect(0, 0, hw, hh);
+    hx.setTransform(1 / HOLE_SCALE, 0, 0, 1 / HOLE_SCALE, 0, 0);
     hx.filter = feather > 0 ? `blur(${feather / 3}px)` : "none";
     hx.fillStyle = "#fff";
     hx.strokeStyle = "#fff";
     hx.lineJoin = "round";
-    hx.lineWidth = feather * FOCUS_SCALE;
+    hx.lineWidth = feather * HOLE_SCALE;
     hx.beginPath();
     frame.polygon!.forEach(([x, y], i) => (i === 0 ? hx.moveTo(x, y) : hx.lineTo(x, y)));
     hx.closePath();
@@ -740,7 +747,8 @@ export class Stage {
 
     ox.setTransform(1, 0, 0, 1, 0, 0);
     ox.globalCompositeOperation = "destination-out";
-    ox.drawImage(hole, 0, 0);
+    ox.imageSmoothingEnabled = true;
+    ox.drawImage(hole, 0, 0, sw, sh);
     ox.globalCompositeOperation = "source-over";
     this.#overlayTexture!.source.update();
 

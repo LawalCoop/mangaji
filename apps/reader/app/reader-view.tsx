@@ -32,6 +32,8 @@ const ASSUMED_PAGE = { w: 1600, h: 2300 };
 /** Duración del viaje de la cámara entre viñetas de la misma página. */
 const TRAVEL_MS = 520;
 const DIRECTED_KEY = "mangaji:directed";
+/** Pantalla táctil: casi siempre un celular, con menos procesador y placa que una compu. */
+const TOUCH = typeof matchMedia !== "undefined" && matchMedia("(pointer: coarse)").matches;
 /** Cuánto se espera a que el worker de procesamiento cierre solo antes de matarlo. */
 const WORKER_CLOSE_MS = 15000;
 const PLAY_KEY = "mangaji:play";
@@ -62,6 +64,8 @@ const SHADE = 0.72;
 const MOTION_AHEAD = 1;
 /** Lo máximo que espera, para que un lector que avanza sin parar no frene el tomo. */
 const MOTION_WAIT_MAX = 2000;
+/** En el celular se espera más a que se quede quieta: la página siguiente igual está lista. */
+const MOTION_WAIT_MAX_TOUCH = 10000;
 /**
  * Tandas: con `pause` páginas listas por delante se deja de procesar hasta que queden
  * `resume`, salvo que el lector esté quieto.
@@ -1081,8 +1085,12 @@ export default function ReaderView({ remote }: { remote?: RemoteBook } = {}) {
               if (index - (engine.current?.director.frame.page ?? 0) <= BATCH.resume) break;
               continue;
             }
-            if (ahead < MOTION_AHEAD || now >= motionUntil.current) break;
-            if (now - waitStart > MOTION_WAIT_MAX) break;
+            if (ahead < MOTION_AHEAD) break;
+            // En el celular una página tarda varios segundos y no se puede cortar: si arranca
+            // apenas se queda quieta la cámara, el próximo paneo o sacudón la agarra a mitad y
+            // va a tirones. Ahí se espera a que lleve un rato quieta, como quien está leyendo.
+            if (now >= motionUntil.current && (!TOUCH || idle)) break;
+            if (now - waitStart > (TOUCH ? MOTION_WAIT_MAX_TOUCH : MOTION_WAIT_MAX)) break;
             await new Promise((resolve) => setTimeout(resolve, 80));
           }
           if (abandon.signal.aborted) break;
