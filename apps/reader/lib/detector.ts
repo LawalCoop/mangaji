@@ -44,6 +44,8 @@ const CONF: Record<DetectionClass, number> = { frame: SHAPE_CONF, balloon: 0.25,
 const TEXT_MODEL_CONF = 0.3;
 /** Cuánto se agranda cada caja de texto, por lado, en proporción a su tamaño. */
 const TEXT_GROW = 0.08;
+/** Pero no más que esto, en píxeles: en un texto grande, agrandar mucho alcanza el contorno del globo. */
+const TEXT_GROW_MAX = 12;
 /** Lado del cuadrado que ve el detector de texto. */
 const TEXT_SIZE = 640;
 /** Con esta fracción de la página en manchas negras se busca también letra blanca sobre negro. */
@@ -337,8 +339,10 @@ export function decodeText(
     // se agrandan un poco, que la extracción ya sabe ignorar el aire de más.
     const bw = boxes[i * 4 + 2] - boxes[i * 4];
     const bh = boxes[i * 4 + 3] - boxes[i * 4 + 1];
-    const px = Math.max(3, bw * TEXT_GROW);
-    const py = Math.max(3, bh * TEXT_GROW);
+    // Agranda más los textos chicos que los grandes: en uno grande, mucho aire alcanza el
+    // contorno del globo; en uno chico, poco aire corta letras.
+    const px = Math.min(TEXT_GROW_MAX, Math.max(3, bw * TEXT_GROW));
+    const py = Math.min(TEXT_GROW_MAX, Math.max(3, bh * TEXT_GROW));
     const x1 = Math.max(0, boxes[i * 4] - px);
     const y1 = Math.max(0, boxes[i * 4 + 1] - py);
     const x2 = Math.min(width, boxes[i * 4 + 2] + px);

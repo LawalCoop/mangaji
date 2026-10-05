@@ -13,6 +13,8 @@ import { ENTER_MS, revealBeats } from "./beats";
  * página. Más que el tope de un bloque de texto: la caja del globo incluye su aire.
  */
 const BALLOON_TEXT_AREA = 0.12;
+/** Desde qué confianza un texto grande se trata como texto y no como dibujo. */
+const SURE_TEXT = 0.7;
 import { readingOrder, type Box } from "./reading-order";
 import { polygonArea, type Point } from "./vision";
 import { CPU_2D } from "./canvas";
@@ -188,7 +190,9 @@ export async function processPage(
   const shapes = balloons.map((b) => b.polygon);
   for (const text of texts) {
     if (isFolio(text.bbox, panels, width, height)) continue;
-    const sprite = await lift(ctx, text, pageArea, shapes);
+    // Un texto que el modelo ve con mucha seguridad puede ser grande —un grito que ocupa
+    // media viñeta—: se le permite el mismo tamaño que a un globo entero.
+    const sprite = await lift(ctx, text, pageArea, shapes, text.conf >= SURE_TEXT ? BALLOON_TEXT_AREA : undefined);
     if (sprite) lifted.push({ det: text, sprite });
   }
 
