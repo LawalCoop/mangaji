@@ -134,12 +134,10 @@ export class Detector {
     onProgress?.({ key: "loadingPanels" });
     const panels = await ort.InferenceSession.create(panelBytes, options);
     onProgress?.({ key: "loadingDialogue" });
-    // El de texto viene cuantizado a 8 bits, y la placa de video no corre todas esas
-    // operaciones: las que no puede, que vayan al procesador.
-    const text = await ort.InferenceSession.create(textBytes, {
-      ...options,
-      executionProviders: Detector.backend === "webgpu" ? ["webgpu", "wasm"] : ["wasm"],
-    });
+    // El de texto, siempre en el procesador: viene cuantizado a 8 bits y la placa de video no
+    // lo carga ("ceil() in shape computation is not yet supported for MaxPool"). Es chico y a
+    // 640 px, así que en el procesador anda bien.
+    const text = await ort.InferenceSession.create(textBytes, { ...options, executionProviders: ["wasm"] });
 
     return new Detector(ort, panels, text);
   }
