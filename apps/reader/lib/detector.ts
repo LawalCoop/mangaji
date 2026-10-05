@@ -121,8 +121,14 @@ export class Detector {
     const ort = await import("onnxruntime-web");
     configure(ort);
 
+    // En el celular, nunca en la placa de video: es una sola, chica, y la comparte con el
+    // dibujo de la lectura. Medido en un celular con Mali-G57, cada búsqueda de viñetas la
+    // tomaba varios segundos seguidos sin dejarla libre, y la lectura se congelaba de a ratos
+    // de hasta dos segundos. En el procesador tarda parecido y corre en otros núcleos.
     const hasGpu =
-      "gpu" in navigator && Boolean(await (navigator as unknown as { gpu?: GPU }).gpu?.requestAdapter());
+      !isMobile() &&
+      "gpu" in navigator &&
+      Boolean(await (navigator as unknown as { gpu?: GPU }).gpu?.requestAdapter());
     Detector.backend = hasGpu ? "webgpu" : "wasm";
     onProgress?.({ key: hasGpu ? "gpu" : "noGpu" });
 
