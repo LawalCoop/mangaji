@@ -1174,6 +1174,10 @@ export default function ReaderView({ remote }: { remote?: RemoteBook } = {}) {
   const closeBook = useCallback(() => {
     fetchAbort.current?.abort();
     teardown();
+    // La música es del tomo: se va con él.
+    musicRef.current?.stop();
+    musicRef.current = null;
+    setMusic(false);
     liveRef.current = null;
     bookRef.current = null;
     resumeRef.current = null;
