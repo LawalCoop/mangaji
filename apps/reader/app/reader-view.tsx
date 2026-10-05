@@ -65,12 +65,14 @@ const SHADE = 0.72;
  */
 /**
  * Cuándo la placa de video es lenta para el modelo de viñetas: si dos búsquedas tardan más
- * de esto, se pasa al modelo de 960. Medido: una compu con Intel Iris Xe tarda medio
- * segundo y no se traba; un celular con Mali-G57, seis segundos y la lectura va a tirones.
+ * de esto, se baja un escalón de tamaño. Medido: una compu con Intel Iris Xe tarda medio
+ * segundo a 1280 y no se traba; un celular con Mali-G57, seis segundos a 1280 y tres y
+ * medio a 960, con la lectura a tirones mientras dura.
  */
 const SLOW_PANELS_MS = 2000;
 const SLOW_PANELS_RUNS = 2;
-const SMALL_PANELS = 960;
+/** Los tamaños del modelo de viñetas, del de siempre al más liviano. */
+const PANEL_STEPS = [1280, 960, 640];
 const PANELS_KEY = "mangaji:panels-size";
 
 function rememberedPanels(): number | null {
@@ -1038,6 +1040,7 @@ export default function ReaderView({ remote }: { remote?: RemoteBook } = {}) {
       const panelSize = rememberedPanels();
       if (panelSize) worker.postMessage({ kind: "panels", size: panelSize } satisfies ProcessRequest);
       let slowPanels = 0;
+      let panelsNow = panelSize ?? PANEL_STEPS[0];
       // Si se cierra el tomo, el bucle de abajo tiene que terminar y soltar el archivo: si no,
       // se quedaba esperando para siempre con el tomo entero descomprimido en memoria.
       const abandon = new AbortController();
@@ -1057,14 +1060,17 @@ export default function ReaderView({ remote }: { remote?: RemoteBook } = {}) {
         if (msg.kind === "timing") {
           perf.model(`${msg.model}-${msg.size}@${msg.backend}`, msg.ms);
           // Una placa de video lenta queda tomada todo lo que dura la búsqueda de viñetas, y
-          // la lectura va a tirones mientras: con dos búsquedas lentas se pasa al modelo
-          // chico, y el aparato lo recuerda.
-          if (msg.model === "panels" && msg.backend === "webgpu" && msg.size > SMALL_PANELS) {
+          // la lectura va a tirones mientras: con dos búsquedas lentas se baja un escalón de
+          // tamaño, y el aparato lo recuerda. Solo cuentan las del tamaño en uso: una que ya
+          // estaba en marcha al cambiar no dice nada del nuevo.
+          const smaller = PANEL_STEPS[PANEL_STEPS.indexOf(msg.size) + 1];
+          if (msg.model === "panels" && msg.backend === "webgpu" && msg.size === panelsNow && smaller) {
             if (msg.ms > SLOW_PANELS_MS) slowPanels++;
             if (slowPanels >= SLOW_PANELS_RUNS) {
-              rememberPanels(SMALL_PANELS);
-              worker.postMessage({ kind: "panels", size: SMALL_PANELS } satisfies ProcessRequest);
-              slowPanels = -Infinity;
+              rememberPanels(smaller);
+              worker.postMessage({ kind: "panels", size: smaller } satisfies ProcessRequest);
+              panelsNow = smaller;
+              slowPanels = 0;
             }
           }
           return;

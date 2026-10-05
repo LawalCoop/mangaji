@@ -32,11 +32,12 @@ export type Detection = {
 const SIZE = 1280;
 
 /**
- * El modelo de viñetas exportado a cada tamaño. El de 1280 es el de siempre; el de 960
- * mira la página más chica y hace la mitad de trabajo: lo usan las placas de video lentas
- * (en un celular con Mali-G57 el de 1280 la tomaba seis segundos por página, y la lectura
- * iba a tirones todo ese rato). Medido en 104 páginas, encuentra el 99,6 % de las mismas
- * viñetas y deja sin levantar alrededor del 3 % de los diálogos.
+ * El modelo de viñetas exportado a cada tamaño. El de 1280 es el de siempre; los más
+ * chicos miran la página más chica y los usan las placas de video lentas (en un celular con
+ * Mali-G57 el de 1280 la tomaba seis segundos por página, y la lectura iba a tirones todo
+ * ese rato). Medido en 104 páginas contra el de 1280: el de 960 hace la mitad de trabajo,
+ * encuentra el 99,6 % de las mismas viñetas y deja sin levantar ~3,5 % de los diálogos; el
+ * de 640, la cuarta parte, 99,4 % y ~6 %.
  */
 function panelsUrl(size: number): string {
   return asset(size === SIZE ? "/models/panels.onnx" : `/models/panels-${size}.onnx`);
