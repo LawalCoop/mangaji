@@ -29,9 +29,15 @@ export class LiveSource implements ArchiveSource {
 
   /** Incorpora una página recién procesada. Llegan en orden. */
   add(page: ProcessedPage | ShelvedPage): void {
-    this.#pages[page.index] = page;
-    this.#bytes.set(`pages/${page.id}.webp`, page.image);
-    for (const [name, data] of Object.entries(page.sprites)) this.#bytes.set(name, data);
+    // Como Blob y no como bytes: un tomo entero de páginas procesadas, guardado en la memoria
+    // de JavaScript, crecía sin parar mientras se leía y en el celular hacía saltar al
+    // recolector a cada rato. Un Blob lo guarda el navegador, que puede pasarlo a disco.
+    const blob = (b: Uint8Array | Blob) => (b instanceof Blob ? b : new Blob([b as unknown as BlobPart]));
+    const sprites = Object.fromEntries(Object.entries(page.sprites).map(([k, v]) => [k, blob(v)]));
+    const kept: ShelvedPage = { ...page, image: blob(page.image), sprites };
+    this.#pages[page.index] = kept;
+    this.#bytes.set(`pages/${page.id}.webp`, kept.image);
+    for (const [name, data] of Object.entries(sprites)) this.#bytes.set(name, data);
   }
 
   /** Todo lo procesado hasta ahora, para armar el `.cbza` al terminar. */

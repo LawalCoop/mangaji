@@ -105,6 +105,13 @@ export class Detector {
   static backend: "webgpu" | "wasm" = "wasm";
 
   /**
+   * Se espera antes de cada inferencia. En el celular la placa de video es una sola: una
+   * inferencia que coincide con un movimiento de cámara le quita los cuadros al dibujo. Así
+   * la página se procesa de a tramos, entre movimiento y movimiento.
+   */
+  static pause: (() => Promise<void>) | null = null;
+
+  /**
    * Baja los modelos y arma las sesiones.
    *
    * `onDownload` recibe cuánto de los modelos llegó, de 0 a 1: la primera vez son unos
@@ -184,6 +191,7 @@ export class Detector {
     // Uno después del otro, no en paralelo: el runtime admite una sola inferencia por vez y
     // rechaza la segunda con "Session already started". Tampoco habría nada que ganar, porque
     // las dos sesiones comparten los mismos hilos.
+    await Detector.pause?.();
     const panelOut = await this.#panels.run({ [this.#panels.inputNames[0]]: tensor });
     const fromPanels = decodeSegmentation(panelOut, image, scale, validW, validH);
 
@@ -191,8 +199,10 @@ export class Detector {
     // página. Distingue el texto suelto, sobre el dibujo, que el de viñetas casi no ve.
     const page = this.#prepareText(image);
     const size = new this.#ort.Tensor("int64", BigInt64Array.from([BigInt(image.width), BigInt(image.height)]), [1, 2]);
-    const text = (planes: Float32Array) =>
-      this.#text.run({ images: new this.#ort.Tensor("float32", planes, [1, 3, TEXT_SIZE, TEXT_SIZE]), orig_target_sizes: size });
+    const text = async (planes: Float32Array) => {
+      await Detector.pause?.();
+      return this.#text.run({ images: new this.#ort.Tensor("float32", planes, [1, 3, TEXT_SIZE, TEXT_SIZE]), orig_target_sizes: size });
+    };
     let fromText = decodeText(await text(page), image.width, image.height);
 
     // Los modelos aprendieron letra oscura sobre blanco: la letra blanca sobre negro —un

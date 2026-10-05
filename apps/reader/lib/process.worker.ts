@@ -14,6 +14,8 @@ import { processPage, type ProcessedPage } from "./process";
 
 export type ProcessRequest =
   | { kind: "page"; index: number; bitmap: ImageBitmap }
+  /** La cámara se va a mover durante `ms`: las inferencias esperan a que termine. */
+  | { kind: "motion"; ms: number }
   | { kind: "close" };
 
 export type ProcessResponse =
@@ -38,11 +40,32 @@ function post(msg: ProcessResponse, transfer: Transferable[] = []): void {
   self.postMessage(msg, transfer);
 }
 
+/**
+ * Hasta cuándo se mueve la cámara, en el reloj de este worker. Cada inferencia espera a que
+ * pase, pero no más que QUIET_MAX_MS: si la lectura nunca se queda quieta, igual se avanza.
+ */
+let movingUntil = 0;
+const QUIET_MAX_MS = 3000;
+
+Detector.pause = async () => {
+  const limit = performance.now() + QUIET_MAX_MS;
+  for (;;) {
+    const wait = Math.min(movingUntil, limit) - performance.now();
+    if (wait <= 0) return;
+    await new Promise((resolve) => setTimeout(resolve, wait));
+  }
+};
+
 /** La página en curso: al cerrar se espera a que termine antes de soltar los modelos. */
 let current: Promise<unknown> = Promise.resolve();
 
 self.onmessage = (ev: MessageEvent<ProcessRequest>) => {
   const msg = ev.data;
+
+  if (msg.kind === "motion") {
+    movingUntil = Math.max(movingUntil, performance.now() + msg.ms);
+    return;
+  }
 
   if (msg.kind === "close") {
     // Cortar a mitad de una inferencia en la placa de video puede dejar trabado el proceso de

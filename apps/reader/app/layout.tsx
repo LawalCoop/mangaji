@@ -18,6 +18,10 @@ const body = Zen_Kaku_Gothic_New({
   variable: "--font-body",
   weight: ["400", "500", "700", "900"],
   subsets: ["latin"],
+  // Es japonesa: Google la parte en unos noventa pedazos por peso, y precargarlos bajaba
+  // casi 3 MB de tipografía en cada visita. Sin precarga el navegador trae solo los pedazos
+  // de las letras que aparecen.
+  preload: false,
 });
 
 export const metadata: Metadata = {

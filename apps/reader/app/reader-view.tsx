@@ -1,7 +1,7 @@
 "use client";
 
 import { MANIFEST_FILENAME, Page, safeParseManifest, type CameraMove } from "@mangaji/format";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { startTransition, useCallback, useEffect, useRef, useState } from "react";
 import { CbzSource, type ArchiveSource } from "../lib/archive";
 import { Camera, type Transform, type Viewport } from "../lib/camera";
 import { Director, frameDuration } from "../lib/director";
@@ -520,6 +520,7 @@ export default function ReaderView({ remote }: { remote?: RemoteBook } = {}) {
         // llegan tarde cuando el lector ya avanzó.
         let token = 0;
         let shownPage = -1;
+        let savedPage = -1;
         /** La apertura ocurre una sola vez, al abrir el archivo. */
         let opening = true;
         /** Cámara experimental: los tramos a tiempo del plano, uno detrás del otro. */
@@ -616,7 +617,9 @@ export default function ReaderView({ remote }: { remote?: RemoteBook } = {}) {
           const mine = ++token;
           const frame = director.frame;
           const pos = director.positionInPage;
-          if (bookRef.current && resumeRef.current === null) {
+          // Una vez por página: es una escritura al disco, y la viñeta cambia seguido.
+          if (bookRef.current && resumeRef.current === null && frame.page !== savedPage) {
+            savedPage = frame.page;
             savePage(bookRef.current, frame.page, sizes.length);
             remoteRef.current?.onPage?.(frame.page, sizes.length);
           }
@@ -626,13 +629,17 @@ export default function ReaderView({ remote }: { remote?: RemoteBook } = {}) {
             resumeRef.current = null;
             setResume(null);
           }
-          setAt({
-            page: frame.page + 1,
-            pages: sizes.length,
-            panel: pos.index,
-            panels: pos.total,
-            progress: director.length > 1 ? director.index / (director.length - 1) : 1,
-          });
+          // La barra se actualiza sin apuro: dibujarla de nuevo entera en el mismo cuadro en
+          // que arranca la cámara era un tirón en cada cambio de viñeta en el celular.
+          startTransition(() =>
+            setAt({
+              page: frame.page + 1,
+              pages: sizes.length,
+              panel: pos.index,
+              panels: pos.total,
+              progress: director.length > 1 ? director.index / (director.length - 1) : 1,
+            }),
+          );
 
           // También el diálogo que viene: si llega recién al cambiar de página, la
           // transición se queda esperando a decodificarlo.
@@ -752,7 +759,25 @@ export default function ReaderView({ remote }: { remote?: RemoteBook } = {}) {
             // Lo que dura el movimiento que se acaba de pedir, con margen para la cámara en
             // mano y la aparición del diálogo.
             motionUntil.current = performance.now() + 1400 * moodRef.current.pace;
+            // En el celular, al worker también: la inferencia que viene espera a que termine.
+            if (TOUCH)
+              workerRef.current?.postMessage({
+                kind: "motion",
+                ms: motionUntil.current - performance.now(),
+              } satisfies ProcessRequest);
             stage.render();
+
+            // La página que sigue se deja lista cuando la cámara se quedó quieta.
+            const next = fresh.page + readingDirection;
+            if (next >= 0 && next < sizes.length) {
+              window.setTimeout(() => {
+                if (mine !== token) return;
+                source
+                  .peek(next)
+                  .then((b) => mine === token && stage.prepare(next, b))
+                  .catch(() => {});
+              }, motionUntil.current - performance.now());
+            }
           } catch (err) {
             if (mine === token) {
               console.error("[mangaji]", err);
@@ -1039,9 +1064,9 @@ export default function ReaderView({ remote }: { remote?: RemoteBook } = {}) {
         const from = Math.max(0, done.index - ETA_WINDOW);
         if (done.index > from) {
           const per = (marks[done.index] - marks[from]) / (done.index - from);
-          setEta(((total - done.index - 1) * per) / 1000);
+          startTransition(() => setEta(((total - done.index - 1) * per) / 1000));
         }
-        setBuilt({ done: done.index + 1, total });
+        startTransition(() => setBuilt({ done: done.index + 1, total }));
 
         // Con la primera página ya hay con qué leer: se abre el lector y el resto entra
         // debajo, sin que la lectura se corte.

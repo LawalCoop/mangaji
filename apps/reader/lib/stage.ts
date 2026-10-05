@@ -121,6 +121,9 @@ const OFF_PANEL_DIALOGUE_ALPHA = 1;
  */
 const DIALOGUE_ENTRY_BLUR = 5;
 
+/** El hueco de las líneas de velocidad, como parte del radio: con cuánto empieza y cuánto crece. */
+const SPEEDLINE_HOLE = { from: 0.28, grow: 0.34 };
+
 export class Stage {
   readonly camera = new Camera();
   /**
@@ -311,6 +314,19 @@ export class Stage {
   }
 
   /**
+   * Deja lista una página que viene, con la cámara quieta: la sube a la placa y arma su
+   * fondo desenfocado. Hacerlo recién al llegar a ella era un tirón en cada cambio de página,
+   * justo cuando arranca el movimiento: en el celular, subir una página entera tarda decenas
+   * de milisegundos.
+   */
+  prepare(page: number, bitmap: ImageBitmap): void {
+    if (bitmap.width === 0 || page === this.#page || outOfReach(page, this.#page, this.#direction)) return;
+    const tex = this.#texture(page, bitmap);
+    this.#app.renderer.texture.initSource(tex.source);
+    if (this.focusStrength > 0) this.#blurredPage(page, bitmap);
+  }
+
+  /**
    * Pone de fondo la tapa en trama, o lo saca con `null`. La trama se arma una vez: puntos
    * apenas más oscuros que el papel, con poco contraste, para que se lea como textura y no
    * compita con la página.
@@ -432,6 +448,11 @@ export class Stage {
     }
     if (kind === "flash" || kind === "speedlines") {
       this.#fxState = { kind, left: ms, total: Math.max(ms, 1), power };
+      if (kind === "speedlines") {
+        const { w, h } = this.viewport;
+        this.#drawSpeedlines(w, h, power);
+        this.#streaks.alpha = 0;
+      }
     }
   }
 
@@ -458,9 +479,10 @@ export class Stage {
   #fxAlive = false;
 
   #stepFx(dtMs: number): boolean {
-    this.#flash.clear();
-    this.#streaks.clear();
-    this.#curtain.clear();
+    // Las figuras se dibujan una vez y acá solo cambia su transparencia: rehacerlas en cada
+    // cuadro —el telón, el destello, las doscientas líneas de velocidad— era trabajo de
+    // geometría a sesenta cuadros por segundo, y en el celular el golpe venía con un tirón.
+    const { w, h } = this.viewport;
 
     // El telón corre por su cuenta: se abre aunque no haya ningún efecto en curso.
     const curtain = this.#curtainState;
@@ -468,46 +490,65 @@ export class Stage {
       curtain.left -= dtMs;
       if (curtain.left <= 0) {
         this.#curtainState = null;
+        this.#curtain.visible = false;
       } else {
-        const { w, h } = this.viewport;
+        this.#cover(this.#curtain, curtain.color, w, h);
         // Se despeja al principio despacio y al final rápido: deja ver la portada entrando.
-        const alpha = Math.pow(curtain.left / curtain.total, 0.7);
-        this.#curtain.rect(0, 0, w, h).fill({ color: curtain.color, alpha });
+        this.#curtain.alpha = Math.pow(curtain.left / curtain.total, 0.7);
       }
     }
 
     const state = this.#fxState;
     if (!state) {
       this.#invert.visible = false;
+      this.#flash.visible = false;
+      this.#streaks.visible = false;
       return this.#curtainState !== null;
     }
 
     state.left -= dtMs;
     if (state.left <= 0) {
       this.#fxState = null;
+      this.#invert.visible = false;
+      this.#flash.visible = false;
+      this.#streaks.visible = false;
       return false;
     }
 
-    const { w, h } = this.viewport;
     const t = 1 - state.left / state.total;
 
     if (state.kind === "flash") {
       // Arranca invirtiendo la imagen unos pocos cuadros —el impact frame del anime— y
       // recién después destella. Invertir marca el golpe mucho más que iluminar.
       if (t < 0.12) {
-        this.#invert.visible = true;
-        this.#invert.clear().rect(0, 0, w, h).fill({ color: 0xffffff, alpha: 1 });
+        this.#cover(this.#invert, 0xffffff, w, h);
+        this.#flash.visible = false;
         return true;
       }
       this.#invert.visible = false;
       const u = (t - 0.12) / 0.88;
-      const alpha = state.power * (u < 0.12 ? u / 0.12 : Math.pow(1 - (u - 0.12) / 0.88, 2));
-      this.#flash.rect(0, 0, w, h).fill({ color: 0xffffff, alpha });
+      this.#cover(this.#flash, 0xffffff, w, h);
+      this.#flash.alpha = state.power * (u < 0.12 ? u / 0.12 : Math.pow(1 - (u - 0.12) / 0.88, 2));
       return true;
     }
 
-    this.#drawSpeedlines(w, h, state.power, t);
+    // Las líneas se armaron al empezar con el hueco más chico; el hueco se abre agrandando
+    // el dibujo desde el centro, y los extremos ya están fuera de la pantalla.
+    this.#streaks.visible = true;
+    this.#streaks.position.set(w / 2, h / 2);
+    this.#streaks.scale.set((SPEEDLINE_HOLE.from + SPEEDLINE_HOLE.grow * t) / SPEEDLINE_HOLE.from);
+    this.#streaks.alpha = (t < 0.15 ? t / 0.15 : Math.pow(1 - (t - 0.15) / 0.85, 1.6)) * 0.9;
     return true;
+  }
+
+  /** Un rectángulo que tapa la pantalla; se rehace solo si cambió de tamaño o de color. */
+  #covers = new WeakMap<Graphics, string>();
+  #cover(g: Graphics, color: number, w: number, h: number): void {
+    g.visible = true;
+    const key = `${w}x${h}:${color}`;
+    if (this.#covers.get(g) === key) return;
+    this.#covers.set(g, key);
+    g.clear().rect(0, 0, w, h).fill({ color, alpha: 1 });
   }
 
   /**
@@ -516,17 +557,17 @@ export class Stage {
    * Salen del centro hacia los bordes dejando un hueco limpio en el medio, para que el
    * dibujo se siga leyendo. El hueco se abre a medida que el efecto avanza, y eso es lo que
    * da la sensación de que algo estalla hacia afuera.
+   *
+   * Se dibujan centradas en el origen, una sola vez por golpe.
    */
-  #drawSpeedlines(w: number, h: number, power: number, t: number): void {
-    const cx = w / 2;
-    const cy = h / 2;
+  #drawSpeedlines(w: number, h: number, power: number): void {
     const reach = Math.hypot(w, h) / 2;
-    const hole = reach * (0.28 + 0.34 * t);
-    const alpha = (t < 0.15 ? t / 0.15 : Math.pow(1 - (t - 0.15) / 0.85, 1.6)) * 0.9;
+    const hole = reach * SPEEDLINE_HOLE.from;
     const count = Math.round(70 + 130 * power);
+    this.#streaks.clear();
 
     for (let i = 0; i < count; i++) {
-      // Distribución fija por índice: las mismas líneas cada cuadro, sin hervir.
+      // Distribución fija por índice: las mismas líneas cada vez.
       const seed = Math.sin(i * 12.9898) * 43758.5453;
       const jitter = seed - Math.floor(seed);
       const angle = (i / count) * Math.PI * 2 + jitter * 0.05;
@@ -535,9 +576,9 @@ export class Stage {
       const width = 1 + jitter * (2 + 3 * power);
 
       this.#streaks
-        .moveTo(cx + Math.cos(angle) * start, cy + Math.sin(angle) * start)
-        .lineTo(cx + Math.cos(angle) * end, cy + Math.sin(angle) * end)
-        .stroke({ width, color: jitter > 0.5 ? 0x000000 : 0xffffff, alpha });
+        .moveTo(Math.cos(angle) * start, Math.sin(angle) * start)
+        .lineTo(Math.cos(angle) * end, Math.sin(angle) * end)
+        .stroke({ width, color: jitter > 0.5 ? 0x000000 : 0xffffff });
     }
   }
 
@@ -672,17 +713,16 @@ export class Stage {
     this.#app.renderer.background.color = this.#paper;
   }
 
-  /** Arma el foco de una viñeta: el entorno desenfocado, con el hueco de su silueta. */
-  #composeFocus(frame: Frame, bitmap: ImageBitmap): void {
-    const { width, height } = bitmap;
-    const sw = Math.max(1, Math.round(width / FOCUS_SCALE));
-    const sh = Math.max(1, Math.round(height / FOCUS_SCALE));
-
-    // La página desenfocada, una vez por página: está borrosa de todos modos, así que a un
-    // cuarto se ve igual.
+  /**
+   * La página desenfocada, una vez por página: está borrosa de todos modos, así que a un
+   * cuarto se ve igual.
+   */
+  #blurredPage(index: number, bitmap: ImageBitmap): { key: string; canvas: HTMLCanvasElement } {
     const blurKey = `${this.focusBlur}`;
-    let page = this.#blurredPages.get(frame.page);
+    let page = this.#blurredPages.get(index);
     if (!page || page.key !== blurKey) {
+      const sw = Math.max(1, Math.round(bitmap.width / FOCUS_SCALE));
+      const sh = Math.max(1, Math.round(bitmap.height / FOCUS_SCALE));
       const canvas = document.createElement("canvas");
       canvas.width = sw;
       canvas.height = sh;
@@ -690,8 +730,18 @@ export class Stage {
       cx.filter = `blur(${this.focusBlur / FOCUS_SCALE}px)`;
       cx.drawImage(bitmap, 0, 0, sw, sh);
       page = { key: blurKey, canvas };
-      this.#blurredPages.set(frame.page, page);
+      this.#blurredPages.set(index, page);
     }
+    return page;
+  }
+
+  /** Arma el foco de una viñeta: el entorno desenfocado, con el hueco de su silueta. */
+  #composeFocus(frame: Frame, bitmap: ImageBitmap): void {
+    const { width, height } = bitmap;
+    const sw = Math.max(1, Math.round(width / FOCUS_SCALE));
+    const sh = Math.max(1, Math.round(height / FOCUS_SCALE));
+
+    const page = this.#blurredPage(frame.page, bitmap);
 
     let overlay = this.#overlayCanvas;
     if (!overlay || overlay.width !== sw || overlay.height !== sh) {
