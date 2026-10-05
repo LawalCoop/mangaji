@@ -484,16 +484,20 @@ export async function lift(
 /** Cuánto se agranda la caja de un texto que está en un globo no detectado. */
 const POCKET_GROW = 5;
 /** Ventana alrededor del texto donde se busca el globo: veces su lado mayor, y mínimo en px. */
-const POCKET_WINDOW = { times: 1.6, min: 36 };
+const POCKET_WINDOW = { times: 3, min: 60 };
 /** Tamaño de globo: el bolsillo de papel, en veces el área del texto. */
-const POCKET_AREA = { min: 1.2, max: 40 };
+const POCKET_AREA = { min: 0.5, max: 40 };
+/** Qué tan poco redondo puede ser el contorno de un globo (1 es un círculo). */
+const POCKET_ROUNDNESS = 3;
+/** Qué parte del interior del globo tiene que ser papel (lo demás, las letras). */
+const POCKET_PAPER_SHARE = 0.75;
 /** A partir de qué nivel un píxel es papel para el bolsillo. */
 const POCKET_PAPER = 200;
 
 /**
- * ¿El texto está adentro de un bolsillo de papel cerrado —un globo—? Se expande por el papel
- * desde el borde de la caja del texto, sin cruzar tinta: si no llega al borde de una ventana
- * alrededor y no es enorme, está encerrado.
+ * ¿El texto está adentro de un bolsillo de papel —un globo—? Se expande por el papel desde el
+ * borde de la caja del texto, sin cruzar tinta: si lo que encuentra es de tamaño de globo y no
+ * se escapa a algo grande, lo es.
  */
 type Pocket = { inside: Uint8Array; x0: number; y0: number; w: number; h: number };
 
@@ -541,15 +545,17 @@ function inPaperPocket(ctx: OffscreenCanvasRenderingContext2D, box: Detection["b
     const p = queue[head++];
     const x = p % w;
     const y = (p - x) / w;
-    // Llegó al borde de la ventana: el papel sigue, no es un globo cerrado.
-    if (x === 0 || y === 0 || x === w - 1 || y === h - 1) return null;
+    // Se escapó hacia algo grande —la calle entre viñetas, un cielo blanco—: no es un globo.
+    // No se exige que esté cerrado del todo: hay globos casi sin contorno, apoyados sobre el
+    // dibujo, cuyo papel se toca con algún reflejo blanco.
     if (tail > maxArea) return null;
-    push(x + 1, y);
-    push(x - 1, y);
-    push(x, y + 1);
-    push(x, y - 1);
+    if (x < w - 1) push(x + 1, y);
+    if (x > 0) push(x - 1, y);
+    if (y < h - 1) push(x, y + 1);
+    if (y > 0) push(x, y - 1);
   }
   if (tail < box.w * box.h * POCKET_AREA.min) return null;
+  const reached = tail;
 
   // El interior: todo lo que no se alcanza desde el borde de la ventana sin pasar por el
   // papel del bolsillo. Las letras quedan adentro; el contorno del globo, afuera.
@@ -581,7 +587,26 @@ function inPaperPocket(ctx: OffscreenCanvasRenderingContext2D, box: Detection["b
     if (y < h - 1) out(x, y + 1);
   }
   const inside = new Uint8Array(w * h);
-  for (let p = 0; p < w * h; p++) inside[p] = outside[p] ? 0 : 1;
+  let area = 0;
+  for (let p = 0; p < w * h; p++) {
+    inside[p] = outside[p] ? 0 : 1;
+    area += inside[p];
+  }
+  // Un globo es una forma redonda y lisa. Las letras con halo blanco sobre un fondo oscuro
+  // —un título de capítulo, un grito sobre el dibujo— también dejan un "bolsillo" de papel,
+  // pero con el contorno lleno de entrantes: ahí no es un globo, y borrar dejaría manchones
+  // blancos sobre el dibujo.
+  let perimeter = 0;
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      const p = y * w + x;
+      if (!inside[p]) continue;
+      if (x === 0 || y === 0 || x === w - 1 || y === h - 1 || !inside[p - 1] || !inside[p + 1] || !inside[p - w] || !inside[p + w]) perimeter++;
+    }
+  }
+  if ((perimeter * perimeter) / (4 * Math.PI * area) > POCKET_ROUNDNESS) return null;
+  // Y adentro es casi todo papel: si entre las letras hay trama o dibujo, son halos.
+  if (reached / area < POCKET_PAPER_SHARE) return null;
   return { inside, x0, y0, w, h };
 }
 
