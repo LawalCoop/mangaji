@@ -32,6 +32,8 @@ const ASSUMED_PAGE = { w: 1600, h: 2300 };
 /** Duración del viaje de la cámara entre viñetas de la misma página. */
 const TRAVEL_MS = 520;
 const DIRECTED_KEY = "mangaji:directed";
+/** Cuánto se espera a que el worker de procesamiento cierre solo antes de matarlo. */
+const WORKER_CLOSE_MS = 15000;
 const PLAY_KEY = "mangaji:play";
 /**
  * Reproducción sola: cuánto se queda cada viñeta. Lo que dura su diálogo, estirado —los tiempos
@@ -207,6 +209,8 @@ export default function ReaderView({ remote }: { remote?: RemoteBook } = {}) {
   /** El archivo que se está escribiendo, para poder guardarlo cuando esté completo. */
   const liveRef = useRef<LiveSource | null>(null);
   const workerRef = useRef<Worker | null>(null);
+  /** Para cortar el procesamiento del tomo abierto al cerrarlo o abrir otro. */
+  const buildAbort = useRef<AbortController | null>(null);
   /** Hasta cuándo se está moviendo la cámara: el procesamiento le cede la placa mientras. */
   const motionUntil = useRef(0);
 
@@ -444,11 +448,21 @@ export default function ReaderView({ remote }: { remote?: RemoteBook } = {}) {
   );
 
   const teardown = useCallback(() => {
+    buildAbort.current?.abort();
+    buildAbort.current = null;
     engine.current?.dispose();
     engine.current = null;
-    // Si había un tomo a medio procesar, su worker sigue vivo con los modelos cargados.
-    workerRef.current?.terminate();
+    // Si había un tomo a medio procesar, su worker sigue vivo con los modelos cargados. Se le
+    // pide que cierre solo —termina la página en curso y suelta la placa de video—; matarlo
+    // a mitad de una inferencia podía trabar el navegador entero al abrir el tomo siguiente.
+    // Si no responde, se lo mata igual.
+    const worker = workerRef.current;
     workerRef.current = null;
+    if (worker) {
+      worker.onmessage = null;
+      worker.postMessage({ kind: "close" } satisfies ProcessRequest);
+      window.setTimeout(() => worker.terminate(), WORKER_CLOSE_MS);
+    }
   }, []);
 
   useEffect(() => teardown, [teardown]);
@@ -937,6 +951,11 @@ export default function ReaderView({ remote }: { remote?: RemoteBook } = {}) {
         type: "module",
       });
       workerRef.current = worker;
+      // Si se cierra el tomo, el bucle de abajo tiene que terminar y soltar el archivo: si no,
+      // se quedaba esperando para siempre con el tomo entero descomprimido en memoria.
+      const abandon = new AbortController();
+      buildAbort.current = abandon;
+      const stopped = new Promise<void>((resolve) => abandon.signal.addEventListener("abort", () => resolve()));
 
       const marks: number[] = [];
       const settle = new Map<number, () => void>();
@@ -1042,6 +1061,7 @@ export default function ReaderView({ remote }: { remote?: RemoteBook } = {}) {
           await accept(page, true);
         }
         for (let index = Math.min(saved.length, total); index < total; index++) {
+          if (abandon.signal.aborted) break;
           // El procesamiento comparte la placa y el procesador con el dibujo, y en el celular
           // la lectura iba a tirones mientras corría. Se trabaja de a tandas: con varias
           // páginas listas por delante, se espera a que el lector se acerque o se quede
@@ -1065,7 +1085,9 @@ export default function ReaderView({ remote }: { remote?: RemoteBook } = {}) {
             if (now - waitStart > MOTION_WAIT_MAX) break;
             await new Promise((resolve) => setTimeout(resolve, 80));
           }
+          if (abandon.signal.aborted) break;
           const bitmap = await cbz!.bitmap(index);
+          if (abandon.signal.aborted) break;
           // Mientras se ve la pantalla de carga, la página en chico: ahí se muestra lo que la
           // IA va encontrando. Antes de mandarla, que después ya no es nuestra.
           if (!mounted) setPreview({ index, src: thumbnail(bitmap), aspect: bitmap.width / bitmap.height });
@@ -1074,7 +1096,8 @@ export default function ReaderView({ remote }: { remote?: RemoteBook } = {}) {
           // que si no queda apuntando a una imagen que ya no es suya.
           worker.postMessage({ kind: "page", index, bitmap } satisfies ProcessRequest, [bitmap]);
           cbz!.release(index);
-          await settled;
+          await Promise.race([settled, stopped]);
+          if (abandon.signal.aborted) break;
           settle.delete(index);
           if (failed) throw new Error(failed);
           // Mientras dura la apertura no se procesa: la inferencia compite con la animación
@@ -1087,9 +1110,14 @@ export default function ReaderView({ remote }: { remote?: RemoteBook } = {}) {
       } finally {
         window.clearInterval(creep);
         cbz?.close();
-        worker.postMessage({ kind: "close" } satisfies ProcessRequest);
-        workerRef.current = null;
+        // Si se cerró el tomo, el worker ya lo cerró `teardown`; y `workerRef` puede ser ya el
+        // del tomo siguiente.
+        if (workerRef.current === worker) {
+          worker.postMessage({ kind: "close" } satisfies ProcessRequest);
+          workerRef.current = null;
+        }
       }
+      if (abandon.signal.aborted) return;
 
       panelFrames.finish();
       setBuilt(null);

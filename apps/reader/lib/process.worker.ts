@@ -38,15 +38,29 @@ function post(msg: ProcessResponse, transfer: Transferable[] = []): void {
   self.postMessage(msg, transfer);
 }
 
-self.onmessage = async (ev: MessageEvent<ProcessRequest>) => {
+/** La página en curso: al cerrar se espera a que termine antes de soltar los modelos. */
+let current: Promise<unknown> = Promise.resolve();
+
+self.onmessage = (ev: MessageEvent<ProcessRequest>) => {
   const msg = ev.data;
 
   if (msg.kind === "close") {
-    if (loading) await (await loading).release();
-    self.close();
+    // Cortar a mitad de una inferencia en la placa de video puede dejar trabado el proceso de
+    // la placa del navegador, y con él la página entera. Se termina lo que está en curso, se
+    // sueltan los modelos y recién ahí se cierra.
+    void current
+      .catch(() => {})
+      .then(async () => {
+        if (loading) await (await loading).release();
+      })
+      .catch(() => {})
+      .finally(() => self.close());
     return;
   }
+  current = work(msg);
+};
 
+async function work(msg: Extract<ProcessRequest, { kind: "page" }>): Promise<void> {
   try {
     const detector = await ready();
     const page = await processPage(detector, msg.bitmap, msg.index, (note) =>
@@ -68,4 +82,4 @@ self.onmessage = async (ev: MessageEvent<ProcessRequest>) => {
       message: error instanceof Error ? error.message : String(error),
     });
   }
-};
+}
