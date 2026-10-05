@@ -28,6 +28,17 @@ import { CPU_2D } from "./canvas";
  * archivo no tiene que salir de la máquina de quien lee.
  */
 
+/** Desde qué confianza una viñeta del modelo dice que la página es historieta. */
+const SURE_PANEL = 0.5;
+/** Cuántas páginas del principio del tomo pueden ser tapa, solapa, créditos o índice. */
+const FRONT_MATTER = 8;
+/** En una página entera, cuántos textos sueltos puede haber para que sean gritos, y con qué seguridad. */
+const LOOSE_SHOUT = { max: 2, conf: 0.45 };
+/** En una página entera, el texto en globo con al menos esta seguridad (un renglón del índice no). */
+const BOXED_TEXT_CONF = 0.6;
+/** En una página entera, solo los globos que el modelo ve con esta seguridad. */
+const SURE_BALLOON = 0.6;
+
 /** Descarta fragmentos espurios: una viñeta real nunca es tan chica. */
 const MIN_PANEL_AREA = 0.02;
 
@@ -133,10 +144,29 @@ export async function processPage(
     dets.filter((d) => d.cls === "frame" && polygonArea(d.polygon) / pageArea >= MIN_PANEL_AREA),
     pageArea,
   );
+  // Sin ninguna viñeta segura no es una página de historieta: una tapa, un índice, un título de
+  // capítulo, una ilustración, una página en blanco. Se muestra entera, sin recorrido, y solo
+  // se levanta el texto que está en un globo: el título, el autor o el índice quedan impresos.
+  const wholePage = !dets.some(
+    (d) => d.cls === "frame" && d.conf >= SURE_PANEL && polygonArea(d.polygon) / pageArea >= MIN_PANEL_AREA,
+  );
+  if (wholePage) panels = [];
   // Lo que el modelo no vio: zonas grandes con dibujo que no son de ninguna viñeta.
-  panels.push(...fillOrphans(panels, dets.filter((d) => d.cls === "frame"), inkGrid(pixels.data, width, height)));
-  const balloons = dedupe(dets.filter((d) => d.cls === "balloon"));
-  const texts = dets.filter((d) => d.cls === "text");
+  else panels.push(...fillOrphans(panels, dets.filter((d) => d.cls === "frame"), inkGrid(pixels.data, width, height)));
+  const balloons = dedupe(dets.filter((d) => d.cls === "balloon" && (!wholePage || d.conf >= SURE_BALLOON)));
+  // En una página entera: el texto en globo sí (un recuadro de narración, un diálogo sobre
+  // una ilustración); el suelto, solo si es uno o dos gritos y la página no está entre las
+  // primeras del tomo. Una tapa, un índice o un título traen varios textos sueltos —título,
+  // autor, número de tomo, la lista de capítulos— que tienen que quedar impresos.
+  const loose = dets.filter((d) => d.cls === "text" && d.free && d.conf >= LOOSE_SHOUT.conf);
+  const shouts = !wholePage || (index >= FRONT_MATTER && loose.length <= LOOSE_SHOUT.max);
+  const texts = dets.filter(
+    (d) =>
+      d.cls === "text" &&
+      (!wholePage ||
+        (d.free ? shouts && d.conf >= LOOSE_SHOUT.conf : d.conf >= BOXED_TEXT_CONF) ||
+        balloons.some((b) => insideBox(b.bbox, d.bbox) >= 0.5)),
+  );
 
   // Una página a sangre sin marco dibujado no produce detecciones: la hoja es la viñeta.
   if (!panels.length) {
@@ -156,7 +186,7 @@ export async function processPage(
   }
 
   // Y lo que ni eso: una viñeta casi blanca con un texto, que queda suelto. El folio no.
-  panels.push(
+  if (!wholePage) panels.push(
     ...fillAroundTexts(
       panels,
       [...texts, ...balloons].map((d) => d.bbox).filter((b) => !isFolio(b, panels, width, height)),
@@ -192,7 +222,11 @@ export async function processPage(
     if (isFolio(text.bbox, panels, width, height)) continue;
     // Un texto que el modelo ve con mucha seguridad puede ser grande —un grito que ocupa
     // media viñeta—: se le permite el mismo tamaño que a un globo entero.
-    const sprite = await lift(ctx, text, pageArea, shapes, text.conf >= SURE_TEXT ? BALLOON_TEXT_AREA : undefined);
+    // Lo mismo un grito suelto en una ilustración a página entera, que ya pasó el filtro de arriba.
+    // Letra clara sobre negro no: ahí "la letra" no se separa bien de las llamas o las líneas
+    // blancas de alrededor, y se borraban en bloque.
+    const big = !text.light && (text.conf >= SURE_TEXT || (wholePage && text.free));
+    const sprite = await lift(ctx, text, pageArea, shapes, big ? BALLOON_TEXT_AREA : undefined);
     if (sprite) lifted.push({ det: text, sprite });
   }
 

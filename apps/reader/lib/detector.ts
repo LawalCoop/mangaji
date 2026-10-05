@@ -23,6 +23,8 @@ export type Detection = {
   conf: number;
   bbox: { x: number; y: number; w: number; h: number };
   polygon: Point[];
+  /** Texto suelto, fuera de un globo, según el detector de texto. */
+  free?: boolean;
   /** Texto hallado en la página invertida: letra clara sobre fondo oscuro. */
   light?: boolean;
 };
@@ -351,6 +353,7 @@ export function decodeText(
     out.push({
       cls: "text",
       conf,
+      free: Number(labels[i]) === 2,
       bbox: { x: x1, y: y1, w: x2 - x1, h: y2 - y1 },
       polygon: [
         [x1, y1],

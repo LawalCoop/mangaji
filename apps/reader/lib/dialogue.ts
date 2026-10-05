@@ -744,7 +744,10 @@ export function inkOf(
     if (found && coloredPaper(px, w, seed, found.paper as number) > MAX_COLORED_PAPER) return null;
     return found;
   };
-  const byColor = () => inkByColor(px, w, h, seed);
+  // Sobre un fondo casi negro, "lo que se aparta del fondo" son las líneas y las llamas blancas
+  // de alrededor tanto como las letras: se borraban en bloque. Ese caso lo cubre la pasada en
+  // negativo, que mira solo letra clara.
+  const byColor = () => (Math.max(...backdrop(px, w, seed)) < DARK_BACKDROP ? null : inkByColor(px, w, h, seed));
   const order = isColoredBox(px, w, seed) ? [byColor, byLight] : [byLight, byColor];
   for (const measure of order) {
     const found = measure();
@@ -772,6 +775,8 @@ function coloredPaper(px: Uint8ClampedArray, w: number, seed: Rect, paper: numbe
   return near ? colored / near : 0;
 }
 
+/** Por debajo de este nivel el "fondo" de un bloque es tinta, no un recuadro de color. */
+const DARK_BACKDROP = 70;
 /** Qué parte del borde tiene que ser del mismo color para tomarlo como un cuadro liso. */
 const FLAT_RING = 0.6;
 
@@ -780,6 +785,9 @@ function isColoredBox(px: Uint8ClampedArray, w: number, seed: Rect): boolean {
   const bg = backdrop(px, w, seed);
   const paperLike = Math.min(...bg) >= PAPER_LEVEL - 15 && Math.max(...bg) - Math.min(...bg) <= 40;
   if (paperLike) return false;
+  // Casi negro no es un recuadro de color: es tinta, líneas de velocidad alrededor de un grito.
+  // La letra clara sobre negro la encuentra la pasada en negativo, por otro camino.
+  if (Math.max(...bg) < DARK_BACKDROP) return false;
   let near = 0;
   let total = 0;
   forRing(seed, (x, y) => {

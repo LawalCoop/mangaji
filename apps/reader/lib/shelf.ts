@@ -13,7 +13,7 @@ import type { ProcessedPage } from "./process";
  */
 
 /** Sube cuando cambia el procesamiento, para no reabrir tomos procesados con errores viejos. */
-export const PROCESSING_VERSION = 11;
+export const PROCESSING_VERSION = 12;
 const INDEX = "mangaji:shelf";
 const DIR = "pages";
 /** Cuántos tomos se guardan; al pasarse se borra el que hace más que no se abre. */

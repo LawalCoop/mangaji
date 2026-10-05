@@ -47,7 +47,8 @@ const T = {
  * dejar la página sin encuadre (un dibujo a sangre, una tapa): se muestra como página entera.
  */
 function isWhole(panel: Panel, w: number, h: number): boolean {
-  return panel.confidence < 0.4 && (panel.bbox[2] * panel.bbox[3]) / (w * h) > 0.8;
+  // La que arma el pipeline cuando no hay viñetas (tapa, ilustración) cubre la hoja entera.
+  return (panel.bbox[2] * panel.bbox[3]) / (w * h) > 0.95 || (panel.confidence < 0.4 && (panel.bbox[2] * panel.bbox[3]) / (w * h) > 0.8);
 }
 
 /** Desde cuánta tensión se anuncia "escena tensa", y hasta cuánta "tranquila". */
