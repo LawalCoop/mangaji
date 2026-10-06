@@ -20,18 +20,16 @@ const LOOKBACK_MS = 400;
 const KEEP = 120;
 const KEEP_MARKS = 4000;
 
-const on =
-  typeof window !== "undefined" &&
-  (() => {
-    try {
-      const v = new URLSearchParams(window.location.search).get("perf");
-      if (v === "on") sessionStorage.setItem("mangaji:perf", "1");
-      if (v === "off") sessionStorage.removeItem("mangaji:perf");
-      return sessionStorage.getItem("mangaji:perf") === "1";
-    } catch {
-      return false;
-    }
-  })();
+/** Solo con `?perf=on` en el link: sin el parámetro no aparece, aunque se haya usado antes. */
+const on = typeof window !== "undefined" && new URLSearchParams(window.location.search).get("perf") === "on";
+if (typeof window !== "undefined") {
+  try {
+    // Lo que dejaba prendido la versión anterior, que lo recordaba en la pestaña.
+    sessionStorage.removeItem("mangaji:perf");
+  } catch {
+    // Sin almacenamiento no hay nada que limpiar.
+  }
+}
 
 const marks: Mark[] = [];
 const janks: Jank[] = [];
