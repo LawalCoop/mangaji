@@ -122,8 +122,8 @@ const OFF_PANEL_DIALOGUE_ALPHA = 1;
  */
 const DIALOGUE_ENTRY_BLUR = 5;
 
-/** El sello de una reacción: tamaño (en píxeles de la página), inclinación y entrada. */
-const STICKER = { share: 0.09, min: 40, max: 76, tilt: -0.14, stampMs: 520, delayMs: 350 };
+/** La reacción en la viñeta: tamaño y margen en píxeles de pantalla, inclinación y entrada. */
+const STICKER = { px: 24, inset: 8, tilt: -0.12, stampMs: 420, delayMs: 350 };
 const EMOJI_FONT = '"Apple Color Emoji", "Segoe UI Emoji", "Noto Color Emoji", "Twemoji Mozilla", sans-serif';
 
 /** El hueco de las líneas de velocidad, como parte del radio: con cuánto empieza y cuánto crece. */
@@ -159,6 +159,8 @@ export class Stage {
   #stickers = new Container();
   /** Los sellos que están entrando: id y cuánto llevan, en milisegundos. */
   #stamping = new Map<string, number>();
+  /** La viñeta de cada reacción, para ubicarla en su esquina con cualquier zoom. */
+  #stickerRects = new Map<string, Rect>();
   #sprites = new Map<string, Sprite>();
   /** Desenfoque de entrada de cada bloque de diálogo. */
   #blurs = new Map<string, BlurFilter>();
@@ -412,6 +414,7 @@ export class Stage {
     if (t.x !== v.x || t.y !== v.y || t.scale !== v.scale) {
       this.#world.position.set(t.x, t.y);
       this.#world.scale.set(t.scale);
+      if (t.scale !== v.scale && this.#stickers.children.length) this.#fitStickers(t.scale);
       this.#lastView = { x: t.x, y: t.y, scale: t.scale };
       this.#dirty = true;
     }
@@ -611,56 +614,69 @@ export class Stage {
   }
 
   /**
-   * Pone las reacciones de la página: un círculo claro con el emoji, apoyado e inclinado
-   * sobre la esquina de arriba de la viñeta, para que se vea de un vistazo cuál se marcó.
-   * Viven en la página, así que acompañan a la cámara y al zoom. `stamp` es la que se acaba
-   * de elegir: esa entra con un golpe, como un sello.
+   * Pone las reacciones de la página: el emoji solo, chiquito, metido en la esquina de arriba
+   * de la viñeta. Se mueve con la página pero no crece con el zoom —con la cámara encima de
+   * una viñeta, un sello del tamaño de la página quedaba enorme—: mide siempre lo mismo en
+   * pantalla. `stamp` es la que se acaba de elegir: esa entra con un rebote corto.
    */
   setStickers(list: { id: string; emoji: string; rect: Rect }[], stamp?: string): void {
     this.#dirty = true;
     this.#stickers.removeChildren().forEach((c) => c.destroy({ children: true }));
+    this.#stickerRects.clear();
     this.#stamping.clear();
     for (const { id, emoji, rect } of list) {
-      const size = Math.min(STICKER.max, Math.max(STICKER.min, Math.min(rect.w, rect.h) * STICKER.share));
-      const badge = new Container();
-      const disc = new Graphics()
-        .circle(size * 0.03, size * 0.05, size / 2)
-        .fill({ color: 0x000000, alpha: 0.18 })
-        .circle(0, 0, size / 2)
-        .fill({ color: 0xffffff, alpha: 0.92 })
-        .stroke({ color: 0x111111, width: Math.max(1.5, size * 0.03), alpha: 0.7 });
       const face = new Text({
         text: emoji,
-        style: { fontSize: size * 0.64, fontFamily: EMOJI_FONT },
-        resolution: 2,
+        style: {
+          fontSize: STICKER.px,
+          fontFamily: EMOJI_FONT,
+          dropShadow: { color: 0x000000, alpha: 0.45, blur: 4, distance: 1, angle: Math.PI / 2 },
+        },
+        resolution: Math.min(window.devicePixelRatio || 1, 2) * 1.5,
       });
-      face.anchor.set(0.5);
-      badge.addChild(disc, face);
-      // En la esquina de arriba, del lado por donde empieza la viñeta en el manga; adentro
-      // de la viñeta, que en las que llegan al borde de la hoja se cortaba contra la pantalla.
-      badge.position.set(rect.x + rect.w - size * 0.75, rect.y + size * 0.75);
-      badge.rotation = STICKER.tilt;
-      badge.label = id;
-      this.#stickers.addChild(badge);
+      face.anchor.set(1, 0);
+      face.label = id;
+      face.rotation = STICKER.tilt;
+      this.#stickers.addChild(face);
+      this.#stickerRects.set(id, rect);
       if (id === stamp) {
-        badge.scale.set(0);
-        // Espera a que la explosión del medio se lleve la mirada, y recién ahí cae el sello.
+        face.alpha = 0;
+        // Espera a que la explosión del medio se lleve la mirada, y recién ahí aparece.
         this.#stamping.set(id, -STICKER.delayMs);
       }
     }
+    this.#fitStickers(this.camera.transform.scale);
+  }
+
+  /** Las reacciones no crecen con el zoom: se compensa la escala de la página. */
+  #fitStickers(scale: number): void {
+    const k = 1 / Math.max(scale, 1e-6);
+    for (const face of this.#stickers.children) {
+      const rect = this.#stickerRects.get(face.label);
+      if (!rect) continue;
+      const pop = this.#popOf(face.label);
+      face.scale.set(k * pop);
+      face.position.set(rect.x + rect.w - STICKER.inset * k, rect.y + STICKER.inset * k);
+    }
+  }
+
+  #popOf(id: string): number {
+    const elapsed = this.#stamping.get(id);
+    if (elapsed === undefined) return 1;
+    const t = Math.max(0, Math.min(1, elapsed / STICKER.stampMs));
+    // Crece un poco de más y se asienta.
+    return t < 0.6 ? 0.4 + 0.8 * (t / 0.6) : 1.2 - 0.2 * ((t - 0.6) / 0.4);
   }
 
   #stepStamps(dtMs: number): void {
     for (const [id, elapsed] of this.#stamping) {
-      const badge = this.#stickers.children.find((c) => c.label === id);
-      const t = Math.max(0, Math.min(1, (elapsed + dtMs) / STICKER.stampMs));
-      // Entra grande, se aplasta y se asienta: el golpe de un sello.
-      const scale = t < 0.45 ? 1.6 - 0.75 * (t / 0.45) : t < 0.7 ? 0.85 + 0.25 * ((t - 0.45) / 0.25) : 1.1 - 0.1 * ((t - 0.7) / 0.3);
-      badge?.scale.set(t === 0 ? 0 : scale);
-      if (badge) badge.alpha = Math.min(1, t * 4);
-      if (t >= 1 || !badge) this.#stamping.delete(id);
-      else this.#stamping.set(id, elapsed + dtMs);
+      const next = elapsed + dtMs;
+      const face = this.#stickers.children.find((c) => c.label === id);
+      if (face) face.alpha = Math.max(0, Math.min(1, next / (STICKER.stampMs * 0.4)));
+      if (next >= STICKER.stampMs || !face) this.#stamping.delete(id);
+      else this.#stamping.set(id, next);
     }
+    this.#fitStickers(this.camera.transform.scale);
     this.#dirty = true;
   }
 
