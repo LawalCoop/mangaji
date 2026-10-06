@@ -193,6 +193,7 @@ const es = {
     hintNext: ["tocá acá", "para avanzar"],
     hintCenter: ["centro:", "controles"],
     hintPage: "deslizá ↑↓ para saltar de página",
+    hintQuote: "mantené apretado un globo para guardar la frase",
     hintBack: ["acá para", "volver"],
   },
 
@@ -507,6 +508,7 @@ const en: Messages = {
     hintNext: ["tap here", "to go on"],
     hintCenter: ["center:", "controls"],
     hintPage: "swipe ↑↓ to jump pages",
+    hintQuote: "press and hold a balloon to save the quote",
     hintBack: ["here to", "go back"],
   },
 
@@ -821,6 +823,7 @@ const ja: Messages = {
     hintNext: ["ここをタップで", "次へ"],
     hintCenter: ["中央：", "操作メニュー"],
     hintPage: "上下にスワイプでページ移動",
+    hintQuote: "フキダシを長押しでセリフを保存",
     hintBack: ["ここで", "戻る"],
   },
 

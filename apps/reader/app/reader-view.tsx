@@ -122,6 +122,8 @@ function rememberPanels(size: number): void {
  * varios segundos en "preparando la página". Un tirón molesta menos que quedarse frenado.
  */
 const URGENT_AHEAD = 2;
+/** Mantener apretado un globo: cuándo se marca y cuándo se guarda como frase, en ms. */
+const LONG_PRESS = { showMs: 180, fireMs: 550 };
 /** Lo que dura a la vista un aviso corto, como "frase guardada". */
 const TOAST_MS = 1600;
 /** Lo máximo que espera, para que un lector que avanza sin parar no frene el tomo. */
@@ -1724,6 +1726,8 @@ export default function ReaderView({ remote }: { remote?: RemoteBook } = {}) {
     multi: boolean;
     /** El dedo pausó un paneo de la cámara β: arrastrar lo mueve en vez de la página. */
     panning: boolean;
+    /** El dedo se quedó apretado sobre un globo y lo guardó como frase: soltar no hace nada más. */
+    consumed?: boolean;
     pinch: { dist: number; cx: number; cy: number } | null;
   } | null>(null);
 
@@ -1755,7 +1759,13 @@ export default function ReaderView({ remote }: { remote?: RemoteBook } = {}) {
         pinch: null,
         panning: engine.current.pan.hold(true),
       };
+      // Con el dedo, mantener apretado un globo lo guarda como frase.
+      if (e.pointerType !== "mouse" && !pickRef.current) {
+        const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+        armLongPress(gesture.current, e.clientX - rect.left, e.clientY - rect.top);
+      }
     } else if (pointers.current.size === 2 && gesture.current) {
+      disarmLongPress();
       gesture.current.multi = true;
       gesture.current.pinch = pinchOf((e.currentTarget as HTMLElement).getBoundingClientRect());
     }
@@ -1780,7 +1790,10 @@ export default function ReaderView({ remote }: { remote?: RemoteBook } = {}) {
     }
     if (g.multi) return;
 
-    if (Math.hypot(e.clientX - g.x0, e.clientY - g.y0) > TAP_SLOP) g.moved = true;
+    if (Math.hypot(e.clientX - g.x0, e.clientY - g.y0) > TAP_SLOP) {
+      if (!g.moved) disarmLongPress();
+      g.moved = true;
+    }
     if (g.panning) eng.pan.scrub(e.clientX - prev.x, e.clientY - prev.y);
     else eng.stage.camera.nudge(e.clientX - prev.x, e.clientY - prev.y);
   };
@@ -1806,6 +1819,47 @@ export default function ReaderView({ remote }: { remote?: RemoteBook } = {}) {
     eng.stage.setQuoteMarks(quoteMarksOf(book, eng.director, page), saved ? layer.id : undefined);
     if (saved) navigator.vibrate?.(12);
     flash(saved ? t.reactions.quoteSaved : t.reactions.quoteRemoved);
+  };
+
+  /**
+   * Mantener apretado un globo: al rato se marca con el contorno, como cargando, y al
+   * cumplirse el tiempo se guarda (o se saca) como frase. Moverse o soltar antes lo cancela.
+   */
+  const longPress = useRef<{ show: ReturnType<typeof setTimeout>; fire: ReturnType<typeof setTimeout> } | null>(null);
+  const disarmLongPress = () => {
+    const lp = longPress.current;
+    if (!lp) return;
+    clearTimeout(lp.show);
+    clearTimeout(lp.fire);
+    longPress.current = null;
+    if (!pickRef.current) engine.current?.stage.setPickable(null);
+  };
+  const armLongPress = (g: NonNullable<typeof gesture.current>, x: number, y: number) => {
+    disarmLongPress();
+    const eng = engine.current;
+    if (!eng) return;
+    const page = eng.director.frame.page;
+    const p = eng.stage.toPage(x, y);
+    const frames = eng.director.framesOfPage(page);
+    let hit: { layer: Layer; frame: string } | null = null;
+    for (const f of frames) {
+      for (const l of f.layers ?? []) {
+        const r = l.rect;
+        if (l.src && p.x >= r.x && p.x <= r.x + r.w && p.y >= r.y && p.y <= r.y + r.h) hit = { layer: l, frame: f.id };
+      }
+    }
+    if (!hit) return;
+    const found = hit;
+    longPress.current = {
+      show: setTimeout(() => eng.stage.setPickable([found.layer.rect]), LONG_PRESS.showMs),
+      fire: setTimeout(() => {
+        longPress.current = null;
+        eng.stage.setPickable(null);
+        if (gesture.current !== g || g.moved || g.multi) return;
+        g.consumed = true;
+        saveQuote(page, found.frame, found.layer);
+      }, LONG_PRESS.fireMs),
+    };
   };
 
   /** Guardar una frase de la viñeta: con un solo globo, ese; con varios, se elige tocándolo. */
@@ -1835,6 +1889,7 @@ export default function ReaderView({ remote }: { remote?: RemoteBook } = {}) {
       return;
     }
     gesture.current = null;
+    disarmLongPress();
 
     // Se soltó un paneo pausado: sigue. Si fue una pausa larga o se lo arrastró, termina acá;
     // un toque corto, en cambio, corta el paneo y va a la viñeta entera.
@@ -1842,6 +1897,7 @@ export default function ReaderView({ remote }: { remote?: RemoteBook } = {}) {
       eng.pan.hold(false);
       if (g.moved || performance.now() - g.t0 > HOLD_MS) return;
     }
+    if (g.consumed) return;
 
     const dx = e.clientX - g.x0;
     const dy = e.clientY - g.y0;
@@ -1887,6 +1943,7 @@ export default function ReaderView({ remote }: { remote?: RemoteBook } = {}) {
 
   const onPointerCancel = (e: React.PointerEvent) => {
     pointers.current.delete(e.pointerId);
+    disarmLongPress();
     if (gesture.current?.panning) engine.current?.pan.hold(false);
     if (pointers.current.size === 0) gesture.current = null;
   };
@@ -1917,6 +1974,9 @@ export default function ReaderView({ remote }: { remote?: RemoteBook } = {}) {
         onPointerMove={onPointerMove}
         onPointerUp={onPointerUp}
         onPointerCancel={onPointerCancel}
+        // En Android, mantener apretado abre el menú contextual y corta el gesto: el dedo
+        // apretado sobre un globo es para guardar la frase.
+        onContextMenu={(e) => e.preventDefault()}
         onWheel={onWheel}
       >
         <canvas ref={canvasRef} className="block h-full w-full" />
@@ -1969,6 +2029,7 @@ export default function ReaderView({ remote }: { remote?: RemoteBook } = {}) {
               {t.reader.hintCenter[1]}
               <br />
               <span className="mt-3 block text-[12px] text-neutral-300">{t.reader.hintPage}</span>
+              <span className="mt-2 block text-[12px] text-neutral-300">{t.reader.hintQuote}</span>
             </span>
           </div>
           <div className="flex items-center justify-center bg-[#FF2E88]/15 px-3">
