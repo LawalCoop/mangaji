@@ -122,8 +122,8 @@ const OFF_PANEL_DIALOGUE_ALPHA = 1;
  */
 const DIALOGUE_ENTRY_BLUR = 5;
 
-/** La reacción en la viñeta: tamaño y margen en píxeles de pantalla, inclinación y entrada. */
-const STICKER = { px: 24, inset: 8, tilt: -0.12, stampMs: 420, delayMs: 350 };
+/** La insignia de una reacción: diámetro en píxeles de pantalla y entrada. */
+const STICKER = { px: 30, stampMs: 420, delayMs: 350 };
 const EMOJI_FONT = '"Apple Color Emoji", "Segoe UI Emoji", "Noto Color Emoji", "Twemoji Mozilla", sans-serif';
 
 /** El hueco de las líneas de velocidad, como parte del radio: con cuánto empieza y cuánto crece. */
@@ -614,33 +614,39 @@ export class Stage {
   }
 
   /**
-   * Pone las reacciones de la página: el emoji solo, chiquito, metido en la esquina de arriba
-   * de la viñeta. Se mueve con la página pero no crece con el zoom —con la cámara encima de
-   * una viñeta, un sello del tamaño de la página quedaba enorme—: mide siempre lo mismo en
-   * pantalla. `stamp` es la que se acaba de elegir: esa entra con un rebote corto.
+   * Pone las reacciones de la página: una insignia —un círculo oscuro con el emoji— montada
+   * sobre la esquina de arriba de cada viñeta marcada, mitad adentro y mitad afuera, como el
+   * globito de notificación de una app. Así se lee como una marca y no como parte del
+   * dibujo (suelto sobre la viñeta parecía una mancha). Se mueve con la página pero no crece
+   * con el zoom: mide siempre lo mismo en pantalla. `stamp` es la recién elegida, que entra
+   * con un rebote corto.
    */
   setStickers(list: { id: string; emoji: string; rect: Rect }[], stamp?: string): void {
     this.#dirty = true;
     this.#stickers.removeChildren().forEach((c) => c.destroy({ children: true }));
     this.#stickerRects.clear();
     this.#stamping.clear();
+    const r = STICKER.px / 2;
     for (const { id, emoji, rect } of list) {
+      const badge = new Container();
+      const disc = new Graphics()
+        .circle(0, 1.5, r + 1)
+        .fill({ color: 0x000000, alpha: 0.3 })
+        .circle(0, 0, r)
+        .fill({ color: 0x17171c, alpha: 0.94 })
+        .stroke({ color: 0xffffff, width: 1.5, alpha: 0.9 });
       const face = new Text({
         text: emoji,
-        style: {
-          fontSize: STICKER.px,
-          fontFamily: EMOJI_FONT,
-          dropShadow: { color: 0x000000, alpha: 0.45, blur: 4, distance: 1, angle: Math.PI / 2 },
-        },
+        style: { fontSize: STICKER.px * 0.6, fontFamily: EMOJI_FONT },
         resolution: Math.min(window.devicePixelRatio || 1, 2) * 1.5,
       });
-      face.anchor.set(1, 0);
-      face.label = id;
-      face.rotation = STICKER.tilt;
-      this.#stickers.addChild(face);
+      face.anchor.set(0.5);
+      badge.addChild(disc, face);
+      badge.label = id;
+      this.#stickers.addChild(badge);
       this.#stickerRects.set(id, rect);
       if (id === stamp) {
-        face.alpha = 0;
+        badge.alpha = 0;
         // Espera a que la explosión del medio se lleve la mirada, y recién ahí aparece.
         this.#stamping.set(id, -STICKER.delayMs);
       }
@@ -656,7 +662,8 @@ export class Stage {
       if (!rect) continue;
       const pop = this.#popOf(face.label);
       face.scale.set(k * pop);
-      face.position.set(rect.x + rect.w - STICKER.inset * k, rect.y + STICKER.inset * k);
+      // Centrada justo en la esquina: mitad sobre la viñeta, mitad afuera.
+      face.position.set(rect.x + rect.w, rect.y);
     }
   }
 
