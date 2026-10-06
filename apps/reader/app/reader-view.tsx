@@ -8,6 +8,7 @@ import { Director, frameDuration } from "../lib/director";
 import { PageFrameSource, PanelFrameSource } from "../lib/frame-sources";
 import { LiveSource } from "../lib/live-archive";
 import { perf } from "../lib/perf";
+import { reloadIfStale } from "../lib/stale";
 import { download, resolveLink, type DownloadProgress } from "../lib/remote";
 import { problemText, useI18n } from "../lib/i18n";
 import { ProblemError, problemOf, type Problem } from "../lib/notes";
@@ -291,6 +292,23 @@ export default function ReaderView({ remote }: { remote?: RemoteBook } = {}) {
     const v = new URLSearchParams(window.location.search).get("demo");
     setDemo(v === "on" || v === "1");
   }, []);
+  // Un pedazo de código que no carga porque la pestaña quedó con una versión vieja: se
+  // recarga sola en vez de quedar rota (ver lib/stale.ts).
+  useEffect(() => {
+    const onRejection = (e: PromiseRejectionEvent) => {
+      if (reloadIfStale(e.reason)) e.preventDefault();
+    };
+    const onError = (e: ErrorEvent) => {
+      if (reloadIfStale(e.error ?? e.message)) e.preventDefault();
+    };
+    window.addEventListener("unhandledrejection", onRejection);
+    window.addEventListener("error", onError);
+    return () => {
+      window.removeEventListener("unhandledrejection", onRejection);
+      window.removeEventListener("error", onError);
+    };
+  }, []);
+
   /** Diagnóstico de rendimiento (`?perf=on`): se decide en el navegador, después de hidratar. */
   const [perfOn, setPerfOn] = useState(false);
   useEffect(() => setPerfOn(perf.on), []);
@@ -893,7 +911,7 @@ export default function ReaderView({ remote }: { remote?: RemoteBook } = {}) {
           } catch (err) {
             if (mine === token) {
               console.error("[mangaji]", err);
-              setStatus({ kind: "error", problem: problemOf(err) });
+              if (!reloadIfStale(err)) setStatus({ kind: "error", problem: problemOf(err) });
             }
           }
         };
@@ -1030,7 +1048,7 @@ export default function ReaderView({ remote }: { remote?: RemoteBook } = {}) {
         void draw(true);
       } catch (err) {
         console.error("[mangaji]", err);
-        setStatus({ kind: "error", problem: problemOf(err) });
+        if (!reloadIfStale(err)) setStatus({ kind: "error", problem: problemOf(err) });
       }
     },
     [],
@@ -1353,7 +1371,7 @@ export default function ReaderView({ remote }: { remote?: RemoteBook } = {}) {
         await openSource(canvas, await CbzSource.open(input));
       } catch (err) {
         console.error("[mangaji]", err);
-        setStatus({ kind: "error", problem: problemOf(err) });
+        if (!reloadIfStale(err)) setStatus({ kind: "error", problem: problemOf(err) });
       }
     },
     [build, mount, teardown],
@@ -1433,7 +1451,7 @@ export default function ReaderView({ remote }: { remote?: RemoteBook } = {}) {
       } catch (err) {
         if (!cancelled) {
           console.error("[mangaji]", err);
-          setStatus({ kind: "error", problem: problemOf(err) });
+          if (!reloadIfStale(err)) setStatus({ kind: "error", problem: problemOf(err) });
         }
       }
     })();
@@ -1464,7 +1482,7 @@ export default function ReaderView({ remote }: { remote?: RemoteBook } = {}) {
       } catch (err) {
         if (abort.signal.aborted) return;
         setFetching(null);
-        setStatus({ kind: "error", problem: problemOf(err) });
+        if (!reloadIfStale(err)) setStatus({ kind: "error", problem: problemOf(err) });
       } finally {
         if (fetchAbort.current === abort) fetchAbort.current = null;
       }
