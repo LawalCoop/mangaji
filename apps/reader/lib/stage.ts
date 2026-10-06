@@ -1,4 +1,4 @@
-import { Application, BlurFilter, Container, Graphics, Sprite, Texture, TilingSprite, UPDATE_PRIORITY } from "pixi.js";
+import { Application, BlurFilter, Container, Graphics, Sprite, Text, Texture, TilingSprite, UPDATE_PRIORITY } from "pixi.js";
 import { Camera, type Transform } from "./camera";
 import type { Frame, Rect } from "./types";
 import { directionOf, outOfReach, type Direction } from "./memory";
@@ -122,6 +122,10 @@ const OFF_PANEL_DIALOGUE_ALPHA = 1;
  */
 const DIALOGUE_ENTRY_BLUR = 5;
 
+/** El sello de una reacción: tamaño (en píxeles de la página), inclinación y entrada. */
+const STICKER = { share: 0.2, min: 70, max: 150, tilt: -0.14, stampMs: 520, delayMs: 350 };
+const EMOJI_FONT = '"Apple Color Emoji", "Segoe UI Emoji", "Noto Color Emoji", "Twemoji Mozilla", sans-serif';
+
 /** El hueco de las líneas de velocidad, como parte del radio: con cuánto empieza y cuánto crece. */
 const SPEEDLINE_HOLE = { from: 0.28, grow: 0.34 };
 
@@ -151,6 +155,10 @@ export class Stage {
   #world = new Container();
   #art = new Sprite();
   #dialogue = new Container();
+  /** Las reacciones del lector, pegadas en la esquina de cada viñeta como un sello. */
+  #stickers = new Container();
+  /** Los sellos que están entrando: id y cuánto llevan, en milisegundos. */
+  #stamping = new Map<string, number>();
   #sprites = new Map<string, Sprite>();
   /** Desenfoque de entrada de cada bloque de diálogo. */
   #blurs = new Map<string, BlurFilter>();
@@ -216,7 +224,7 @@ export class Stage {
 
   private constructor(app: Application) {
     this.#app = app;
-    this.#world.addChild(this.#paperFrame, this.#art, this.#blurred, this.#shadeSprite, this.#dialogue);
+    this.#world.addChild(this.#paperFrame, this.#art, this.#blurred, this.#shadeSprite, this.#dialogue, this.#stickers);
     this.#blurred.visible = false;
     this.#shadeSprite.visible = false;
     // Se dibuja solo cuando algo cambió: con la página quieta, esperando que se lea, no hay
@@ -488,6 +496,7 @@ export class Stage {
 
   /** Avanza los efectos en curso. Devuelve si queda alguno vivo. */
   updateFx(dtMs: number): boolean {
+    if (this.#stamping.size) this.#stepStamps(dtMs);
     // Mientras haya un efecto, y un cuadro más al terminar para borrarlo.
     const alive = this.#stepFx(dtMs);
     if (alive || this.#fxAlive) this.#dirty = true;
@@ -599,6 +608,60 @@ export class Stage {
         .lineTo(Math.cos(angle) * end, Math.sin(angle) * end)
         .stroke({ width, color: jitter > 0.5 ? 0x000000 : 0xffffff });
     }
+  }
+
+  /**
+   * Pone las reacciones de la página: un círculo claro con el emoji, apoyado e inclinado
+   * sobre la esquina de arriba de la viñeta, para que se vea de un vistazo cuál se marcó.
+   * Viven en la página, así que acompañan a la cámara y al zoom. `stamp` es la que se acaba
+   * de elegir: esa entra con un golpe, como un sello.
+   */
+  setStickers(list: { id: string; emoji: string; rect: Rect }[], stamp?: string): void {
+    this.#dirty = true;
+    this.#stickers.removeChildren().forEach((c) => c.destroy({ children: true }));
+    this.#stamping.clear();
+    for (const { id, emoji, rect } of list) {
+      const size = Math.min(STICKER.max, Math.max(STICKER.min, Math.min(rect.w, rect.h) * STICKER.share));
+      const badge = new Container();
+      const disc = new Graphics()
+        .circle(size * 0.04, size * 0.06, size / 2)
+        .fill({ color: 0x000000, alpha: 0.28 })
+        .circle(0, 0, size / 2)
+        .fill({ color: 0xffffff })
+        .stroke({ color: 0x111111, width: Math.max(2, size * 0.035) });
+      const face = new Text({
+        text: emoji,
+        style: { fontSize: size * 0.62, fontFamily: EMOJI_FONT },
+        resolution: 2,
+      });
+      face.anchor.set(0.5);
+      badge.addChild(disc, face);
+      // En la esquina de arriba, del lado por donde empieza la viñeta en el manga; adentro
+      // de la viñeta, que en las que llegan al borde de la hoja se cortaba contra la pantalla.
+      badge.position.set(rect.x + rect.w - size * 0.6, rect.y + size * 0.6);
+      badge.rotation = STICKER.tilt;
+      badge.label = id;
+      this.#stickers.addChild(badge);
+      if (id === stamp) {
+        badge.scale.set(0);
+        // Espera a que la explosión del medio se lleve la mirada, y recién ahí cae el sello.
+        this.#stamping.set(id, -STICKER.delayMs);
+      }
+    }
+  }
+
+  #stepStamps(dtMs: number): void {
+    for (const [id, elapsed] of this.#stamping) {
+      const badge = this.#stickers.children.find((c) => c.label === id);
+      const t = Math.max(0, Math.min(1, (elapsed + dtMs) / STICKER.stampMs));
+      // Entra grande, se aplasta y se asienta: el golpe de un sello.
+      const scale = t < 0.45 ? 1.6 - 0.75 * (t / 0.45) : t < 0.7 ? 0.85 + 0.25 * ((t - 0.45) / 0.25) : 1.1 - 0.1 * ((t - 0.7) / 0.3);
+      badge?.scale.set(t === 0 ? 0 : scale);
+      if (badge) badge.alpha = Math.min(1, t * 4);
+      if (t >= 1 || !badge) this.#stamping.delete(id);
+      else this.#stamping.set(id, elapsed + dtMs);
+    }
+    this.#dirty = true;
   }
 
   /** Muestra un bloque de diálogo. `progress` de 0 a 1 anima su entrada. */

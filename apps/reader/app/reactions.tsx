@@ -12,9 +12,9 @@ const BURST_MS = 1300;
 type Burst = { id: number; r: Reaction; sparks: { dx: number; dy: number; rot: number; size: number; delay: number }[] };
 
 /**
- * Reaccionar a la viñeta que se está leyendo. Un botón al costado, que aparece con los
- * controles; al elegir, el emoji explota en el medio de la pantalla. Lo elegido queda
- * guardado en este navegador, y al volver a esa viñeta se ve en la esquina.
+ * Reaccionar a la viñeta que se está leyendo. Un botón arriba, que aparece con los
+ * controles; al elegir, el emoji explota en el medio de la pantalla y queda pegado en la
+ * viñeta como un sello (lo dibuja el escenario). Se guarda en este navegador.
  */
 export function Reactions({
   visible,
@@ -23,6 +23,7 @@ export function Reactions({
   frame,
   onActivity,
   onHold,
+  onChange,
 }: {
   visible: boolean;
   book: string;
@@ -30,6 +31,8 @@ export function Reactions({
   frame: string;
   onActivity: () => void;
   onHold: (held: boolean) => void;
+  /** Cambió la reacción de la viñeta: con su id si se acaba de poner, para el sello. */
+  onChange: (stamped: string | null) => void;
 }) {
   const { t } = useI18n();
   const T = t.reactions;
@@ -63,6 +66,7 @@ export function Reactions({
     setCurrent(next);
     setOpen(false);
     onHold(false);
+    onChange(next ? frame : null);
     if (!next) return;
     navigator.vibrate?.(12);
     const id = ++seq.current;
@@ -109,17 +113,6 @@ export function Reactions({
           ))}
         </div>
       ))}
-
-      {/* Con los controles escondidos, la reacción de esta viñeta queda chiquita en la esquina. */}
-      {current && !visible && (
-        <span
-          key={`${page}:${frame}`}
-          aria-label={T.yours(current)}
-          className="emoji react-chip pointer-events-none absolute right-3 top-[max(0.75rem,env(safe-area-inset-top))] z-30 flex size-10 items-center justify-center rounded-full bg-black/45 text-xl backdrop-blur"
-        >
-          {current}
-        </span>
-      )}
 
       <div
         inert={!visible}

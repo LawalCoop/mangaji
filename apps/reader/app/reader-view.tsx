@@ -28,6 +28,7 @@ import { DemoView } from "./demo-view";
 import { CPU_2D } from "../lib/canvas";
 import { PerfHud } from "./perf-hud";
 import { Reactions } from "./reactions";
+import { reactionOf } from "../lib/reactions";
 
 /** Hasta que la página se decodifica no se sabe su tamaño; esto evita un encuadre en cero. */
 const ASSUMED_PAGE = { w: 1600, h: 2300 };
@@ -75,6 +76,15 @@ const SLOW_PANELS_RUNS = 2;
 /** Los tamaños del modelo de viñetas, del de siempre al más liviano. */
 const PANEL_STEPS = [1280, 960, 640];
 const PANELS_KEY = "mangaji:panels-size";
+
+/** Las reacciones de una página, para pegarlas en sus viñetas. */
+function stickersOf(book: string | null, director: Director, page: number) {
+  if (!book) return [];
+  return director.framesOfPage(page).flatMap((f) => {
+    const emoji = reactionOf(book, page + 1, f.id);
+    return emoji ? [{ id: f.id, emoji, rect: f.rect }] : [];
+  });
+}
 
 function rememberedPanels(): number | null {
   try {
@@ -780,6 +790,7 @@ export default function ReaderView({ remote }: { remote?: RemoteBook } = {}) {
               // se dejan como están, y así el diálogo ya leído conserva su lugar.
               revealed.clear();
               perf.time("globos", () => stage.setDialogue(dialogue));
+              stage.setStickers(stickersOf(bookRef.current, director, fresh.page));
             }
             for (const id of revealed) stage.revealDialogue(id, 1);
 
@@ -1970,6 +1981,12 @@ export default function ReaderView({ remote }: { remote?: RemoteBook } = {}) {
           frame={at.frame}
           onActivity={poke}
           onHold={holdChrome}
+          onChange={(frame) => {
+            const eng = engine.current;
+            if (!eng) return;
+            const page = eng.director.frame.page;
+            eng.stage.setStickers(stickersOf(bookRef.current, eng.director, page), frame ?? undefined);
+          }}
         />
       )}
 
