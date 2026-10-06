@@ -123,7 +123,7 @@ const OFF_PANEL_DIALOGUE_ALPHA = 1;
 const DIALOGUE_ENTRY_BLUR = 5;
 
 /** El sello de una reacción: tamaño (en píxeles de la página), inclinación y entrada. */
-const STICKER = { share: 0.2, min: 70, max: 150, tilt: -0.14, stampMs: 520, delayMs: 350 };
+const STICKER = { share: 0.09, min: 40, max: 76, tilt: -0.14, stampMs: 520, delayMs: 350 };
 const EMOJI_FONT = '"Apple Color Emoji", "Segoe UI Emoji", "Noto Color Emoji", "Twemoji Mozilla", sans-serif';
 
 /** El hueco de las líneas de velocidad, como parte del radio: con cuánto empieza y cuánto crece. */
@@ -624,21 +624,21 @@ export class Stage {
       const size = Math.min(STICKER.max, Math.max(STICKER.min, Math.min(rect.w, rect.h) * STICKER.share));
       const badge = new Container();
       const disc = new Graphics()
-        .circle(size * 0.04, size * 0.06, size / 2)
-        .fill({ color: 0x000000, alpha: 0.28 })
+        .circle(size * 0.03, size * 0.05, size / 2)
+        .fill({ color: 0x000000, alpha: 0.18 })
         .circle(0, 0, size / 2)
-        .fill({ color: 0xffffff })
-        .stroke({ color: 0x111111, width: Math.max(2, size * 0.035) });
+        .fill({ color: 0xffffff, alpha: 0.92 })
+        .stroke({ color: 0x111111, width: Math.max(1.5, size * 0.03), alpha: 0.7 });
       const face = new Text({
         text: emoji,
-        style: { fontSize: size * 0.62, fontFamily: EMOJI_FONT },
+        style: { fontSize: size * 0.64, fontFamily: EMOJI_FONT },
         resolution: 2,
       });
       face.anchor.set(0.5);
       badge.addChild(disc, face);
       // En la esquina de arriba, del lado por donde empieza la viñeta en el manga; adentro
       // de la viñeta, que en las que llegan al borde de la hoja se cortaba contra la pantalla.
-      badge.position.set(rect.x + rect.w - size * 0.6, rect.y + size * 0.6);
+      badge.position.set(rect.x + rect.w - size * 0.75, rect.y + size * 0.75);
       badge.rotation = STICKER.tilt;
       badge.label = id;
       this.#stickers.addChild(badge);
