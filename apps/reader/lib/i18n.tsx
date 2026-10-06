@@ -270,6 +270,14 @@ const es = {
     closing: "Todo esto pasa en tu dispositivo, en segundos por página.",
   },
 
+  reactions: {
+    react: "Reaccionar a esta viñeta",
+    change: "Cambiar la reacción",
+    pick: "Elegí una reacción",
+    yours: (r: string) => `Tu reacción: ${r}`,
+    name: { "❤️": "Me encanta", "😂": "Me río", "😮": "Me sorprende", "😢": "Me entristece", "😡": "Me enoja", "🔥": "Épico" },
+  },
+
   toolbar: {
     goToPage: "Ir a una página",
     prevPage: "Página anterior (↑)",
@@ -562,6 +570,14 @@ const en: Messages = {
     closing: "All of this happens on your device, in seconds per page.",
   },
 
+  reactions: {
+    react: "React to this panel",
+    change: "Change your reaction",
+    pick: "Pick a reaction",
+    yours: (r: string) => `Your reaction: ${r}`,
+    name: { "❤️": "Love it", "😂": "Funny", "😮": "Wow", "😢": "Sad", "😡": "Angry", "🔥": "Epic" },
+  },
+
   toolbar: {
     goToPage: "Go to a page",
     prevPage: "Previous page (↑)",
@@ -852,6 +868,14 @@ const ja: Messages = {
     },
     closingTitle: "あなたのマンガで試そう",
     closing: "これがすべて、あなたの端末の中で、1 ページ数秒で行われます。",
+  },
+
+  reactions: {
+    react: "このコマにリアクション",
+    change: "リアクションを変える",
+    pick: "リアクションを選ぶ",
+    yours: (r: string) => `あなたのリアクション：${r}`,
+    name: { "❤️": "好き", "😂": "笑える", "😮": "びっくり", "😢": "悲しい", "😡": "怒り", "🔥": "熱い" },
   },
 
   toolbar: {

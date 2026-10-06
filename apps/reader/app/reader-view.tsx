@@ -27,6 +27,7 @@ import { Toolbar } from "./toolbar";
 import { DemoView } from "./demo-view";
 import { CPU_2D } from "../lib/canvas";
 import { PerfHud } from "./perf-hud";
+import { Reactions } from "./reactions";
 
 /** Hasta que la página se decodifica no se sabe su tamaño; esto evita un encuadre en cero. */
 const ASSUMED_PAGE = { w: 1600, h: 2300 };
@@ -294,7 +295,16 @@ export default function ReaderView({ remote }: { remote?: RemoteBook } = {}) {
   const [music, setMusic] = useState(false);
   const [volume, setVolume] = useState(0.42);
   /** Posición de lectura, refrescada en cada encuadre. */
-  const [at, setAt] = useState({ page: 1, pages: 1, panel: 0, panels: 0, progress: 0 });
+  const [at, setAt] = useState({
+    page: 1,
+    pages: 1,
+    panel: 0,
+    panels: 0,
+    progress: 0,
+    /** El encuadre a la vista y el tomo, para las reacciones. */
+    frame: "",
+    book: null as string | null,
+  });
 
   /** El mood se lee dentro del ciclo de render, que no ve el estado de React. */
   const moodRef = useRef(MOODS[DEFAULT_MOOD]);
@@ -698,6 +708,8 @@ export default function ReaderView({ remote }: { remote?: RemoteBook } = {}) {
               panel: pos.index,
               panels: pos.total,
               progress: director.length > 1 ? director.index / (director.length - 1) : 1,
+              frame: frame.id,
+              book: bookRef.current,
             }),
           );
 
@@ -1947,6 +1959,17 @@ export default function ReaderView({ remote }: { remote?: RemoteBook } = {}) {
           frames={engine.current.panelFrames}
           title={title}
           onExit={remote?.exit?.onClick ?? closeBook}
+        />
+      )}
+
+      {status.kind === "ready" && !demo && at.book && at.frame && (
+        <Reactions
+          visible={chrome}
+          book={at.book}
+          page={at.page}
+          frame={at.frame}
+          onActivity={poke}
+          onHold={holdChrome}
         />
       )}
 
