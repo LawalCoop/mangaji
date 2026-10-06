@@ -1759,8 +1759,9 @@ export default function ReaderView({ remote }: { remote?: RemoteBook } = {}) {
         pinch: null,
         panning: engine.current.pan.hold(true),
       };
-      // Con el dedo, mantener apretado un globo lo guarda como frase.
-      if (e.pointerType !== "mouse" && !pickRef.current) {
+      // Mantener apretado un globo —con el dedo o con el mouse— lo guarda como frase.
+      // Arrastrar lo cancela, así que no se cruza con mover la página.
+      if (!pickRef.current && e.button <= 0) {
         const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
         armLongPress(gesture.current, e.clientX - rect.left, e.clientY - rect.top);
       }
