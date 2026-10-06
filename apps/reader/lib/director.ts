@@ -141,6 +141,18 @@ export class Director {
     }
   }
 
+  /** Salta a un encuadre por su página e id; si no está (otro modo de lectura), a la página. */
+  seekToFrame(page: number, id: string): void {
+    for (let i = 0; i < this.#source.length; i++) {
+      const f = this.#source.at(i);
+      if (f.page === page && f.id === id) {
+        this.seek(i);
+        return;
+      }
+    }
+    this.seekToPage(page);
+  }
+
   /** Cuántos encuadres tiene la página actual, y cuál se está viendo. */
   get positionInPage(): { index: number; total: number } {
     const page = this.frame.page;

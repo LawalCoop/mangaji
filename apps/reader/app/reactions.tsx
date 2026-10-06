@@ -24,6 +24,8 @@ export function Reactions({
   onActivity,
   onHold,
   onChange,
+  onQuote,
+  onMarks,
 }: {
   visible: boolean;
   book: string;
@@ -33,6 +35,10 @@ export function Reactions({
   onHold: (held: boolean) => void;
   /** Cambió la reacción de la viñeta: con su id si se acaba de poner, para el sello. */
   onChange: (stamped: string | null) => void;
+  /** Guardar una frase de esta viñeta. */
+  onQuote: () => void;
+  /** Abrir el resumen con todas las marcas del tomo. */
+  onMarks: () => void;
 }) {
   const { t } = useI18n();
   const T = t.reactions;
@@ -165,6 +171,40 @@ export function Reactions({
                 {r}
               </button>
             ))}
+            <span aria-hidden className="my-1 h-px w-6 bg-neutral-600" />
+            <button
+              type="button"
+              onClick={() => {
+                setOpen(false);
+                onHold(false);
+                onQuote();
+              }}
+              title={T.quote}
+              aria-label={T.quote}
+              style={{ animationDelay: `${REACTIONS.length * 35}ms` }}
+              className="react-option flex h-10 w-10 touch-manipulation items-center justify-center rounded-full font-serif text-3xl leading-none text-[#FF2E88] transition-transform hover:scale-125 active:scale-90"
+            >
+              ❝
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setOpen(false);
+                onHold(false);
+                onMarks();
+              }}
+              title={T.openMarks}
+              aria-label={T.openMarks}
+              style={{ animationDelay: `${(REACTIONS.length + 1) * 35}ms` }}
+              className="react-option flex h-10 w-10 touch-manipulation items-center justify-center rounded-full text-neutral-200 transition-transform hover:scale-125 active:scale-90"
+            >
+              <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden>
+                <rect x="4" y="4" width="7" height="7" rx="1.5" />
+                <rect x="13" y="4" width="7" height="7" rx="1.5" />
+                <rect x="4" y="13" width="7" height="7" rx="1.5" />
+                <rect x="13" y="13" width="7" height="7" rx="1.5" />
+              </svg>
+            </button>
           </div>
         )}
       </div>

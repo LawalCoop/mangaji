@@ -122,6 +122,8 @@ const OFF_PANEL_DIALOGUE_ALPHA = 1;
  */
 const DIALOGUE_ENTRY_BLUR = 5;
 
+/** El trazo de una frase guardada: grosor y separación en píxeles de pantalla, color y dibujo. */
+const QUOTE = { px: 5, gap: 5, tilt: -1.5, color: 0xff2e88, drawMs: 450 };
 /** La insignia de una reacción: diámetro en píxeles de pantalla y entrada. */
 const STICKER = { px: 30, stampMs: 420, delayMs: 350 };
 const EMOJI_FONT = '"Apple Color Emoji", "Segoe UI Emoji", "Noto Color Emoji", "Twemoji Mozilla", sans-serif';
@@ -161,6 +163,13 @@ export class Stage {
   #stamping = new Map<string, number>();
   /** La viñeta de cada reacción, para ubicarla en su esquina con cualquier zoom. */
   #stickerRects = new Map<string, Rect>();
+  /** Frases guardadas: un trazo de marcador debajo de cada globo; `p` es cuánto se dibujó. */
+  #quotes = new Graphics();
+  #quoteMarks: { id: string; rect: Rect; p: number }[] = [];
+  /** Globos para elegir cuál guardar, con un contorno que late; null fuera de ese modo. */
+  #pick = new Graphics();
+  #pickRects: Rect[] | null = null;
+  #pickClock = 0;
   #sprites = new Map<string, Sprite>();
   /** Desenfoque de entrada de cada bloque de diálogo. */
   #blurs = new Map<string, BlurFilter>();
@@ -226,7 +235,7 @@ export class Stage {
 
   private constructor(app: Application) {
     this.#app = app;
-    this.#world.addChild(this.#paperFrame, this.#art, this.#blurred, this.#shadeSprite, this.#dialogue, this.#stickers);
+    this.#world.addChild(this.#paperFrame, this.#art, this.#blurred, this.#shadeSprite, this.#dialogue, this.#quotes, this.#pick, this.#stickers);
     this.#blurred.visible = false;
     this.#shadeSprite.visible = false;
     // Se dibuja solo cuando algo cambió: con la página quieta, esperando que se lea, no hay
@@ -414,7 +423,11 @@ export class Stage {
     if (t.x !== v.x || t.y !== v.y || t.scale !== v.scale) {
       this.#world.position.set(t.x, t.y);
       this.#world.scale.set(t.scale);
-      if (t.scale !== v.scale && this.#stickers.children.length) this.#fitStickers(t.scale);
+      if (t.scale !== v.scale) {
+        if (this.#stickers.children.length) this.#fitStickers(t.scale);
+        if (this.#quoteMarks.length) this.#drawQuotes(t.scale);
+        if (this.#pickRects) this.#drawPick(t.scale);
+      }
       this.#lastView = { x: t.x, y: t.y, scale: t.scale };
       this.#dirty = true;
     }
@@ -500,6 +513,12 @@ export class Stage {
   /** Avanza los efectos en curso. Devuelve si queda alguno vivo. */
   updateFx(dtMs: number): boolean {
     if (this.#stamping.size) this.#stepStamps(dtMs);
+    if (this.#quoteMarks.some((m) => m.p < 1)) this.#stepQuotes(dtMs);
+    if (this.#pickRects) {
+      this.#pickClock += dtMs;
+      this.#pick.alpha = 0.55 + 0.45 * Math.sin(this.#pickClock / 180) ** 2;
+      this.#dirty = true;
+    }
     // Mientras haya un efecto, y un cuadro más al terminar para borrarlo.
     const alive = this.#stepFx(dtMs);
     if (alive || this.#fxAlive) this.#dirty = true;
@@ -652,6 +671,100 @@ export class Stage {
       }
     }
     this.#fitStickers(this.camera.transform.scale);
+  }
+
+  /**
+   * Las frases guardadas de la página: un trazo de marcador rosa debajo de cada globo, del
+   * mismo grosor en pantalla con cualquier zoom. `stamp`, la recién guardada, se dibuja de
+   * izquierda a derecha, como pasando el marcador.
+   */
+  setQuoteMarks(list: { id: string; rect: Rect }[], stamp?: string): void {
+    this.#quoteMarks = list.map(({ id, rect }) => ({ id, rect: this.#inkOf(id, rect), p: id === stamp ? 0 : 1 }));
+    this.#drawQuotes(this.camera.transform.scale);
+    this.#dirty = true;
+  }
+
+  /**
+   * Dónde está la letra dentro del recuadro de un diálogo: el recuadro trae bastante margen,
+   * y el subrayado quedaba lejos del globo. Se mide la tinta del sprite una vez.
+   */
+  #inks = new Map<ImageBitmap, { x: number; y: number; w: number; h: number }>();
+  #inkOf(id: string, rect: Rect): Rect {
+    const bitmap = this.#sprites.get(id)?.texture.source.resource as ImageBitmap | undefined;
+    if (!bitmap || !(bitmap instanceof ImageBitmap) || bitmap.width === 0) return rect;
+    let box = this.#inks.get(bitmap);
+    if (!box) {
+      const canvas = new OffscreenCanvas(bitmap.width, bitmap.height);
+      const cx = canvas.getContext("2d", CPU_2D)!;
+      cx.drawImage(bitmap, 0, 0);
+      const { data, width, height } = cx.getImageData(0, 0, bitmap.width, bitmap.height);
+      let x0 = width;
+      let y0 = height;
+      let x1 = -1;
+      let y1 = -1;
+      for (let y = 0; y < height; y++) {
+        for (let x = 0; x < width; x++) {
+          if (data[(y * width + x) * 4 + 3] < 128) continue;
+          if (x < x0) x0 = x;
+          if (x > x1) x1 = x;
+          if (y < y0) y0 = y;
+          if (y > y1) y1 = y;
+        }
+      }
+      box = x1 < 0 ? { x: 0, y: 0, w: width, h: height } : { x: x0, y: y0, w: x1 - x0 + 1, h: y1 - y0 + 1 };
+      this.#inks.set(bitmap, box);
+    }
+    const kx = rect.w / bitmap.width;
+    const ky = rect.h / bitmap.height;
+    return { x: rect.x + box.x * kx, y: rect.y + box.y * ky, w: box.w * kx, h: box.h * ky };
+  }
+
+  #drawQuotes(scale: number): void {
+    const k = 1 / Math.max(scale, 1e-6);
+    const g = this.#quotes.clear();
+    for (const { rect, p } of this.#quoteMarks) {
+      if (p <= 0) continue;
+      const x0 = rect.x - rect.w * 0.04;
+      const x1 = rect.x + rect.w * 1.04;
+      const y = rect.y + rect.h + QUOTE.gap * k;
+      const x = x0 + (x1 - x0) * p;
+      // Dos pasadas, como un marcador de verdad: una ancha y suave y otra más firme.
+      g.moveTo(x0, y).lineTo(x, y + QUOTE.tilt * k).stroke({ width: QUOTE.px * 1.6 * k, color: QUOTE.color, alpha: 0.35, cap: "round" });
+      g.moveTo(x0, y).lineTo(x, y + QUOTE.tilt * k).stroke({ width: QUOTE.px * k, color: QUOTE.color, alpha: 0.9, cap: "round" });
+    }
+  }
+
+  #stepQuotes(dtMs: number): void {
+    for (const m of this.#quoteMarks) if (m.p < 1) m.p = Math.min(1, m.p + dtMs / QUOTE.drawMs);
+    this.#drawQuotes(this.camera.transform.scale);
+    this.#dirty = true;
+  }
+
+  /** Marca los globos que se pueden elegir, o sale de ese modo con `null`. */
+  setPickable(rects: Rect[] | null): void {
+    this.#pickRects = rects;
+    this.#pickClock = 0;
+    if (rects) this.#drawPick(this.camera.transform.scale);
+    else this.#pick.clear();
+    this.#dirty = true;
+  }
+
+  #drawPick(scale: number): void {
+    const k = 1 / Math.max(scale, 1e-6);
+    const g = this.#pick.clear();
+    for (const r of this.#pickRects ?? []) {
+      const pad = 6 * k;
+      g.roundRect(r.x - pad, r.y - pad, r.w + 2 * pad, r.h + 2 * pad, 10 * k)
+        .stroke({ width: 5 * k, color: 0x000000, alpha: 0.35 })
+        .roundRect(r.x - pad, r.y - pad, r.w + 2 * pad, r.h + 2 * pad, 10 * k)
+        .stroke({ width: 2.5 * k, color: QUOTE.color });
+    }
+  }
+
+  /** Un punto de la pantalla, en coordenadas de la página. */
+  toPage(x: number, y: number): { x: number; y: number } {
+    const t = this.camera.transform;
+    return { x: (x - t.x) / t.scale, y: (y - t.y) / t.scale };
   }
 
   /** Las reacciones no crecen con el zoom: se compensa la escala de la página. */

@@ -19,7 +19,7 @@ import { directedShot, FIT_MARGIN, type DirectedShot, type Pan } from "../lib/di
 import type { ProcessedPage } from "../lib/process";
 import { Stage } from "../lib/stage";
 import { PAGES, directionOf, type Direction } from "../lib/memory";
-import type { Frame, Rect } from "../lib/types";
+import type { Frame, Layer, Rect } from "../lib/types";
 import type { ProcessRequest, ProcessResponse } from "../lib/process.worker";
 import { Landing } from "./landing";
 import { Processing, type LogLine, type Preview, type Stage as ProcessStage } from "./processing";
@@ -28,7 +28,8 @@ import { DemoView } from "./demo-view";
 import { CPU_2D } from "../lib/canvas";
 import { PerfHud } from "./perf-hud";
 import { Reactions } from "./reactions";
-import { reactionOf } from "../lib/reactions";
+import { quotesOf, reactionOf, reactionsOf, toggleQuote } from "../lib/reactions";
+import { MarksView } from "./marks-view";
 
 /** Hasta que la página se decodifica no se sabe su tamaño; esto evita un encuadre en cero. */
 const ASSUMED_PAGE = { w: 1600, h: 2300 };
@@ -77,6 +78,18 @@ const SLOW_PANELS_RUNS = 2;
 const PANEL_STEPS = [1280, 960, 640];
 const PANELS_KEY = "mangaji:panels-size";
 
+/** Las frases guardadas de una página, para subrayar sus globos. */
+function quoteMarksOf(book: string | null, director: Director, page: number) {
+  if (!book) return [];
+  const saved = new Set(quotesOf(book).filter((q) => q.page === page + 1).map((q) => q.layer));
+  if (!saved.size) return [];
+  const layers = new Map(director.framesOfPage(page).flatMap((f) => f.layers ?? []).map((l) => [l.id, l]));
+  return [...saved].flatMap((id) => {
+    const layer = layers.get(id);
+    return layer ? [{ id, rect: layer.rect }] : [];
+  });
+}
+
 /** Las reacciones de una página, para pegarlas en sus viñetas. */
 function stickersOf(book: string | null, director: Director, page: number) {
   if (!book) return [];
@@ -109,6 +122,8 @@ function rememberPanels(size: number): void {
  * varios segundos en "preparando la página". Un tirón molesta menos que quedarse frenado.
  */
 const URGENT_AHEAD = 2;
+/** Lo que dura a la vista un aviso corto, como "frase guardada". */
+const TOAST_MS = 1600;
 /** Lo máximo que espera, para que un lector que avanza sin parar no frene el tomo. */
 const MOTION_WAIT_MAX = 2000;
 /** En el celular se espera más a que se quede quieta: la página siguiente igual está lista. */
@@ -456,6 +471,23 @@ export default function ReaderView({ remote }: { remote?: RemoteBook } = {}) {
   const chromeHeld = useRef(false);
   /** Ayuda de gestos, la primera vez que se lee con el dedo. */
   const [hint, setHint] = useState(false);
+  /** El resumen de marcas abierto; `finished` si se abrió al terminar el tomo. */
+  const [marks, setMarks] = useState<{ finished: boolean } | null>(null);
+  /** Se está eligiendo qué globo guardar como frase: el próximo toque lo elige. */
+  const [picking, setPicking] = useState(false);
+  const pickRef = useRef<{ layers: Layer[]; page: number; frame: string } | null>(null);
+  /** Un aviso corto: "frase guardada". */
+  const [toast, setToast] = useState<string | null>(null);
+  const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  /** El resumen ya se mostró al llegar al final de este tomo. */
+  const endShown = useRef(false);
+  // Si se pasa de viñeta mientras se elige una frase, se deja de elegir.
+  useEffect(() => {
+    if (!pickRef.current) return;
+    pickRef.current = null;
+    engine.current?.stage.setPickable(null);
+    setPicking(false);
+  }, [at.frame, at.page]);
   /** Descarga en curso de un tomo pedido por link. */
   const [fetching, setFetching] = useState<DownloadProgress | null>(null);
   const fetchAbort = useRef<AbortController | null>(null);
@@ -791,6 +823,7 @@ export default function ReaderView({ remote }: { remote?: RemoteBook } = {}) {
               revealed.clear();
               perf.time("globos", () => stage.setDialogue(dialogue));
               stage.setStickers(stickersOf(bookRef.current, director, fresh.page));
+              stage.setQuoteMarks(quoteMarksOf(bookRef.current, director, fresh.page));
             }
             for (const id of revealed) stage.revealDialogue(id, 1);
 
@@ -880,6 +913,12 @@ export default function ReaderView({ remote }: { remote?: RemoteBook } = {}) {
           // Terminó el tomo: el botón vuelve a play, sin olvidar que se quería solo.
           if (ev.type === "end") {
             setPlaying(false);
+            // Al terminar, lo que se marcó en el tomo, una vez.
+            const book = bookRef.current;
+            if (book && !endShown.current && (reactionsOf(book).length || quotesOf(book).length)) {
+              endShown.current = true;
+              setMarks({ finished: true });
+            }
             return;
           }
           if (ev.type !== "beat") return;
@@ -1323,6 +1362,8 @@ export default function ReaderView({ remote }: { remote?: RemoteBook } = {}) {
    * estaba en curso— como al abrir otro; por dónde se iba ya quedó anotado.
    */
   const closeBook = useCallback(() => {
+    endShown.current = false;
+    setMarks(null);
     fetchAbort.current?.abort();
     teardown();
     // La música es del tomo: se va con él.
@@ -1744,6 +1785,42 @@ export default function ReaderView({ remote }: { remote?: RemoteBook } = {}) {
     else eng.stage.camera.nudge(e.clientX - prev.x, e.clientY - prev.y);
   };
 
+  const flash = (text: string) => {
+    setToast(text);
+    if (toastTimer.current) clearTimeout(toastTimer.current);
+    toastTimer.current = setTimeout(() => setToast(null), TOAST_MS);
+  };
+
+  const cancelPick = () => {
+    pickRef.current = null;
+    engine.current?.stage.setPickable(null);
+    setPicking(false);
+  };
+
+  /** Guarda (o saca) un globo como frase, y lo subraya con el marcador. */
+  const saveQuote = (page: number, frame: string, layer: Layer) => {
+    const eng = engine.current;
+    const book = bookRef.current;
+    if (!eng || !book) return;
+    const saved = toggleQuote(book, page + 1, frame, layer.id);
+    eng.stage.setQuoteMarks(quoteMarksOf(book, eng.director, page), saved ? layer.id : undefined);
+    if (saved) navigator.vibrate?.(12);
+    flash(saved ? t.reactions.quoteSaved : t.reactions.quoteRemoved);
+  };
+
+  /** Guardar una frase de la viñeta: con un solo globo, ese; con varios, se elige tocándolo. */
+  const startQuote = () => {
+    const eng = engine.current;
+    if (!eng) return;
+    const frame = eng.director.frame;
+    const layers = (frame.layers ?? []).filter((l) => l.src);
+    if (!layers.length) return flash(t.reactions.noDialogue);
+    if (layers.length === 1) return saveQuote(frame.page, frame.id, layers[0]);
+    pickRef.current = { layers, page: frame.page, frame: frame.id };
+    eng.stage.setPickable(layers.map((l) => l.rect));
+    setPicking(true);
+  };
+
   const onPointerUp = (e: React.PointerEvent) => {
     pointers.current.delete(e.pointerId);
     const g = gesture.current;
@@ -1786,6 +1863,22 @@ export default function ReaderView({ remote }: { remote?: RemoteBook } = {}) {
     }
 
     const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+    // Eligiendo una frase: el toque elige el globo que cae debajo, o cancela si no hay ninguno.
+    const pick = pickRef.current;
+    if (pick) {
+      const p = eng.stage.toPage(e.clientX - rect.left, e.clientY - rect.top);
+      const slack = 12 / eng.stage.camera.transform.scale;
+      const hit = pick.layers.find(
+        (l) =>
+          p.x >= l.rect.x - slack &&
+          p.x <= l.rect.x + l.rect.w + slack &&
+          p.y >= l.rect.y - slack &&
+          p.y <= l.rect.y + l.rect.h + slack,
+      );
+      cancelPick();
+      if (hit) saveQuote(pick.page, pick.frame, hit);
+      return;
+    }
     const at = (e.clientX - rect.left) / rect.width;
     if (at < TAP_ZONE) eng.director.next();
     else if (at > 1 - TAP_ZONE) eng.director.prev();
@@ -1981,6 +2074,8 @@ export default function ReaderView({ remote }: { remote?: RemoteBook } = {}) {
           frame={at.frame}
           onActivity={poke}
           onHold={holdChrome}
+          onQuote={startQuote}
+          onMarks={() => setMarks({ finished: false })}
           onChange={(frame) => {
             const eng = engine.current;
             if (!eng) return;
@@ -2030,6 +2125,46 @@ export default function ReaderView({ remote }: { remote?: RemoteBook } = {}) {
           onToggleBackdrop={toggleBackdrop}
         />
       )}
+      {picking && (
+        <div
+          onPointerDown={(e) => e.stopPropagation()}
+          className="react-chip absolute left-1/2 top-[max(4rem,calc(env(safe-area-inset-top)+3.5rem))] z-30 flex -translate-x-1/2 items-center gap-3 rounded-full border border-[#FF2E88]/60 bg-neutral-950/90 py-1.5 pl-4 pr-1.5 text-sm text-neutral-100 shadow-lg backdrop-blur"
+        >
+          <span className="font-serif text-xl leading-none text-[#FF2E88]">❝</span>
+          {t.reactions.quotePick}
+          <button
+            type="button"
+            onClick={cancelPick}
+            className="rounded-full bg-neutral-800 px-3 py-1 text-xs hover:bg-neutral-700"
+          >
+            {t.reactions.cancel}
+          </button>
+        </div>
+      )}
+
+      {toast && (
+        <div
+          role="status"
+          className="react-chip pointer-events-none absolute left-1/2 top-[max(4rem,calc(env(safe-area-inset-top)+3.5rem))] z-30 -translate-x-1/2 rounded-full bg-neutral-950/90 px-4 py-2 text-sm text-neutral-100 shadow-lg backdrop-blur"
+        >
+          {toast}
+        </div>
+      )}
+
+      {marks && status.kind === "ready" && engine.current && at.book && (
+        <MarksView
+          book={at.book}
+          source={engine.current.source}
+          director={engine.current.director}
+          finished={marks.finished}
+          onClose={() => setMarks(null)}
+          onGo={(page, frame) => {
+            setMarks(null);
+            engine.current?.director.seekToFrame(page, frame);
+          }}
+        />
+      )}
+
       {perfOn && <PerfHud />}
     </main>
   );
